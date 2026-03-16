@@ -1,5 +1,6 @@
 #include "game_logic.h"
 
+#include "debug_log.h"
 #include <raylib.h>
 #include <math.h>
 #include <stddef.h>
@@ -211,6 +212,15 @@ bool gameTrySubmitDiscard(struct Map *map, enum PlayerType player, const int res
     map->awaitingThiefPlacement = true;
   }
 
+  debugLog("GAME", "discard submitted player=%d plan=[%d,%d,%d,%d,%d] thiefPlacement=%d",
+           player,
+           resources[RESOURCE_WOOD],
+           resources[RESOURCE_WHEAT],
+           resources[RESOURCE_CLAY],
+           resources[RESOURCE_SHEEP],
+           resources[RESOURCE_STONE],
+           map->awaitingThiefPlacement ? 1 : 0);
+
   return true;
 }
 
@@ -248,11 +258,15 @@ bool gameCanStealFromPlayer(const struct Map *map, enum PlayerType victim)
 
 void gameRollDice(struct Map *map, int diceRoll)
 {
+  const double started = GetTime();
+
   if (!gameCanRollDice(map))
   {
+    debugLog("GAME", "gameRollDice ignored total=%d", diceRoll);
     return;
   }
 
+  debugLog("GAME", "gameRollDice start player=%d total=%d", map->currentPlayer, diceRoll);
   map->lastDiceRoll = diceRoll;
   if (diceRoll == 7)
   {
@@ -263,15 +277,26 @@ void gameRollDice(struct Map *map, int diceRoll)
     distribute_resources_for_roll(map, diceRoll);
   }
   map->rolledThisTurn = true;
+  debugLog("GAME", "gameRollDice end player=%d total=%d elapsed=%.3f pendingDiscards=%d thiefPlacement=%d thiefVictim=%d",
+           map->currentPlayer,
+           diceRoll,
+           GetTime() - started,
+           any_pending_discards(map) ? 1 : 0,
+           map->awaitingThiefPlacement ? 1 : 0,
+           map->awaitingThiefVictimSelection ? 1 : 0);
 }
 
 void gameMoveThief(struct Map *map, int tileId)
 {
+  const double started = GetTime();
+
   if (!gameCanMoveThiefToTile(map, tileId))
   {
+    debugLog("GAME", "move thief ignored player=%d tile=%d", map != NULL ? map->currentPlayer : PLAYER_NONE, tileId);
     return;
   }
 
+  debugLog("GAME", "move thief start player=%d tile=%d", map->currentPlayer, tileId);
   map->thiefTileId = tileId;
   map->awaitingThiefPlacement = false;
   map->awaitingThiefVictimSelection = false;
@@ -285,6 +310,12 @@ void gameMoveThief(struct Map *map, int tileId)
       break;
     }
   }
+
+  debugLog("GAME", "move thief end player=%d tile=%d elapsed=%.3f thiefVictim=%d",
+           map->currentPlayer,
+           tileId,
+           GetTime() - started,
+           map->awaitingThiefVictimSelection ? 1 : 0);
 }
 
 bool gameStealRandomResource(struct Map *map, enum PlayerType victim)
@@ -313,6 +344,10 @@ bool gameStealRandomResource(struct Map *map, enum PlayerType victim)
   map->players[victim].resources[stolenResource]--;
   map->players[map->currentPlayer].resources[stolenResource]++;
   map->awaitingThiefVictimSelection = false;
+  debugLog("GAME", "steal resource player=%d victim=%d resource=%d",
+           map->currentPlayer,
+           victim,
+           stolenResource);
   return true;
 }
 
@@ -1193,15 +1228,21 @@ static void begin_discard_phase(struct Map *map)
 
   map->awaitingThiefPlacement = false;
   map->awaitingThiefVictimSelection = false;
+  debugLog("GAME", "begin discard phase currentPlayer=%d", map->currentPlayer);
   for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
   {
     const int total = total_resources_for_player(map, (enum PlayerType)player);
     map->discardRemaining[player] = total > 7 ? total / 2 : 0;
+    debugLog("GAME", "discard requirement player=%d total=%d discard=%d",
+             player,
+             total,
+             map->discardRemaining[player]);
   }
 
   if (!any_pending_discards(map))
   {
     map->awaitingThiefPlacement = true;
+    debugLog("GAME", "no discards needed, thief placement starts immediately");
   }
 }
 

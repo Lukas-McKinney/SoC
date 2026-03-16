@@ -60,11 +60,61 @@ static bool EdgeKeysMatch(int ax1, int ay1, int bx1, int by1, int ax2, int ay2, 
 static void CanonicalizeHoveredEdge(void);
 static bool CornerKeysMatch(int x1, int y1, int x2, int y2);
 static void CanonicalizeHoveredCorner(void);
+static void NormalizeMaritimeTradeSelection(const struct Map *map);
 static void NormalizePlayerTradeSelection(const struct Map *map);
 static enum PlayerType LocalHumanPlayer(const struct Map *map);
 static const char *PlayerNameLabel(enum PlayerType player);
 static bool HasAnyValidRoadPlacement(const struct Map *map, Vector2 origin, float radius);
 static bool CanOpenDevelopmentPlayOverlay(const struct Map *map, enum DevelopmentCardType type, Vector2 origin, float radius);
+
+static void NormalizeMaritimeTradeSelection(const struct Map *map)
+{
+    int firstValidGiveResource = -1;
+    int maxTradeAmount;
+
+    if (map == NULL || map->currentPlayer < PLAYER_RED || map->currentPlayer > PLAYER_BLACK)
+    {
+        return;
+    }
+
+    for (int resource = 0; resource < 5; resource++)
+    {
+        if (map->players[map->currentPlayer].resources[resource] >= gameGetMaritimeTradeRate(map, (enum ResourceType)resource))
+        {
+            firstValidGiveResource = resource;
+            break;
+        }
+    }
+
+    if (firstValidGiveResource >= 0 &&
+        map->players[map->currentPlayer].resources[gTradeGiveResource] < gameGetMaritimeTradeRate(map, (enum ResourceType)gTradeGiveResource))
+    {
+        gTradeGiveResource = firstValidGiveResource;
+    }
+
+    if (gTradeReceiveResource == gTradeGiveResource)
+    {
+        for (int resource = 0; resource < 5; resource++)
+        {
+            if (resource != gTradeGiveResource)
+            {
+                gTradeReceiveResource = resource;
+                break;
+            }
+        }
+    }
+
+    maxTradeAmount = map->players[map->currentPlayer].resources[gTradeGiveResource] /
+                     gameGetMaritimeTradeRate(map, (enum ResourceType)gTradeGiveResource);
+    if (gTradeAmount > maxTradeAmount)
+    {
+        gTradeAmount = maxTradeAmount > 0 ? maxTradeAmount : 1;
+    }
+    if (gTradeAmount < 1)
+    {
+        gTradeAmount = 1;
+    }
+}
 
 static void NormalizePlayerTradeSelection(const struct Map *map)
 {
@@ -268,6 +318,9 @@ void HandleMapInput(struct Map *map)
     const bool needsThiefVictimSelection = gameNeedsThiefVictimSelection(map);
     const bool hasWinner = gameHasWinner(map);
     const bool aiControlledDecision = aiControlsActiveDecision(map);
+    const bool humanControlledTurn = map->currentPlayer >= PLAYER_RED &&
+                                     map->currentPlayer <= PLAYER_BLACK &&
+                                     map->players[map->currentPlayer].controlMode == PLAYER_CONTROL_HUMAN;
     const bool canBuyRoad = setupRoadMode || gameCanAffordRoad(map);
     const bool canBuySettlement = setupSettlementMode || gameCanAffordSettlement(map);
     const bool canBuyCity = map->phase == GAME_PHASE_PLAY && gameCanAffordCity(map);
@@ -553,7 +606,7 @@ void HandleMapInput(struct Map *map)
             for (int resource = 0; resource < 5; resource++)
             {
                 const Rectangle firstButton = {rowX + resource * (buttonWidth + buttonGap), developmentPlayOverlay.y + 132.0f, buttonWidth, buttonHeight};
-                const Rectangle secondButton = {rowX + resource * (buttonWidth + buttonGap), developmentPlayOverlay.y + 184.0f, buttonWidth, buttonHeight};
+                const Rectangle secondButton = {rowX + resource * (buttonWidth + buttonGap), developmentPlayOverlay.y + 200.0f, buttonWidth, buttonHeight};
                 if (CheckCollisionPointRec(mouse, firstButton))
                 {
                     gDevelopmentPlayPrimaryResource = (enum ResourceType)resource;
@@ -779,7 +832,8 @@ void HandleMapInput(struct Map *map)
         return;
     }
 
-    if (gameCanRollDice(map) &&
+    if (humanControlledTurn &&
+        gameCanRollDice(map) &&
         !uiIsDiceRolling() &&
         IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
         CheckCollisionPointRec(mouse, rollDiceButton))
@@ -788,7 +842,8 @@ void HandleMapInput(struct Map *map)
         return;
     }
 
-    if (gameCanEndTurn(map) &&
+    if (humanControlledTurn &&
+        gameCanEndTurn(map) &&
         IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
         CheckCollisionPointRec(mouse, endTurnButton))
     {
@@ -807,6 +862,7 @@ void HandleMapInput(struct Map *map)
         IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
         CheckCollisionPointRec(mouse, tradeButton))
     {
+        NormalizeMaritimeTradeSelection(map);
         uiToggleTradeMenu();
         uiSetPlayerTradeMenuOpen(false);
         return;
@@ -826,6 +882,11 @@ void HandleMapInput(struct Map *map)
     if (uiGetPlayerTradeMenuOpenAmount() > 0.01f && map->phase == GAME_PHASE_PLAY)
     {
         NormalizePlayerTradeSelection(map);
+    }
+
+    if (uiGetTradeMenuOpenAmount() > 0.01f && map->phase == GAME_PHASE_PLAY)
+    {
+        NormalizeMaritimeTradeSelection(map);
     }
 
     if (uiGetTradeMenuOpenAmount() > 0.98f && map->phase == GAME_PHASE_PLAY && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))

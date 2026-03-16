@@ -1,6 +1,7 @@
 #include "ai_controller.h"
 
 #include "board_rules.h"
+#include "debug_log.h"
 #include "game_logic.h"
 #include "localization.h"
 #include "renderer_internal.h"
@@ -80,13 +81,26 @@ static double gNextAiActionTime = 0.0;
 static int gAiBuildActionsThisTurn = 0;
 static int gAiMaritimeTradesThisTurn = 0;
 static bool gAiUiPreparedForTurn = false;
+static double gAiSearchDeadline = 0.0;
+static double gAiSearchBudget = 0.0;
+static unsigned int gAiSearchNodesVisited = 0;
+static bool gAiSearchTimedOut = false;
 
 static bool player_is_ai(const struct Map *map, enum PlayerType player);
 static enum PlayerType active_decision_player(const struct Map *map);
 static enum AiDifficulty active_ai_difficulty(const struct Map *map, enum PlayerType player);
+static const char *ai_action_type_label(enum AiActionType type);
+static void log_ai_action(const char *event, const struct Map *map, const struct AiAction *action);
 static double ai_delay_for_difficulty(enum AiDifficulty difficulty);
+static double ai_follow_up_delay(const struct Map *map, enum AiDifficulty difficulty);
+static double ai_initial_delay(const struct Map *map, enum AiDifficulty difficulty);
+static double ai_search_time_budget(enum AiDifficulty difficulty);
+static void ai_begin_play_phase_search(enum AiDifficulty difficulty);
+static void ai_end_play_phase_search(void);
+static bool ai_search_visit_node(void);
+static bool ai_search_timed_out(void);
 static int ai_build_action_budget(enum AiDifficulty difficulty);
-static void schedule_next_ai_action(enum AiDifficulty difficulty);
+static void schedule_next_ai_action(const struct Map *map, enum AiDifficulty difficulty);
 static void reset_ai_turn_state(void);
 static void prepare_ui_for_ai_turn(void);
 static bool ai_is_blocked_by_ui(void);
@@ -122,6 +136,7 @@ static float search_thief_move_score(const struct Map *map, enum PlayerType play
 static float search_thief_victim_score(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty, struct AiSearchState state, struct AiAction *bestAction);
 static bool find_best_play_phase_action(const struct Map *map, enum AiDifficulty difficulty, struct AiAction *action);
 static bool execute_ai_action(struct Map *map, const struct AiAction *action);
+static float score_discard_plan(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty, const int discardPlan[5]);
 static void search_best_discard_plan_recursive(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty, int resourceIndex, int remaining, int discardPlan[5], float *bestScore, int bestPlan[5]);
 static bool choose_best_discard_action(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty, struct AiAction *action);
 static float search_setup_road_score(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty, struct AiAction *bestAction);
@@ -194,6 +209,70 @@ const char *aiDifficultyLabel(enum AiDifficulty difficulty)
     return locAiDifficultyLabel(difficulty);
 }
 
+static const char *ai_action_type_label(enum AiActionType type)
+{
+    switch (type)
+    {
+    case AI_ACTION_BUILD_SETTLEMENT:
+        return "build_settlement";
+    case AI_ACTION_BUILD_CITY:
+        return "build_city";
+    case AI_ACTION_BUILD_ROAD:
+        return "build_road";
+    case AI_ACTION_BUY_DEVELOPMENT:
+        return "buy_development";
+    case AI_ACTION_PLAY_KNIGHT:
+        return "play_knight";
+    case AI_ACTION_PLAY_ROAD_BUILDING:
+        return "play_road_building";
+    case AI_ACTION_PLAY_YEAR_OF_PLENTY:
+        return "play_year_of_plenty";
+    case AI_ACTION_PLAY_MONOPOLY:
+        return "play_monopoly";
+    case AI_ACTION_MARITIME_TRADE:
+        return "maritime_trade";
+    case AI_ACTION_MOVE_THIEF:
+        return "move_thief";
+    case AI_ACTION_CHOOSE_THIEF_VICTIM:
+        return "choose_thief_victim";
+    case AI_ACTION_SETUP_SETTLEMENT:
+        return "setup_settlement";
+    case AI_ACTION_SETUP_ROAD:
+        return "setup_road";
+    case AI_ACTION_DISCARD:
+        return "discard";
+    case AI_ACTION_NONE:
+    default:
+        return "none";
+    }
+}
+
+static void log_ai_action(const char *event, const struct Map *map, const struct AiAction *action)
+{
+    if (action == NULL)
+    {
+        debugLog("AI", "%s action=<null>", event == NULL ? "action" : event);
+        return;
+    }
+
+    debugLog("AI", "%s current=%d actor=%d type=%s tile=%d corner=%d side=%d target=%d resA=%d resB=%d discard=[%d,%d,%d,%d,%d]",
+             event == NULL ? "action" : event,
+             map != NULL ? map->currentPlayer : PLAYER_NONE,
+             action->player != PLAYER_NONE ? action->player : (map != NULL ? map->currentPlayer : PLAYER_NONE),
+             ai_action_type_label(action->type),
+             action->tileId,
+             action->cornerIndex,
+             action->sideIndex,
+             action->player,
+             action->resourceA,
+             action->resourceB,
+             action->discardPlan[RESOURCE_WOOD],
+             action->discardPlan[RESOURCE_WHEAT],
+             action->discardPlan[RESOURCE_CLAY],
+             action->discardPlan[RESOURCE_SHEEP],
+             action->discardPlan[RESOURCE_STONE]);
+}
+
 void aiUpdateTurn(struct Map *map)
 {
     enum PlayerType decisionPlayer;
@@ -213,10 +292,21 @@ void aiUpdateTurn(struct Map *map)
     difficulty = active_ai_difficulty(map, decisionPlayer);
     if (decisionPlayer != gTrackedDecisionPlayer || map->currentPlayer != gTrackedTurnPlayer)
     {
+        const double delay = ai_initial_delay(map, difficulty);
         gTrackedDecisionPlayer = decisionPlayer;
         gTrackedTurnPlayer = map->currentPlayer;
-        gNextAiActionTime = GetTime() + ai_delay_for_difficulty(difficulty) * 0.6;
+        gNextAiActionTime = GetTime() + delay;
         reset_ai_turn_state();
+        debugLog("AI", "decision start current=%d decision=%d difficulty=%d phase=%d rolled=%d discards=%d thiefPlacement=%d thiefVictim=%d delay=%.3f",
+                 map->currentPlayer,
+                 decisionPlayer,
+                 difficulty,
+                 map->phase,
+                 map->rolledThisTurn ? 1 : 0,
+                 gameHasPendingDiscards(map) ? 1 : 0,
+                 gameNeedsThiefPlacement(map) ? 1 : 0,
+                 gameNeedsThiefVictimSelection(map) ? 1 : 0,
+                 delay);
     }
 
     if (player_is_ai(map, map->currentPlayer) && !gAiUiPreparedForTurn)
@@ -234,7 +324,7 @@ void aiUpdateTurn(struct Map *map)
     {
         if (handle_ai_discard(map, decisionPlayer, difficulty))
         {
-            schedule_next_ai_action(difficulty);
+            schedule_next_ai_action(map, difficulty);
         }
         return;
     }
@@ -243,7 +333,7 @@ void aiUpdateTurn(struct Map *map)
     {
         if (handle_ai_thief_victim(map, difficulty))
         {
-            schedule_next_ai_action(difficulty);
+            schedule_next_ai_action(map, difficulty);
         }
         return;
     }
@@ -252,7 +342,7 @@ void aiUpdateTurn(struct Map *map)
     {
         if (handle_ai_thief_move(map, difficulty))
         {
-            schedule_next_ai_action(difficulty);
+            schedule_next_ai_action(map, difficulty);
         }
         return;
     }
@@ -261,7 +351,7 @@ void aiUpdateTurn(struct Map *map)
     {
         if (handle_ai_setup_settlement(map, difficulty))
         {
-            schedule_next_ai_action(difficulty);
+            schedule_next_ai_action(map, difficulty);
         }
         return;
     }
@@ -270,7 +360,7 @@ void aiUpdateTurn(struct Map *map)
     {
         if (handle_ai_setup_road(map, difficulty))
         {
-            schedule_next_ai_action(difficulty);
+            schedule_next_ai_action(map, difficulty);
         }
         return;
     }
@@ -284,7 +374,7 @@ void aiUpdateTurn(struct Map *map)
     {
         if (handle_ai_roll(map))
         {
-            schedule_next_ai_action(difficulty);
+            schedule_next_ai_action(map, difficulty);
         }
         return;
     }
@@ -292,42 +382,67 @@ void aiUpdateTurn(struct Map *map)
     if (gameHasFreeRoadPlacements(map))
     {
         struct AiAction action;
-        if (choose_best_free_road_action(map, difficulty, &action) &&
-            execute_ai_action(map, &action))
+        const double planningStart = GetTime();
+        if (choose_best_free_road_action(map, difficulty, &action))
         {
-            schedule_next_ai_action(difficulty);
+            log_ai_action("free road decision", map, &action);
+            if (execute_ai_action(map, &action))
+            {
+                debugLog("AI", "free road elapsed=%.3f", GetTime() - planningStart);
+                schedule_next_ai_action(map, difficulty);
+            }
+            else
+            {
+                debugLog("AI", "free road execute failed elapsed=%.3f remaining=%d",
+                         GetTime() - planningStart,
+                         map->freeRoadPlacementsRemaining);
+                schedule_next_ai_action(map, difficulty);
+            }
         }
         else
         {
+            debugLog("AI", "free road failed elapsed=%.3f remaining=%d",
+                     GetTime() - planningStart,
+                     map->freeRoadPlacementsRemaining);
             map->freeRoadPlacementsRemaining = 0;
-            schedule_next_ai_action(difficulty);
+            schedule_next_ai_action(map, difficulty);
         }
         return;
     }
 
     {
         struct AiAction action;
-        if (find_best_play_phase_action(map, difficulty, &action) &&
-            execute_ai_action(map, &action))
+        const double planningStart = GetTime();
+        if (find_best_play_phase_action(map, difficulty, &action))
         {
-            if (action.type == AI_ACTION_MARITIME_TRADE)
+            log_ai_action("play phase decision", map, &action);
+            if (execute_ai_action(map, &action))
             {
-                gAiMaritimeTradesThisTurn++;
+                debugLog("AI", "play phase elapsed=%.3f", GetTime() - planningStart);
+                if (action.type == AI_ACTION_MARITIME_TRADE)
+                {
+                    gAiMaritimeTradesThisTurn++;
+                }
+                else if (action.type == AI_ACTION_BUILD_SETTLEMENT ||
+                         action.type == AI_ACTION_BUILD_CITY ||
+                         action.type == AI_ACTION_BUILD_ROAD ||
+                         action.type == AI_ACTION_BUY_DEVELOPMENT)
+                {
+                    gAiBuildActionsThisTurn++;
+                }
+                schedule_next_ai_action(map, difficulty);
+                return;
             }
-            else if (action.type == AI_ACTION_BUILD_SETTLEMENT ||
-                     action.type == AI_ACTION_BUILD_CITY ||
-                     action.type == AI_ACTION_BUILD_ROAD ||
-                     action.type == AI_ACTION_BUY_DEVELOPMENT)
-            {
-                gAiBuildActionsThisTurn++;
-            }
-            schedule_next_ai_action(difficulty);
+            debugLog("AI", "play phase execute failed elapsed=%.3f", GetTime() - planningStart);
+            schedule_next_ai_action(map, difficulty);
             return;
         }
+        debugLog("AI", "play phase no action elapsed=%.3f", GetTime() - planningStart);
     }
 
     if (gameCanEndTurn(map))
     {
+        debugLog("AI", "end turn player=%d", map->currentPlayer);
         gameEndTurn(map);
         gTrackedDecisionPlayer = active_decision_player(map);
         gTrackedTurnPlayer = map->currentPlayer;
@@ -340,6 +455,7 @@ bool aiShouldAcceptPlayerTradeOffer(const struct Map *map, enum PlayerType aiPla
     float beforeScore;
     float afterScore;
     float threshold;
+    bool accepted;
     const enum AiDifficulty difficulty = active_ai_difficulty(map, aiPlayer);
     const int aiVisiblePoints = gameComputeVisibleVictoryPoints(map, aiPlayer);
     const int offeringPlayerPoints = gameComputeVisibleVictoryPoints(map, map != NULL ? map->currentPlayer : PLAYER_NONE);
@@ -350,6 +466,13 @@ bool aiShouldAcceptPlayerTradeOffer(const struct Map *map, enum PlayerType aiPla
         !player_is_ai(map, aiPlayer) ||
         !gameCanTradeWithPlayer(map, aiPlayer, give, giveAmount, receive, receiveAmount))
     {
+        debugLog("AI", "trade offer ignored ai=%d other=%d give=%d x%d receive=%d x%d",
+                 aiPlayer,
+                 map != NULL ? map->currentPlayer : PLAYER_NONE,
+                 give,
+                 giveAmount,
+                 receive,
+                 receiveAmount);
         return false;
     }
 
@@ -380,7 +503,20 @@ bool aiShouldAcceptPlayerTradeOffer(const struct Map *map, enum PlayerType aiPla
         }
     }
 
-    return (afterScore - beforeScore) >= threshold;
+    accepted = (afterScore - beforeScore) >= threshold;
+    debugLog("AI", "trade offer decision ai=%d other=%d give=%d x%d receive=%d x%d before=%.3f after=%.3f delta=%.3f threshold=%.3f accept=%d",
+             aiPlayer,
+             map->currentPlayer,
+             give,
+             giveAmount,
+             receive,
+             receiveAmount,
+             beforeScore,
+             afterScore,
+             afterScore - beforeScore,
+             threshold,
+             accepted ? 1 : 0);
+    return accepted;
 }
 
 static bool player_is_ai(const struct Map *map, enum PlayerType player)
@@ -430,6 +566,88 @@ static double ai_delay_for_difficulty(enum AiDifficulty difficulty)
     return baseDelay * (1.0 - speedNormalized);
 }
 
+static double ai_follow_up_delay(const struct Map *map, enum AiDifficulty difficulty)
+{
+    if (map != NULL &&
+        (gameHasPendingDiscards(map) ||
+         gameNeedsThiefPlacement(map) ||
+         gameNeedsThiefVictimSelection(map)))
+    {
+        return 0.0;
+    }
+
+    return ai_delay_for_difficulty(difficulty);
+}
+
+static double ai_initial_delay(const struct Map *map, enum AiDifficulty difficulty)
+{
+    const double delay = ai_follow_up_delay(map, difficulty);
+    return delay <= 0.0 ? 0.0 : delay * 0.6;
+}
+
+static double ai_search_time_budget(enum AiDifficulty difficulty)
+{
+    switch (difficulty)
+    {
+    case AI_DIFFICULTY_HARD:
+        return 0.100;
+    case AI_DIFFICULTY_MEDIUM:
+        return 0.065;
+    case AI_DIFFICULTY_EASY:
+    default:
+        return 0.040;
+    }
+}
+
+static void ai_begin_play_phase_search(enum AiDifficulty difficulty)
+{
+    gAiSearchBudget = ai_search_time_budget(difficulty);
+    gAiSearchDeadline = gAiSearchBudget > 0.0 ? GetTime() + gAiSearchBudget : 0.0;
+    gAiSearchNodesVisited = 0;
+    gAiSearchTimedOut = false;
+}
+
+static void ai_end_play_phase_search(void)
+{
+    gAiSearchDeadline = 0.0;
+    gAiSearchBudget = 0.0;
+    gAiSearchNodesVisited = 0;
+    gAiSearchTimedOut = false;
+}
+
+static bool ai_search_visit_node(void)
+{
+    if (gAiSearchDeadline <= 0.0)
+    {
+        return false;
+    }
+
+    gAiSearchNodesVisited++;
+    if (GetTime() >= gAiSearchDeadline)
+    {
+        gAiSearchTimedOut = true;
+        return true;
+    }
+
+    return false;
+}
+
+static bool ai_search_timed_out(void)
+{
+    if (gAiSearchDeadline <= 0.0)
+    {
+        return false;
+    }
+
+    if (GetTime() >= gAiSearchDeadline)
+    {
+        gAiSearchTimedOut = true;
+        return true;
+    }
+
+    return false;
+}
+
 static int ai_build_action_budget(enum AiDifficulty difficulty)
 {
     switch (difficulty)
@@ -444,9 +662,9 @@ static int ai_build_action_budget(enum AiDifficulty difficulty)
     }
 }
 
-static void schedule_next_ai_action(enum AiDifficulty difficulty)
+static void schedule_next_ai_action(const struct Map *map, enum AiDifficulty difficulty)
 {
-    gNextAiActionTime = GetTime() + ai_delay_for_difficulty(difficulty);
+    gNextAiActionTime = GetTime() + ai_follow_up_delay(map, difficulty);
 }
 
 static void reset_ai_turn_state(void)
@@ -1017,65 +1235,139 @@ static bool find_best_road_candidate(const struct Map *map, enum PlayerType play
 static bool handle_ai_discard(struct Map *map, enum PlayerType player, enum AiDifficulty difficulty)
 {
     struct AiAction action;
+    const double planningStart = GetTime();
 
+    debugLog("AI", "discard planning start player=%d required=%d",
+             player,
+             gameGetDiscardAmountForPlayer(map, player));
     if (!choose_best_discard_action(map, player, difficulty, &action))
     {
+        debugLog("AI", "discard planning failed player=%d elapsed=%.3f",
+                 player,
+                 GetTime() - planningStart);
         return false;
     }
 
-    return execute_ai_action(map, &action);
+    debugLog("AI", "discard planning end player=%d elapsed=%.3f plan=[%d,%d,%d,%d,%d]",
+             player,
+             GetTime() - planningStart,
+             action.discardPlan[RESOURCE_WOOD],
+             action.discardPlan[RESOURCE_WHEAT],
+             action.discardPlan[RESOURCE_CLAY],
+             action.discardPlan[RESOURCE_SHEEP],
+             action.discardPlan[RESOURCE_STONE]);
+
+    {
+        const double executeStart = GetTime();
+        const bool executed = execute_ai_action(map, &action);
+        debugLog("AI", "discard execute player=%d success=%d elapsed=%.3f",
+                 player,
+                 executed ? 1 : 0,
+                 GetTime() - executeStart);
+        return executed;
+    }
 }
 
 static bool handle_ai_thief_victim(struct Map *map, enum AiDifficulty difficulty)
 {
     struct AiAction action;
+    const double planningStart = GetTime();
 
     if (!choose_best_thief_victim_action(map, difficulty, &action))
     {
+        debugLog("AI", "thief victim planning failed player=%d elapsed=%.3f",
+                 map != NULL ? map->currentPlayer : PLAYER_NONE,
+                 GetTime() - planningStart);
         return false;
     }
 
-    return execute_ai_action(map, &action);
+    debugLog("AI", "thief victim planning end player=%d victim=%d elapsed=%.3f",
+             map != NULL ? map->currentPlayer : PLAYER_NONE,
+             action.player,
+             GetTime() - planningStart);
+
+    {
+        const double executeStart = GetTime();
+        const bool executed = execute_ai_action(map, &action);
+        debugLog("AI", "thief victim execute player=%d victim=%d success=%d elapsed=%.3f",
+                 map != NULL ? map->currentPlayer : PLAYER_NONE,
+                 action.player,
+                 executed ? 1 : 0,
+                 GetTime() - executeStart);
+        return executed;
+    }
 }
 
 static bool handle_ai_thief_move(struct Map *map, enum AiDifficulty difficulty)
 {
     struct AiAction action;
+    const double planningStart = GetTime();
 
     if (!choose_best_thief_move_action(map, difficulty, &action))
     {
+        debugLog("AI", "thief move planning failed player=%d elapsed=%.3f",
+                 map != NULL ? map->currentPlayer : PLAYER_NONE,
+                 GetTime() - planningStart);
         return false;
     }
 
-    return execute_ai_action(map, &action);
+    debugLog("AI", "thief move planning end player=%d tile=%d elapsed=%.3f",
+             map != NULL ? map->currentPlayer : PLAYER_NONE,
+             action.tileId,
+             GetTime() - planningStart);
+
+    {
+        const double executeStart = GetTime();
+        const bool executed = execute_ai_action(map, &action);
+        debugLog("AI", "thief move execute player=%d tile=%d success=%d elapsed=%.3f",
+                 map != NULL ? map->currentPlayer : PLAYER_NONE,
+                 action.tileId,
+                 executed ? 1 : 0,
+                 GetTime() - executeStart);
+        return executed;
+    }
 }
 
 static bool handle_ai_setup_settlement(struct Map *map, enum AiDifficulty difficulty)
 {
     struct AiAction action;
+    const double planningStart = GetTime();
 
     if (!choose_best_setup_settlement_action(map, map != NULL ? map->currentPlayer : PLAYER_NONE, difficulty, &action))
     {
+        debugLog("AI", "setup settlement planning failed player=%d elapsed=%.3f",
+                 map != NULL ? map->currentPlayer : PLAYER_NONE,
+                 GetTime() - planningStart);
         return false;
     }
 
+    log_ai_action("setup settlement decision", map, &action);
+    debugLog("AI", "setup settlement elapsed=%.3f", GetTime() - planningStart);
     return execute_ai_action(map, &action);
 }
 
 static bool handle_ai_setup_road(struct Map *map, enum AiDifficulty difficulty)
 {
     struct AiAction action;
+    const double planningStart = GetTime();
 
     if (!choose_best_setup_road_action(map, map != NULL ? map->currentPlayer : PLAYER_NONE, difficulty, &action))
     {
+        debugLog("AI", "setup road planning failed player=%d elapsed=%.3f",
+                 map != NULL ? map->currentPlayer : PLAYER_NONE,
+                 GetTime() - planningStart);
         return false;
     }
 
+    log_ai_action("setup road decision", map, &action);
+    debugLog("AI", "setup road elapsed=%.3f", GetTime() - planningStart);
     return execute_ai_action(map, &action);
 }
 
 static bool handle_ai_roll(struct Map *map)
 {
+    const enum PlayerType player = map != NULL ? map->currentPlayer : PLAYER_NONE;
+
     if (map == NULL || !gameCanRollDice(map) || uiIsDiceRolling())
     {
         return false;
@@ -1083,10 +1375,18 @@ static bool handle_ai_roll(struct Map *map)
 
     if (uiGetAiSpeedSetting() >= 10)
     {
-        gameRollDice(map, GetRandomValue(1, 6) + GetRandomValue(1, 6));
+        const int dieA = GetRandomValue(1, 6);
+        const int dieB = GetRandomValue(1, 6);
+        debugLog("AI", "roll instant player=%d dice=%d+%d total=%d",
+                 player,
+                 dieA,
+                 dieB,
+                 dieA + dieB);
+        gameRollDice(map, dieA + dieB);
         return true;
     }
 
+    debugLog("AI", "roll animation start player=%d", player);
     uiStartDiceRollAnimation();
     return true;
 }
@@ -1232,6 +1532,7 @@ static bool simulate_specific_steal(struct Map *map, enum PlayerType victim, enu
 static float search_thief_victim_score(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty, struct AiSearchState state, struct AiAction *bestAction)
 {
     const float epsilon = 0.001f;
+    const float fallbackScore = evaluate_player_position(map, player, difficulty);
     float bestScore = -AI_SEARCH_WIN_SCORE;
     bool found = false;
     (void)state;
@@ -1244,7 +1545,12 @@ static float search_thief_victim_score(const struct Map *map, enum PlayerType pl
 
     if (map == NULL || !gameNeedsThiefVictimSelection(map))
     {
-        return evaluate_player_position(map, player, difficulty);
+        return fallbackScore;
+    }
+
+    if (ai_search_visit_node())
+    {
+        return fallbackScore;
     }
 
     for (int other = PLAYER_RED; other <= PLAYER_BLACK; other++)
@@ -1252,6 +1558,11 @@ static float search_thief_victim_score(const struct Map *map, enum PlayerType pl
         enum PlayerType victim = (enum PlayerType)other;
         float totalScore = 0.0f;
         int outcomeCount = 0;
+
+        if (ai_search_timed_out())
+        {
+            return found ? bestScore : fallbackScore;
+        }
 
         if (!gameCanStealFromPlayer(map, victim))
         {
@@ -1261,6 +1572,11 @@ static float search_thief_victim_score(const struct Map *map, enum PlayerType pl
         for (int resource = RESOURCE_WOOD; resource <= RESOURCE_STONE; resource++)
         {
             struct Map simulatedMap;
+            if (ai_search_timed_out())
+            {
+                return found ? bestScore : fallbackScore;
+            }
+
             if (map->players[victim].resources[resource] <= 0)
             {
                 continue;
@@ -1292,12 +1608,13 @@ static float search_thief_victim_score(const struct Map *map, enum PlayerType pl
         }
     }
 
-    return found ? bestScore : evaluate_player_position(map, player, difficulty);
+    return found ? bestScore : fallbackScore;
 }
 
 static float search_thief_move_score(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty, struct AiSearchState state, struct AiAction *bestAction)
 {
     const float epsilon = 0.001f;
+    const float fallbackScore = evaluate_player_position(map, player, difficulty);
     float bestScore = -AI_SEARCH_WIN_SCORE;
     bool found = false;
     (void)state;
@@ -1310,13 +1627,23 @@ static float search_thief_move_score(const struct Map *map, enum PlayerType play
 
     if (map == NULL || !gameNeedsThiefPlacement(map))
     {
-        return evaluate_player_position(map, player, difficulty);
+        return fallbackScore;
+    }
+
+    if (ai_search_visit_node())
+    {
+        return fallbackScore;
     }
 
     for (int tileId = 0; tileId < LAND_TILE_COUNT; tileId++)
     {
         struct Map simulatedMap;
         float score;
+
+        if (ai_search_timed_out())
+        {
+            return found ? bestScore : fallbackScore;
+        }
 
         if (!gameCanMoveThiefToTile(map, tileId))
         {
@@ -1338,7 +1665,7 @@ static float search_thief_move_score(const struct Map *map, enum PlayerType play
         }
     }
 
-    return found ? bestScore : evaluate_player_position(map, player, difficulty);
+    return found ? bestScore : fallbackScore;
 }
 
 static float search_free_road_score(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty, struct AiSearchState state, struct AiAction *bestAction)
@@ -1360,6 +1687,11 @@ static float search_free_road_score(const struct Map *map, enum PlayerType playe
         return evaluate_player_position(map, player, difficulty);
     }
 
+    if (ai_search_visit_node())
+    {
+        return evaluate_player_position(map, player, difficulty);
+    }
+
     skippedMap = *map;
     skippedMap.freeRoadPlacementsRemaining = 0;
     bestScore = search_turn_score(&skippedMap, player, difficulty, state, NULL);
@@ -1370,6 +1702,11 @@ static float search_free_road_score(const struct Map *map, enum PlayerType playe
         {
             struct Map simulatedMap;
             float score;
+
+            if (ai_search_timed_out())
+            {
+                return bestScore;
+            }
 
             if (!IsCanonicalSharedEdge(tileId, sideIndex) ||
                 IsSharedEdgeOccupied(map, tileId, sideIndex) ||
@@ -1424,6 +1761,12 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
         return gameGetWinner(map) == player ? AI_SEARCH_WIN_SCORE : -AI_SEARCH_WIN_SCORE;
     }
 
+    bestScore = evaluate_player_position(map, player, difficulty);
+    if (ai_search_visit_node())
+    {
+        return bestScore;
+    }
+
     if (gameNeedsThiefPlacement(map))
     {
         return search_thief_move_score(map, player, difficulty, state, bestAction);
@@ -1437,11 +1780,14 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
         return search_free_road_score(map, player, difficulty, state, bestAction);
     }
 
-    bestScore = evaluate_player_position(map, player, difficulty);
-
     if (gameCanPlayDevelopmentCard(map, DEVELOPMENT_CARD_KNIGHT))
     {
         struct Map simulatedMap = *map;
+        if (ai_search_timed_out())
+        {
+            return bestScore;
+        }
+
         if (gameTryPlayKnight(&simulatedMap))
         {
             float score;
@@ -1462,6 +1808,11 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
     if (gameCanPlayDevelopmentCard(map, DEVELOPMENT_CARD_ROAD_BUILDING))
     {
         struct Map simulatedMap = *map;
+        if (ai_search_timed_out())
+        {
+            return bestScore;
+        }
+
         if (gameTryPlayRoadBuilding(&simulatedMap))
         {
             const float score = search_turn_score(&simulatedMap, player, difficulty, state, NULL);
@@ -1484,6 +1835,11 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
             for (int second = RESOURCE_WOOD; second <= RESOURCE_STONE; second++)
             {
                 struct Map simulatedMap = *map;
+                if (ai_search_timed_out())
+                {
+                    return bestScore;
+                }
+
                 if (!gameTryPlayYearOfPlenty(&simulatedMap, (enum ResourceType)first, (enum ResourceType)second))
                 {
                     continue;
@@ -1512,6 +1868,11 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
         for (int resource = RESOURCE_WOOD; resource <= RESOURCE_STONE; resource++)
         {
             struct Map simulatedMap = *map;
+            if (ai_search_timed_out())
+            {
+                return bestScore;
+            }
+
             if (!gameTryPlayMonopoly(&simulatedMap, (enum ResourceType)resource))
             {
                 continue;
@@ -1543,6 +1904,11 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
             for (int receive = RESOURCE_WOOD; receive <= RESOURCE_STONE; receive++)
             {
                 struct Map simulatedMap = *map;
+                if (ai_search_timed_out())
+                {
+                    return bestScore;
+                }
+
                 if (!gameTryTradeMaritime(&simulatedMap, (enum ResourceType)give, 1, (enum ResourceType)receive))
                 {
                     continue;
@@ -1579,6 +1945,11 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
                 {
                     struct Map simulatedMap;
                     float score;
+
+                    if (ai_search_timed_out())
+                    {
+                        return bestScore;
+                    }
 
                     if (!IsCanonicalSharedCorner(tileId, cornerIndex) ||
                         !boardIsValidSettlementPlacement(map, tileId, cornerIndex, player, origin, BOARD_HEX_RADIUS))
@@ -1620,6 +1991,11 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
                     struct Map simulatedMap;
                     float score;
 
+                    if (ai_search_timed_out())
+                    {
+                        return bestScore;
+                    }
+
                     if (!IsCanonicalSharedCorner(tileId, cornerIndex) ||
                         !boardIsValidCityPlacement(map, tileId, cornerIndex, player))
                     {
@@ -1660,6 +2036,11 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
                     struct Map simulatedMap;
                     float score;
 
+                    if (ai_search_timed_out())
+                    {
+                        return bestScore;
+                    }
+
                     if (!IsCanonicalSharedEdge(tileId, sideIndex) ||
                         IsSharedEdgeOccupied(map, tileId, sideIndex) ||
                         !boardIsValidRoadPlacement(map, tileId, sideIndex, player, origin, BOARD_HEX_RADIUS))
@@ -1696,6 +2077,10 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
         {
             struct Map simulatedMap = *map;
             enum DevelopmentCardType drawnCard = DEVELOPMENT_CARD_KNIGHT;
+            if (ai_search_timed_out())
+            {
+                return bestScore;
+            }
 
             if (gameTryBuyDevelopment(&simulatedMap, &drawnCard))
             {
@@ -1725,6 +2110,11 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
 static bool find_best_play_phase_action(const struct Map *map, enum AiDifficulty difficulty, struct AiAction *action)
 {
     struct AiSearchState state;
+    float score;
+    const double started = GetTime();
+    double budgetUsed = 0.0;
+    unsigned int nodesVisited = 0;
+    bool timedOut = false;
 
     if (map == NULL || action == NULL)
     {
@@ -1742,18 +2132,33 @@ static bool find_best_play_phase_action(const struct Map *map, enum AiDifficulty
         state.maritimeTradesRemaining = 0;
     }
 
-    search_turn_score(map, map->currentPlayer, difficulty, state, action);
+    ai_begin_play_phase_search(difficulty);
+    score = search_turn_score(map, map->currentPlayer, difficulty, state, action);
+    budgetUsed = gAiSearchBudget;
+    nodesVisited = gAiSearchNodesVisited;
+    timedOut = gAiSearchTimedOut;
+    ai_end_play_phase_search();
+    debugLog("AI", "play phase search action=%s score=%.3f elapsed=%.3f budget=%.3f nodes=%u timedOut=%d",
+             ai_action_type_label(action->type),
+             score,
+             GetTime() - started,
+             budgetUsed,
+             nodesVisited,
+             timedOut ? 1 : 0);
     return action->type != AI_ACTION_NONE;
 }
 
 static bool execute_ai_action(struct Map *map, const struct AiAction *action)
 {
     Vector2 origin = {(float)GetScreenWidth() * BOARD_ORIGIN_X_FACTOR, (float)GetScreenHeight() * BOARD_ORIGIN_Y_FACTOR};
+    const double started = GetTime();
 
     if (map == NULL || action == NULL)
     {
         return false;
     }
+
+    log_ai_action("action execute start", map, action);
 
     switch (action->type)
     {
@@ -1762,11 +2167,13 @@ static bool execute_ai_action(struct Map *map, const struct AiAction *action)
             !boardIsValidSettlementPlacement(map, action->tileId, action->cornerIndex, map->currentPlayer, origin, BOARD_HEX_RADIUS) ||
             !gameTryBuySettlement(map))
         {
+            debugLog("AI", "action execute end type=%s success=0 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
             return false;
         }
         PlaceSettlementOnSharedCorner(map, action->tileId, action->cornerIndex, map->currentPlayer, STRUCTURE_TOWN);
         gameRefreshAwards(map);
         finalize_ai_victory(map);
+        debugLog("AI", "action execute end type=%s success=1 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
         return true;
 
     case AI_ACTION_BUILD_CITY:
@@ -1774,11 +2181,13 @@ static bool execute_ai_action(struct Map *map, const struct AiAction *action)
             !boardIsValidCityPlacement(map, action->tileId, action->cornerIndex, map->currentPlayer) ||
             !gameTryBuyCity(map))
         {
+            debugLog("AI", "action execute end type=%s success=0 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
             return false;
         }
         PlaceSettlementOnSharedCorner(map, action->tileId, action->cornerIndex, map->currentPlayer, STRUCTURE_CITY);
         gameRefreshAwards(map);
         finalize_ai_victory(map);
+        debugLog("AI", "action execute end type=%s success=1 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
         return true;
 
     case AI_ACTION_BUILD_ROAD:
@@ -1786,11 +2195,13 @@ static bool execute_ai_action(struct Map *map, const struct AiAction *action)
             IsSharedEdgeOccupied(map, action->tileId, action->sideIndex) ||
             !boardIsValidRoadPlacement(map, action->tileId, action->sideIndex, map->currentPlayer, origin, BOARD_HEX_RADIUS))
         {
+            debugLog("AI", "action execute end type=%s success=0 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
             return false;
         }
 
         if (!gameHasFreeRoadPlacements(map) && !gameTryBuyRoad(map))
         {
+            debugLog("AI", "action execute end type=%s success=0 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
             return false;
         }
 
@@ -1801,6 +2212,7 @@ static bool execute_ai_action(struct Map *map, const struct AiAction *action)
             gameConsumeFreeRoadPlacement(map);
         }
         finalize_ai_victory(map);
+        debugLog("AI", "action execute end type=%s success=1 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
         return true;
 
     case AI_ACTION_BUY_DEVELOPMENT:
@@ -1808,6 +2220,7 @@ static bool execute_ai_action(struct Map *map, const struct AiAction *action)
         enum DevelopmentCardType drawnCard = DEVELOPMENT_CARD_KNIGHT;
         if (!gameTryBuyDevelopment(map, &drawnCard))
         {
+            debugLog("AI", "action execute end type=%s success=0 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
             return false;
         }
         if (uiGetAiSpeedSetting() < 10)
@@ -1815,49 +2228,76 @@ static bool execute_ai_action(struct Map *map, const struct AiAction *action)
             uiStartDevelopmentCardDrawAnimation(drawnCard);
         }
         finalize_ai_victory(map);
+        debugLog("AI", "action execute end type=%s success=1 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
         return true;
     }
 
     case AI_ACTION_PLAY_KNIGHT:
         if (!gameTryPlayKnight(map))
         {
+            debugLog("AI", "action execute end type=%s success=0 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
             return false;
         }
         finalize_ai_victory(map);
+        debugLog("AI", "action execute end type=%s success=1 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
         return true;
 
     case AI_ACTION_PLAY_ROAD_BUILDING:
-        return gameTryPlayRoadBuilding(map);
+    {
+        const bool success = gameTryPlayRoadBuilding(map);
+        debugLog("AI", "action execute end type=%s success=%d elapsed=%.3f", ai_action_type_label(action->type), success ? 1 : 0, GetTime() - started);
+        return success;
+    }
 
     case AI_ACTION_PLAY_YEAR_OF_PLENTY:
-        return gameTryPlayYearOfPlenty(map, action->resourceA, action->resourceB);
+    {
+        const bool success = gameTryPlayYearOfPlenty(map, action->resourceA, action->resourceB);
+        debugLog("AI", "action execute end type=%s success=%d elapsed=%.3f", ai_action_type_label(action->type), success ? 1 : 0, GetTime() - started);
+        return success;
+    }
 
     case AI_ACTION_PLAY_MONOPOLY:
-        return gameTryPlayMonopoly(map, action->resourceA);
+    {
+        const bool success = gameTryPlayMonopoly(map, action->resourceA);
+        debugLog("AI", "action execute end type=%s success=%d elapsed=%.3f", ai_action_type_label(action->type), success ? 1 : 0, GetTime() - started);
+        return success;
+    }
 
     case AI_ACTION_MARITIME_TRADE:
-        return gameTryTradeMaritime(map, action->resourceA, 1, action->resourceB);
+    {
+        const bool success = gameTryTradeMaritime(map, action->resourceA, 1, action->resourceB);
+        debugLog("AI", "action execute end type=%s success=%d elapsed=%.3f", ai_action_type_label(action->type), success ? 1 : 0, GetTime() - started);
+        return success;
+    }
 
     case AI_ACTION_MOVE_THIEF:
         if (!gameCanMoveThiefToTile(map, action->tileId))
         {
+            debugLog("AI", "action execute end type=%s success=0 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
             return false;
         }
         gameMoveThief(map, action->tileId);
+        debugLog("AI", "action execute end type=%s success=1 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
         return true;
 
     case AI_ACTION_CHOOSE_THIEF_VICTIM:
-        return gameStealRandomResource(map, action->player);
+    {
+        const bool success = gameStealRandomResource(map, action->player);
+        debugLog("AI", "action execute end type=%s success=%d elapsed=%.3f", ai_action_type_label(action->type), success ? 1 : 0, GetTime() - started);
+        return success;
+    }
 
     case AI_ACTION_SETUP_SETTLEMENT:
         if (!IsCanonicalSharedCorner(action->tileId, action->cornerIndex) ||
             !boardIsValidSettlementPlacement(map, action->tileId, action->cornerIndex, map->currentPlayer, origin, BOARD_HEX_RADIUS))
         {
+            debugLog("AI", "action execute end type=%s success=0 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
             return false;
         }
         PlaceSettlementOnSharedCorner(map, action->tileId, action->cornerIndex, map->currentPlayer, STRUCTURE_TOWN);
         gameRefreshAwards(map);
         gameHandlePlacedSettlement(map, action->tileId, action->cornerIndex);
+        debugLog("AI", "action execute end type=%s success=1 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
         return true;
 
     case AI_ACTION_SETUP_ROAD:
@@ -1866,20 +2306,51 @@ static bool execute_ai_action(struct Map *map, const struct AiAction *action)
             !boardIsValidRoadPlacement(map, action->tileId, action->sideIndex, map->currentPlayer, origin, BOARD_HEX_RADIUS) ||
             !boardEdgeTouchesCorner(action->tileId, action->sideIndex, map->setupSettlementTileId, map->setupSettlementCornerIndex, origin, BOARD_HEX_RADIUS))
         {
+            debugLog("AI", "action execute end type=%s success=0 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
             return false;
         }
         PlaceRoadOnSharedEdge(map, action->tileId, action->sideIndex, map->currentPlayer);
         gameRefreshAwards(map);
         gameHandlePlacedRoad(map);
+        debugLog("AI", "action execute end type=%s success=1 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
         return true;
 
     case AI_ACTION_DISCARD:
-        return gameTrySubmitDiscard(map, action->player, action->discardPlan);
+    {
+        const bool success = gameTrySubmitDiscard(map, action->player, action->discardPlan);
+        debugLog("AI", "action execute end type=%s success=%d elapsed=%.3f", ai_action_type_label(action->type), success ? 1 : 0, GetTime() - started);
+        return success;
+    }
 
     case AI_ACTION_NONE:
     default:
+        debugLog("AI", "action execute end type=%s success=0 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
         return false;
     }
+}
+
+static float score_discard_plan(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty, const int discardPlan[5])
+{
+    int remainingResources[5];
+
+    if (map == NULL ||
+        discardPlan == NULL ||
+        player < PLAYER_RED ||
+        player > PLAYER_BLACK)
+    {
+        return -AI_SEARCH_WIN_SCORE;
+    }
+
+    for (int resource = RESOURCE_WOOD; resource <= RESOURCE_STONE; resource++)
+    {
+        remainingResources[resource] = map->players[player].resources[resource] - discardPlan[resource];
+        if (remainingResources[resource] < 0)
+        {
+            return -AI_SEARCH_WIN_SCORE;
+        }
+    }
+
+    return evaluate_hand_value(map, player, remainingResources, difficulty);
 }
 
 static void search_best_discard_plan_recursive(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty, int resourceIndex, int remaining, int discardPlan[5], float *bestScore, int bestPlan[5])
@@ -1891,33 +2362,13 @@ static void search_best_discard_plan_recursive(const struct Map *map, enum Playe
 
     if (resourceIndex >= RESOURCE_STONE)
     {
-        struct Map simulatedMap;
-        struct AiSearchState state;
-        float score;
-
         if (remaining > map->players[player].resources[RESOURCE_STONE])
         {
             return;
         }
 
         discardPlan[RESOURCE_STONE] = remaining;
-        simulatedMap = *map;
-        if (!gameTrySubmitDiscard(&simulatedMap, player, discardPlan))
-        {
-            return;
-        }
-
-        if (simulatedMap.currentPlayer == player && !gameHasPendingDiscards(&simulatedMap))
-        {
-            state.buildActionsRemaining = max_int(ai_build_action_budget(difficulty) - gAiBuildActionsThisTurn, 0);
-            state.maritimeTradesRemaining = max_int(ai_maritime_trade_budget(difficulty) - gAiMaritimeTradesThisTurn, 0);
-            score = search_turn_score(&simulatedMap, player, difficulty, state, NULL);
-        }
-        else
-        {
-            score = evaluate_player_position(&simulatedMap, player, difficulty);
-        }
-
+        const float score = score_discard_plan(map, player, difficulty, discardPlan);
         if (score > *bestScore)
         {
             *bestScore = score;

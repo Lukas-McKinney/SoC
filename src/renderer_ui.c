@@ -54,6 +54,7 @@ static Vector2 TransformCardPoint(Rectangle bounds, float rotationDegrees, Vecto
 static void DrawCardText(Font font, Rectangle bounds, float rotationDegrees, Vector2 localPoint, const char *text, int fontSize, Color color);
 static int BuildDevelopmentHandLayout(const struct Map *map, struct DevelopmentHandCard cards[DEVELOPMENT_CARD_COUNT]);
 static int BuildWrappedUiLines(const char *message, int fontSize, int maxWidth, char lines[][96], int maxLines);
+static int DrawWrappedUiTextBlock(const char *message, float x, float y, int fontSize, int maxWidth, float lineHeight, Color color);
 static Rectangle DevelopmentHandHitBounds(Rectangle bounds);
 static void DrawAwardCard(Rectangle bounds, const char *title, const char *subtitle, const char *detail, enum PlayerType owner, Color accent);
 static void BuildVictoryHeadline(const struct Map *map, enum PlayerType winner, char *buffer, size_t bufferSize);
@@ -131,6 +132,19 @@ static int BuildWrappedUiLines(const char *message, int fontSize, int maxWidth, 
         }
 
         paragraph = nextParagraph;
+    }
+
+    return lineCount;
+}
+
+static int DrawWrappedUiTextBlock(const char *message, float x, float y, int fontSize, int maxWidth, float lineHeight, Color color)
+{
+    char lines[3][96] = {{0}};
+    const int lineCount = BuildWrappedUiLines(message, fontSize, maxWidth, lines, 3);
+
+    for (int i = 0; i < lineCount; i++)
+    {
+        DrawUiText(lines[i], x, y + (float)i * lineHeight, fontSize, color);
     }
 
     return lineCount;
@@ -1230,6 +1244,7 @@ void DrawDevelopmentPlayOverlay(const struct Map *map)
     const float buttonGap = 8.0f;
     const float rowWidth = buttonWidth * 5.0f + buttonGap * 4.0f;
     const float rowX = panel.x + panel.width * 0.5f - rowWidth * 0.5f;
+    const int detailMaxWidth = (int)(panel.width - 44.0f);
     const Color textColor = (Color){54, 39, 29, 255};
     const Color mutedText = (Color){92, 70, 50, 255};
 
@@ -1247,21 +1262,21 @@ void DrawDevelopmentPlayOverlay(const struct Map *map)
     switch (type)
     {
     case DEVELOPMENT_CARD_KNIGHT:
-        DrawUiText(loc("Move the thief and steal 1 random card."), panel.x + 22.0f, panel.y + 60.0f, 18, Fade(mutedText, alpha));
+        DrawWrappedUiTextBlock(loc("Move the thief and steal 1 random card."), panel.x + 22.0f, panel.y + 60.0f, 18, detailMaxWidth, 22.0f, Fade(mutedText, alpha));
         DrawUiText(loc("You can still roll this turn afterward."), panel.x + 22.0f, panel.y + 88.0f, 16, Fade((Color){122, 100, 78, 255}, alpha));
         break;
     case DEVELOPMENT_CARD_ROAD_BUILDING:
-        DrawUiText(loc("Place up to 2 roads for free."), panel.x + 22.0f, panel.y + 60.0f, 18, Fade(mutedText, alpha));
+        DrawWrappedUiTextBlock(loc("Place up to 2 roads for free."), panel.x + 22.0f, panel.y + 60.0f, 18, detailMaxWidth, 22.0f, Fade(mutedText, alpha));
         DrawUiText(loc("The board will switch into road placement mode."), panel.x + 22.0f, panel.y + 88.0f, 16, Fade((Color){122, 100, 78, 255}, alpha));
         break;
     case DEVELOPMENT_CARD_YEAR_OF_PLENTY:
-        DrawUiText(loc("Choose 2 resources to take from the bank."), panel.x + 22.0f, panel.y + 60.0f, 18, Fade(mutedText, alpha));
+        DrawWrappedUiTextBlock(loc("Choose 2 resources to take from the bank."), panel.x + 22.0f, panel.y + 60.0f, 18, detailMaxWidth, 22.0f, Fade(mutedText, alpha));
         DrawUiText(loc("First Resource"), panel.x + 24.0f, panel.y + 108.0f, 15, Fade(textColor, alpha));
-        DrawUiText(loc("Second Resource"), panel.x + 24.0f, panel.y + 160.0f, 15, Fade(textColor, alpha));
+        DrawUiText(loc("Second Resource"), panel.x + 24.0f, panel.y + 176.0f, 15, Fade(textColor, alpha));
         for (int resource = 0; resource < 5; resource++)
         {
             const Rectangle firstButton = {rowX + resource * (buttonWidth + buttonGap), panel.y + 132.0f, buttonWidth, buttonHeight};
-            const Rectangle secondButton = {rowX + resource * (buttonWidth + buttonGap), panel.y + 184.0f, buttonWidth, buttonHeight};
+            const Rectangle secondButton = {rowX + resource * (buttonWidth + buttonGap), panel.y + 200.0f, buttonWidth, buttonHeight};
             const bool firstSelected = gDevelopmentPlayPrimaryResource == (enum ResourceType)resource;
             const bool secondSelected = gDevelopmentPlaySecondaryResource == (enum ResourceType)resource;
             const Color fill = (Color){236, 228, 208, 255};
@@ -1281,7 +1296,7 @@ void DrawDevelopmentPlayOverlay(const struct Map *map)
         }
         break;
     case DEVELOPMENT_CARD_MONOPOLY:
-        DrawUiText(loc("Choose 1 resource. Every opponent gives you that type."), panel.x + 22.0f, panel.y + 60.0f, 18, Fade(mutedText, alpha));
+        DrawWrappedUiTextBlock(loc("Choose 1 resource. Every opponent gives you that type."), panel.x + 22.0f, panel.y + 60.0f, 18, detailMaxWidth, 22.0f, Fade(mutedText, alpha));
         DrawUiText(loc("Target Resource"), panel.x + 24.0f, panel.y + 116.0f, 15, Fade(textColor, alpha));
         for (int resource = 0; resource < 5; resource++)
         {
@@ -1297,7 +1312,7 @@ void DrawDevelopmentPlayOverlay(const struct Map *map)
         break;
     case DEVELOPMENT_CARD_VICTORY_POINT:
     default:
-        DrawUiText(loc("Victory point cards are counted automatically."), panel.x + 22.0f, panel.y + 60.0f, 18, Fade(mutedText, alpha));
+        DrawWrappedUiTextBlock(loc("Victory point cards are counted automatically."), panel.x + 22.0f, panel.y + 60.0f, 18, detailMaxWidth, 22.0f, Fade(mutedText, alpha));
         break;
     }
 
@@ -1483,8 +1498,13 @@ void DrawTurnPanel(const struct Map *map)
     const Color actionColor = (Color){171, 82, 54, 255};
     const Color mutedButton = (Color){214, 202, 181, 255};
     const Color textColor = (Color){54, 39, 29, 255};
+    const bool humanControlledTurn = map->currentPlayer >= PLAYER_RED &&
+                                     map->currentPlayer <= PLAYER_BLACK &&
+                                     map->players[map->currentPlayer].controlMode == PLAYER_CONTROL_HUMAN;
     const bool canEndTurn = gameCanEndTurn(map);
     const bool diceLocked = map->rolledThisTurn || uiIsDiceRolling();
+    const bool rollButtonInteractive = humanControlledTurn && !diceLocked;
+    const bool endTurnButtonInteractive = humanControlledTurn && canEndTurn;
     const Rectangle dieA = {panel.x + 20.0f, panel.y + 76.0f, 54.0f, 54.0f};
     const Rectangle dieB = {panel.x + 84.0f, panel.y + 76.0f, 54.0f, 54.0f};
     const int shownTotal = uiIsDiceRolling() ? (uiGetDisplayedDieA() + uiGetDisplayedDieB()) : map->lastDiceRoll;
@@ -1607,10 +1627,10 @@ void DrawTurnPanel(const struct Map *map)
         DrawUiText(loc("Rolling..."), panel.x + 148.0f, panel.y + 106.0f, 16, (Color){92, 70, 50, 255});
     }
 
-    UpdateTurnButtonAnimation(&gRollDiceButtonAnimation, rollDiceButton, !diceLocked);
-    UpdateTurnButtonAnimation(&gEndTurnButtonAnimation, endTurnButton, canEndTurn);
-    DrawTurnActionButton(rollDiceButton, loc("Roll Dice (Enter)"), 22, diceLocked ? mutedButton : actionColor, diceLocked ? borderColor : ColorBrightness(actionColor, -0.18f), diceLocked ? (Color){108, 86, 67, 255} : RAYWHITE, actionColor, &gRollDiceButtonAnimation);
-    DrawTurnActionButton(endTurnButton, loc("End Turn"), 22, canEndTurn ? mutedButton : (Color){228, 220, 202, 255}, canEndTurn ? borderColor : (Color){154, 132, 108, 255}, canEndTurn ? textColor : (Color){132, 112, 91, 255}, (Color){182, 141, 97, 255}, &gEndTurnButtonAnimation);
+    UpdateTurnButtonAnimation(&gRollDiceButtonAnimation, rollDiceButton, rollButtonInteractive);
+    UpdateTurnButtonAnimation(&gEndTurnButtonAnimation, endTurnButton, endTurnButtonInteractive);
+    DrawTurnActionButton(rollDiceButton, loc("Roll Dice (Enter)"), 22, rollButtonInteractive ? actionColor : mutedButton, rollButtonInteractive ? ColorBrightness(actionColor, -0.18f) : borderColor, rollButtonInteractive ? RAYWHITE : (Color){108, 86, 67, 255}, actionColor, &gRollDiceButtonAnimation);
+    DrawTurnActionButton(endTurnButton, loc("End Turn"), 22, endTurnButtonInteractive ? mutedButton : (Color){228, 220, 202, 255}, endTurnButtonInteractive ? borderColor : (Color){154, 132, 108, 255}, endTurnButtonInteractive ? textColor : (Color){132, 112, 91, 255}, (Color){182, 141, 97, 255}, &gEndTurnButtonAnimation);
 }
 
 void DrawVictoryOverlay(const struct Map *map)

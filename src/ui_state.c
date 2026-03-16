@@ -1,4 +1,5 @@
 #include "ui_state.h"
+#include "debug_log.h"
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -642,6 +643,10 @@ void uiStartDiceRollAnimation(void)
     gPendingDieB = GetRandomValue(1, 6);
     gDisplayedDieA = GetRandomValue(1, 6);
     gDisplayedDieB = GetRandomValue(1, 6);
+    debugLog("UI", "dice animation start pending=%d+%d total=%d",
+             gPendingDieA,
+             gPendingDieB,
+             gPendingDieA + gPendingDieB);
 }
 
 bool uiIsDiceRolling(void)
@@ -1098,13 +1103,21 @@ static void update_dice_animation(struct Map *map)
 
     if (now - gDiceRollStartTime >= 0.85)
     {
+        const double rollResolveStarted = GetTime();
         const int resolvedRoll = gPendingDieA + gPendingDieB;
         gDiceRolling = false;
         gDisplayedDieA = gPendingDieA;
         gDisplayedDieB = gPendingDieB;
         gRecentRollHighlightValue = resolvedRoll;
         gRecentRollHighlightStartTime = now;
+        debugLog("UI", "dice animation resolve total=%d", resolvedRoll);
         gameRollDice(map, resolvedRoll);
+        debugLog("UI", "dice animation resolved total=%d elapsed=%.3f pendingDiscards=%d thiefPlacement=%d thiefVictim=%d",
+                 resolvedRoll,
+                 GetTime() - rollResolveStarted,
+                 gameHasPendingDiscards(map) ? 1 : 0,
+                 gameNeedsThiefPlacement(map) ? 1 : 0,
+                 gameNeedsThiefVictimSelection(map) ? 1 : 0);
     }
 }
 
