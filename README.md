@@ -227,6 +227,8 @@ Output:
 - `dist/SoC-<version>-macos-<arch>.zip`
 - `dist/SoC-<version>-macos-<arch>.sha256.txt`
 
+The macOS packager bundles non-system `.dylib` dependencies (such as raylib) and rewrites loader paths so the zip is portable to machines without raylib installed.
+
 ### What your friend runs
 
 Each zip includes:

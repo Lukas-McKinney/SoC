@@ -60,7 +60,7 @@ jobs:
       - name: Package game (Windows)
         shell: pwsh
         run: |
-          powershell -ExecutionPolicy Bypass -File scripts/package_windows.ps1 -Version "${{ steps.version.outputs.value }}"
+          powershell -ExecutionPolicy Bypass -File scripts/package_windows.ps1 -Version "${{ steps.version.outputs.value }}" -RaylibDllPath "C:\msys64\mingw64\bin\raylib.dll"
 
       - name: Upload Windows package artifact
         uses: actions/upload-artifact@v4

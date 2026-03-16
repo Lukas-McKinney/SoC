@@ -1,13 +1,42 @@
 param(
     [string]$Version = "dev",
     [string]$OutDir = "dist",
-    [string]$BinaryPath = "settlers.exe"
+    [string]$BinaryPath = "settlers.exe",
+    [string]$RaylibDllPath = ""
 )
 
 $ErrorActionPreference = "Stop"
 
 if (-not (Test-Path -Path $BinaryPath -PathType Leaf)) {
     throw "Binary '$BinaryPath' not found. Build first with: make"
+}
+
+function Resolve-DllPath {
+    param(
+        [string]$DllName,
+        [string[]]$Hints = @()
+    )
+
+    foreach ($hint in $Hints) {
+        if (-not [string]::IsNullOrWhiteSpace($hint) -and (Test-Path -Path $hint -PathType Leaf)) {
+            return (Resolve-Path $hint).Path
+        }
+    }
+
+    $fromPath = Get-Command $DllName -ErrorAction SilentlyContinue
+    if ($fromPath -ne $null -and -not [string]::IsNullOrWhiteSpace($fromPath.Source) -and (Test-Path -Path $fromPath.Source -PathType Leaf)) {
+        return (Resolve-Path $fromPath.Source).Path
+    }
+
+    return $null
+}
+
+$needsRaylibDll = $false
+if (Get-Command objdump -ErrorAction SilentlyContinue) {
+    $imports = objdump -p $BinaryPath | Select-String "DLL Name" | ForEach-Object { $_.ToString().ToLowerInvariant() }
+    if ($imports -match "raylib\.dll") {
+        $needsRaylibDll = $true
+    }
 }
 
 $packageName = "SoC-$Version-windows-x64"
@@ -30,6 +59,26 @@ New-Item -ItemType Directory -Path $stageDir -Force | Out-Null
 Copy-Item $BinaryPath $stageDir
 if (Test-Path "README.md") { Copy-Item "README.md" $stageDir }
 if (Test-Path "LICENSE") { Copy-Item "LICENSE" $stageDir }
+
+$resolvedRaylibDll = Resolve-DllPath -DllName "raylib.dll" -Hints @(
+    $RaylibDllPath,
+    "C:\msys64\mingw64\bin\raylib.dll",
+    "D:\a\_temp\msys64\mingw64\bin\raylib.dll"
+)
+
+if ($resolvedRaylibDll) {
+    Copy-Item $resolvedRaylibDll $stageDir
+    $mingwBinDir = Split-Path -Parent $resolvedRaylibDll
+    foreach ($runtimeDll in @("libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll")) {
+        $runtimePath = Join-Path $mingwBinDir $runtimeDll
+        if (Test-Path -Path $runtimePath -PathType Leaf) {
+            Copy-Item $runtimePath $stageDir
+        }
+    }
+}
+elseif ($needsRaylibDll) {
+    throw "Binary imports raylib.dll but it was not found. Pass -RaylibDllPath or ensure raylib.dll is in PATH."
+}
 
 @'
 @echo off
