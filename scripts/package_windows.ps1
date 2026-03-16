@@ -31,12 +31,14 @@ function Resolve-DllPath {
     return $null
 }
 
-$needsRaylibDll = $false
+$raylibImports = @()
 if (Get-Command objdump -ErrorAction SilentlyContinue) {
-    $imports = objdump -p $BinaryPath | Select-String "DLL Name" | ForEach-Object { $_.ToString().ToLowerInvariant() }
-    if ($imports -match "raylib\.dll") {
-        $needsRaylibDll = $true
+    $imports = objdump -p $BinaryPath | Select-String "DLL Name" | ForEach-Object {
+        if ($_ -match "DLL Name:\s*([^\s]+)") {
+            $matches[1].ToLowerInvariant()
+        }
     }
+    $raylibImports = @($imports | Where-Object { $_ -match "raylib\.dll$" } | Select-Object -Unique)
 }
 
 $packageName = "SoC-$Version-windows-x64"
@@ -60,24 +62,31 @@ Copy-Item $BinaryPath $stageDir
 if (Test-Path "README.md") { Copy-Item "README.md" $stageDir }
 if (Test-Path "LICENSE") { Copy-Item "LICENSE" $stageDir }
 
-$resolvedRaylibDll = Resolve-DllPath -DllName "raylib.dll" -Hints @(
-    $RaylibDllPath,
-    "C:\msys64\mingw64\bin\raylib.dll",
-    "D:\a\_temp\msys64\mingw64\bin\raylib.dll"
-)
+if ($raylibImports.Count -gt 0) {
+    $copiedRaylib = $false
+    foreach ($importedDll in $raylibImports) {
+        $resolvedRaylibDll = Resolve-DllPath -DllName $importedDll -Hints @(
+            $RaylibDllPath,
+            (Join-Path "C:\msys64\mingw64\bin" $importedDll),
+            (Join-Path "D:\a\_temp\msys64\mingw64\bin" $importedDll)
+        )
 
-if ($resolvedRaylibDll) {
-    Copy-Item $resolvedRaylibDll $stageDir
-    $mingwBinDir = Split-Path -Parent $resolvedRaylibDll
-    foreach ($runtimeDll in @("libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll")) {
-        $runtimePath = Join-Path $mingwBinDir $runtimeDll
-        if (Test-Path -Path $runtimePath -PathType Leaf) {
-            Copy-Item $runtimePath $stageDir
+        if ($resolvedRaylibDll) {
+            Copy-Item $resolvedRaylibDll $stageDir
+            $mingwBinDir = Split-Path -Parent $resolvedRaylibDll
+            foreach ($runtimeDll in @("libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll")) {
+                $runtimePath = Join-Path $mingwBinDir $runtimeDll
+                if (Test-Path -Path $runtimePath -PathType Leaf) {
+                    Copy-Item $runtimePath $stageDir
+                }
+            }
+            $copiedRaylib = $true
         }
     }
-}
-elseif ($needsRaylibDll) {
-    throw "Binary imports raylib.dll but it was not found. Pass -RaylibDllPath or ensure raylib.dll is in PATH."
+
+    if (-not $copiedRaylib) {
+        throw "Binary imports $($raylibImports -join ', ') but none were found. Pass -RaylibDllPath or ensure the DLLs are in PATH."
+    }
 }
 
 @'
