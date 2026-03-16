@@ -5,6 +5,7 @@
 #include "localization.h"
 #include "map_snapshot.h"
 #include "netplay.h"
+#include "debug_log.h"
 #include "renderer_ui.h"
 #include "ui_state.h"
 
@@ -97,6 +98,13 @@ static void set_connection_error(struct MatchSession *session, const char *messa
     }
 
     snprintf(session->connectionError, sizeof(session->connectionError), "%s", message == NULL ? "" : message);
+    if (session->connectionError[0] != '\0')
+    {
+        debugLog("NET", "connection error (%s): %s",
+                 session->networkMode == MATCH_NETWORK_PRIVATE_HOST ? "host" :
+                 (session->networkMode == MATCH_NETWORK_PRIVATE_CLIENT ? "client" : "local"),
+                 session->connectionError);
+    }
 }
 
 static bool configure_default_private_host_seats(struct MatchSession *session)
@@ -261,6 +269,7 @@ bool matchSessionOpenPrivateHost(struct MatchSession *session, unsigned short po
         return false;
     }
 
+    debugLog("NET", "opening private host on port %u", (unsigned int)port);
     if (session->netplay == NULL)
     {
         session->netplay = netplayCreate();
@@ -288,6 +297,7 @@ bool matchSessionOpenPrivateClient(struct MatchSession *session, const char *hos
         return false;
     }
 
+    debugLog("NET", "opening private client to %s:%u", hostAddress == NULL ? "<null>" : hostAddress, (unsigned int)port);
     if (session->netplay == NULL)
     {
         session->netplay = netplayCreate();
@@ -658,21 +668,23 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
                 }
             }
 
-        session->connectionStatus = MATCH_CONNECTION_CONNECTED;
-        session->ready = true;
-        clear_connection_error(session);
-        uiShowCenteredStatus(loc("Remote player connected."), UI_NOTIFICATION_POSITIVE);
-        if (session->netplay != NULL)
-        {
-            netplayQueueHello(session->netplay, remotePlayer, session->localPlayer, authorities);
-            broadcast_host_snapshot(session);
-        }
+            session->connectionStatus = MATCH_CONNECTION_CONNECTED;
+            session->ready = true;
+            clear_connection_error(session);
+            debugLog("NET", "remote client connected (local=%d remote=%d)", (int)session->localPlayer, (int)remotePlayer);
+            uiShowCenteredStatus(loc("Remote player connected."), UI_NOTIFICATION_POSITIVE);
+            if (session->netplay != NULL)
+            {
+                netplayQueueHello(session->netplay, remotePlayer, session->localPlayer, authorities);
+                broadcast_host_snapshot(session);
+            }
         }
         break;
 
     case NETPLAY_EVENT_CONNECTED:
         session->connectionStatus = MATCH_CONNECTION_SYNCING;
         clear_connection_error(session);
+        debugLog("NET", "client connected to host; waiting for hello/snapshot");
         uiShowCenteredStatus(loc("Connected to host."), UI_NOTIFICATION_NEUTRAL);
         break;
 
@@ -685,6 +697,7 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
                                         : MATCH_CONNECTION_DISCONNECTED;
         set_connection_error(session, event->message);
         reset_client_transient_ui();
+        debugLog("NET", "disconnected event: %s", event->message);
         uiShowCenteredWarning(loc("Remote player disconnected."));
         break;
 
@@ -697,6 +710,7 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
         }
         session->connectionStatus = MATCH_CONNECTION_SYNCING;
         clear_connection_error(session);
+        debugLog("NET", "hello received; assigned local player=%d", (int)session->localPlayer);
         break;
 
     case NETPLAY_EVENT_SNAPSHOT:
@@ -709,6 +723,7 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
             clear_connection_error(session);
             matchSessionRefreshStateHash(session);
             reset_client_transient_ui();
+            debugLog("NET", "snapshot applied (size=%zu, hash=%u)", event->payloadSize, session->stateHash);
         }
         break;
 
@@ -861,6 +876,7 @@ void matchSessionUpdate(struct MatchSession *session)
     {
         session->connectionStatus = MATCH_CONNECTION_ERROR;
         set_connection_error(session, netplayGetLastError(session->netplay));
+        debugLog("NET", "netplay entered error state: %s", netplayGetLastError(session->netplay));
     }
 
     while (netplayPollEvent(session->netplay, &event))

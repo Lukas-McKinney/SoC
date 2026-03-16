@@ -277,6 +277,7 @@ int main(int argc, char **argv)
             else
             {
                 handleUiGlobalInput();
+                HandleMapInput(&session);
             }
 
             if (uiConsumeRestartGameRequest())
