@@ -31,14 +31,31 @@ function Resolve-DllPath {
     return $null
 }
 
-$raylibImports = @()
-if (Get-Command objdump -ErrorAction SilentlyContinue) {
-    $imports = objdump -p $BinaryPath | Select-String "DLL Name" | ForEach-Object {
+function Get-ImportedDllNames {
+    param([string]$FilePath)
+
+    if (-not (Get-Command objdump -ErrorAction SilentlyContinue) -or -not (Test-Path -Path $FilePath -PathType Leaf)) {
+        return @()
+    }
+
+    return @(objdump -p $FilePath | Select-String "DLL Name" | ForEach-Object {
         if ($_ -match "DLL Name:\s*([^\s]+)") {
             $matches[1].ToLowerInvariant()
         }
-    }
-    $raylibImports = @($imports | Where-Object { $_ -match "raylib\.dll$" } | Select-Object -Unique)
+    } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+}
+
+function Is-SystemDll {
+    param([string]$DllName)
+
+    $systemDlls = @(
+        "kernel32.dll", "user32.dll", "gdi32.dll", "winmm.dll", "ws2_32.dll", "shell32.dll", "msvcrt.dll",
+        "advapi32.dll", "ole32.dll", "oleaut32.dll", "comdlg32.dll", "comctl32.dll", "rpcrt4.dll", "imm32.dll",
+        "version.dll", "setupapi.dll", "crypt32.dll", "winspool.drv", "uxtheme.dll", "dwmapi.dll", "shlwapi.dll",
+        "secur32.dll", "ntdll.dll"
+    )
+
+    return $systemDlls -contains ($DllName.ToLowerInvariant())
 }
 
 $packageName = "SoC-$Version-windows-x64"
@@ -62,30 +79,52 @@ Copy-Item $BinaryPath $stageDir
 if (Test-Path "README.md") { Copy-Item "README.md" $stageDir }
 if (Test-Path "LICENSE") { Copy-Item "LICENSE" $stageDir }
 
-if ($raylibImports.Count -gt 0) {
-    $copiedRaylib = $false
-    foreach ($importedDll in $raylibImports) {
-        $resolvedRaylibDll = Resolve-DllPath -DllName $importedDll -Hints @(
-            $RaylibDllPath,
-            (Join-Path "C:\msys64\mingw64\bin" $importedDll),
-            (Join-Path "D:\a\_temp\msys64\mingw64\bin" $importedDll)
-        )
-
-        if ($resolvedRaylibDll) {
-            Copy-Item $resolvedRaylibDll $stageDir
-            $mingwBinDir = Split-Path -Parent $resolvedRaylibDll
-            foreach ($runtimeDll in @("libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll")) {
-                $runtimePath = Join-Path $mingwBinDir $runtimeDll
-                if (Test-Path -Path $runtimePath -PathType Leaf) {
-                    Copy-Item $runtimePath $stageDir
-                }
-            }
-            $copiedRaylib = $true
-        }
+if (Get-Command objdump -ErrorAction SilentlyContinue) {
+    $hintedDirs = @("C:\msys64\mingw64\bin", "D:\a\_temp\msys64\mingw64\bin")
+    if (-not [string]::IsNullOrWhiteSpace($RaylibDllPath) -and (Test-Path -Path $RaylibDllPath -PathType Leaf)) {
+        $hintedDirs += (Split-Path -Parent $RaylibDllPath)
     }
+    $hintedDirs = @($hintedDirs | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
 
-    if (-not $copiedRaylib) {
-        throw "Binary imports $($raylibImports -join ', ') but none were found. Pass -RaylibDllPath or ensure the DLLs are in PATH."
+    $queue = New-Object System.Collections.Generic.Queue[string]
+    $visited = New-Object System.Collections.Generic.HashSet[string]
+    $copied = New-Object System.Collections.Generic.HashSet[string]
+
+    $queue.Enqueue((Resolve-Path $BinaryPath).Path)
+
+    while ($queue.Count -gt 0) {
+        $current = $queue.Dequeue()
+        if (-not $visited.Add($current.ToLowerInvariant())) {
+            continue
+        }
+
+        $imports = Get-ImportedDllNames -FilePath $current
+        foreach ($dllName in $imports) {
+            if (Is-SystemDll $dllName) {
+                continue
+            }
+
+            $hints = @()
+            if (-not [string]::IsNullOrWhiteSpace($RaylibDllPath) -and
+                ([System.IO.Path]::GetFileName($RaylibDllPath).ToLowerInvariant() -eq $dllName) -and
+                (Test-Path -Path $RaylibDllPath -PathType Leaf)) {
+                $hints += $RaylibDllPath
+            }
+            foreach ($dir in $hintedDirs) {
+                $hints += (Join-Path $dir $dllName)
+            }
+
+            $resolvedDll = Resolve-DllPath -DllName $dllName -Hints $hints
+            if (-not $resolvedDll) {
+                throw "Binary imports $dllName but it was not found. Pass -RaylibDllPath or ensure required DLLs are in PATH."
+            }
+
+            $resolvedKey = $resolvedDll.ToLowerInvariant()
+            if ($copied.Add($resolvedKey)) {
+                Copy-Item $resolvedDll $stageDir
+                $queue.Enqueue($resolvedDll)
+            }
+        }
     }
 }
 
