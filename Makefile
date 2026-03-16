@@ -2,7 +2,7 @@ CC = gcc
 
 COMMON_CFLAGS = -Wall -Wextra -Iinc -finput-charset=UTF-8 -fexec-charset=UTF-8
 SRC = $(wildcard src/*.c)
-RULE_TEST_SRC = tests/rule_validation.c src/board_rules.c src/game_logic.c src/map.c
+RULE_TEST_SRC = tests/rule_validation.c src/board_rules.c src/game_logic.c src/map.c src/debug_log.c
 
 ifeq ($(OS),Windows_NT)
 RAYLIB_INCLUDE ?= C:/raylib/w64devkit/x86_64-w64-mingw32/include
@@ -34,6 +34,12 @@ endif
 all: $(TARGET)
 
 rules-test: $(RULE_TEST_TARGET)
+
+package-windows: $(TARGET)
+	powershell -ExecutionPolicy Bypass -File scripts/package_windows.ps1
+
+package-macos: $(TARGET)
+	bash scripts/package_macos.sh
 
 $(TARGET): $(SRC)
 	$(CC) $(CFLAGS) $(SRC) $(GAME_LDFLAGS) -o $(TARGET)

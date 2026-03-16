@@ -107,6 +107,38 @@ static void format_resource_delta_list(const int deltas[5], char *buffer, size_t
 static void reset_ui_state(bool resetTheme);
 static unsigned long long current_match_elapsed_seconds(void);
 static void commit_match_result_if_needed(const struct Map *map);
+static void choose_canonical_dice_faces(int total, int *dieA, int *dieB);
+
+static void choose_canonical_dice_faces(int total, int *dieA, int *dieB)
+{
+    int resolvedA;
+
+    if (dieA == NULL || dieB == NULL || total < 2 || total > 12)
+    {
+        return;
+    }
+
+    resolvedA = total / 2;
+    if (resolvedA < 1)
+    {
+        resolvedA = 1;
+    }
+    if (resolvedA > 6)
+    {
+        resolvedA = 6;
+    }
+    while (total - resolvedA < 1)
+    {
+        resolvedA--;
+    }
+    while (total - resolvedA > 6)
+    {
+        resolvedA++;
+    }
+
+    *dieA = resolvedA;
+    *dieB = total - resolvedA;
+}
 
 void initUiState(void)
 {
@@ -658,12 +690,13 @@ unsigned long long uiGetTotalLosses(void)
 
 void uiStartDiceRollAnimation(void)
 {
+    const int rolledTotal = GetRandomValue(1, 6) + GetRandomValue(1, 6);
+
     gDiceRolling = true;
     gDiceRollAnimationSubmitsAction = true;
     gDiceRollStartTime = GetTime();
     gLastDiceShuffleTime = 0.0;
-    gPendingDieA = GetRandomValue(1, 6);
-    gPendingDieB = GetRandomValue(1, 6);
+    choose_canonical_dice_faces(rolledTotal, &gPendingDieA, &gPendingDieB);
     gDisplayedDieA = GetRandomValue(1, 6);
     gDisplayedDieB = GetRandomValue(1, 6);
     debugLog("UI", "dice animation start pending=%d+%d total=%d",
@@ -674,31 +707,16 @@ void uiStartDiceRollAnimation(void)
 
 void uiStartObservedDiceRollAnimation(int total)
 {
-    int minDieA;
-    int maxDieA;
-
     if (total < 2 || total > 12)
     {
         return;
-    }
-
-    minDieA = total - 6;
-    if (minDieA < 1)
-    {
-        minDieA = 1;
-    }
-    maxDieA = total - 1;
-    if (maxDieA > 6)
-    {
-        maxDieA = 6;
     }
 
     gDiceRolling = true;
     gDiceRollAnimationSubmitsAction = false;
     gDiceRollStartTime = GetTime();
     gLastDiceShuffleTime = 0.0;
-    gPendingDieA = GetRandomValue(minDieA, maxDieA);
-    gPendingDieB = total - gPendingDieA;
+    choose_canonical_dice_faces(total, &gPendingDieA, &gPendingDieB);
     gDisplayedDieA = GetRandomValue(1, 6);
     gDisplayedDieB = GetRandomValue(1, 6);
     debugLog("UI", "dice observed animation start pending=%d+%d total=%d",
@@ -1424,6 +1442,7 @@ static const char *resource_label(enum ResourceType resource, bool abbreviated)
 
 static enum PlayerType local_human_player(const struct Map *map)
 {
+    const struct MatchSession *session = matchSessionGetActive();
     enum PlayerType humanPlayer = PLAYER_NONE;
     int humanCount = 0;
     int aiCount = 0;
@@ -1431,6 +1450,17 @@ static enum PlayerType local_human_player(const struct Map *map)
     if (map == NULL)
     {
         return PLAYER_NONE;
+    }
+
+    if (session != NULL && matchSessionIsNetplay(session))
+    {
+        const enum PlayerType sessionLocalPlayer = matchSessionGetLocalPlayer(session);
+        if (sessionLocalPlayer >= PLAYER_RED &&
+            sessionLocalPlayer <= PLAYER_BLACK &&
+            map->players[sessionLocalPlayer].controlMode != PLAYER_CONTROL_AI)
+        {
+            return sessionLocalPlayer;
+        }
     }
 
     for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)

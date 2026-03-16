@@ -15,6 +15,7 @@ struct ButtonAnimationState
 {
     float hoverAmount;
     float pressAmount;
+    float activeAmount;
 };
 
 struct DevelopmentHandCard
@@ -1674,9 +1675,6 @@ void DrawTurnPanel(const struct Map *map)
     const bool diceLocked = map->rolledThisTurn || uiIsDiceRolling();
     const bool rollButtonInteractive = humanControlledTurn && !diceLocked;
     const bool endTurnButtonInteractive = humanControlledTurn && canEndTurn;
-    const bool netplayConnectedAndReady = matchSessionIsNetplay(session) &&
-                                          matchSessionGetConnectionStatus(session) == MATCH_CONNECTION_CONNECTED &&
-                                          matchSessionIsReady(session);
     const Rectangle dieA = {panel.x + 20.0f, panel.y + 76.0f, 54.0f, 54.0f};
     const Rectangle dieB = {panel.x + 84.0f, panel.y + 76.0f, 54.0f, 54.0f};
     const int shownTotal = uiIsDiceRolling() ? (uiGetDisplayedDieA() + uiGetDisplayedDieB()) : map->lastDiceRoll;
@@ -1692,7 +1690,6 @@ void DrawTurnPanel(const struct Map *map)
     {
         const char *statusLabel = NetplayStatusLabel(session);
         const char *errorLabel = matchSessionGetConnectionError(session);
-        const char *turnHint = humanControlledTurn ? loc("Your turn") : loc("Waiting for turn");
         if (statusLabel[0] != '\0')
         {
             DrawUiText(statusLabel, panel.x + 16.0f, panel.y + panel.height - 22.0f, 14, (Color){92, 70, 50, 255});
@@ -1700,10 +1697,6 @@ void DrawTurnPanel(const struct Map *map)
         if (errorLabel[0] != '\0')
         {
             DrawUiText(errorLabel, panel.x + 16.0f, panel.y + panel.height - 40.0f, 13, (Color){146, 54, 46, 255});
-        }
-        else if (netplayConnectedAndReady && !gameHasWinner(map))
-        {
-            DrawUiText(turnHint, panel.x + 16.0f, panel.y + panel.height - 40.0f, 14, (Color){92, 70, 50, 255});
         }
     }
     if (gameHasWinner(map))
@@ -1757,7 +1750,13 @@ void DrawTurnPanel(const struct Map *map)
                                map->players[discardPlayer].controlMode == PLAYER_CONTROL_AI;
         const bool revealDiscard = gDiscardRevealPlayer == discardPlayer;
         DrawUiText(loc("Dice"), panel.x + 16.0f, panel.y + 48.0f, 18, (Color){92, 70, 50, 255});
-        DrawUiText("7", panel.x + 178.0f, panel.y + 72.0f, 30, textColor);
+        DrawDie(dieA, uiGetDisplayedDieA(), uiIsDiceRolling() ? -8.0f : -2.0f, 1.0f);
+        DrawDie(dieB, uiGetDisplayedDieB(), uiIsDiceRolling() ? 7.0f : 2.0f, 1.0f);
+        DrawUiText(shownTotal > 0 ? TextFormat("%d", shownTotal) : "-", panel.x + 178.0f, panel.y + 72.0f, 30, textColor);
+        if (uiIsDiceRolling())
+        {
+            DrawUiText(loc("Rolling..."), panel.x + 148.0f, panel.y + 106.0f, 16, (Color){92, 70, 50, 255});
+        }
         DrawUiText(loc("Discard Cards"), panel.x + 16.0f, panel.y + 148.0f, 24, (Color){171, 82, 54, 255});
         if (aiDiscard)
         {
@@ -1780,7 +1779,13 @@ void DrawTurnPanel(const struct Map *map)
         UpdateTurnButtonAnimation(&gRollDiceButtonAnimation, rollDiceButton, false);
         UpdateTurnButtonAnimation(&gEndTurnButtonAnimation, endTurnButton, false);
         DrawUiText(loc("Dice"), panel.x + 16.0f, panel.y + 48.0f, 18, (Color){92, 70, 50, 255});
-        DrawUiText("7", panel.x + 178.0f, panel.y + 72.0f, 30, textColor);
+        DrawDie(dieA, uiGetDisplayedDieA(), uiIsDiceRolling() ? -8.0f : -2.0f, 1.0f);
+        DrawDie(dieB, uiGetDisplayedDieB(), uiIsDiceRolling() ? 7.0f : 2.0f, 1.0f);
+        DrawUiText(shownTotal > 0 ? TextFormat("%d", shownTotal) : "-", panel.x + 178.0f, panel.y + 72.0f, 30, textColor);
+        if (uiIsDiceRolling())
+        {
+            DrawUiText(loc("Rolling..."), panel.x + 148.0f, panel.y + 106.0f, 16, (Color){92, 70, 50, 255});
+        }
         DrawUiText(loc("Move Thief"), panel.x + 16.0f, panel.y + 148.0f, 24, (Color){171, 82, 54, 255});
         DrawUiText(loc("Select a land tile"), panel.x + 16.0f, panel.y + 178.0f, 18, (Color){92, 70, 50, 255});
         DrawUiText(loc("before ending turn"), panel.x + 16.0f, panel.y + 200.0f, 18, (Color){92, 70, 50, 255});
@@ -1794,7 +1799,13 @@ void DrawTurnPanel(const struct Map *map)
         UpdateTurnButtonAnimation(&gRollDiceButtonAnimation, rollDiceButton, false);
         UpdateTurnButtonAnimation(&gEndTurnButtonAnimation, endTurnButton, false);
         DrawUiText(loc("Dice"), panel.x + 16.0f, panel.y + 48.0f, 18, (Color){92, 70, 50, 255});
-        DrawUiText("7", panel.x + 178.0f, panel.y + 72.0f, 30, textColor);
+        DrawDie(dieA, uiGetDisplayedDieA(), uiIsDiceRolling() ? -8.0f : -2.0f, 1.0f);
+        DrawDie(dieB, uiGetDisplayedDieB(), uiIsDiceRolling() ? 7.0f : 2.0f, 1.0f);
+        DrawUiText(shownTotal > 0 ? TextFormat("%d", shownTotal) : "-", panel.x + 178.0f, panel.y + 72.0f, 30, textColor);
+        if (uiIsDiceRolling())
+        {
+            DrawUiText(loc("Rolling..."), panel.x + 148.0f, panel.y + 106.0f, 16, (Color){92, 70, 50, 255});
+        }
         DrawUiText(loc("Steal Resource"), panel.x + 16.0f, panel.y + 148.0f, 24, (Color){171, 82, 54, 255});
         if (map->players[map->currentPlayer].controlMode == PLAYER_CONTROL_AI)
         {
@@ -1917,27 +1928,33 @@ static void UpdateTurnButtonAnimation(struct ButtonAnimationState *state, Rectan
     const bool pressed = hovered && IsMouseButtonDown(MOUSE_BUTTON_LEFT);
     state->hoverAmount = EaseAnimationValue(state->hoverAmount, hovered ? 1.0f : 0.0f, 11.0f);
     state->pressAmount = EaseAnimationValue(state->pressAmount, pressed ? 1.0f : 0.0f, 18.0f);
+    state->activeAmount = EaseAnimationValue(state->activeAmount, interactive ? 1.0f : 0.0f, 8.0f);
 }
 
 static void DrawTurnActionButton(Rectangle bounds, const char *label, int fontSize, Color fillColor, Color borderColor, Color textColor, Color glowColor, const struct ButtonAnimationState *state)
 {
     const float hoverAmount = state->hoverAmount;
     const float pressAmount = state->pressAmount;
-    const float scale = 1.0f + hoverAmount * 0.028f - pressAmount * 0.015f;
-    const float lift = hoverAmount * 3.0f - pressAmount * 1.6f;
+    const float activeAmount = state->activeAmount;
+    const float pulseWave = 0.5f + 0.5f * sinf((float)GetTime() * 5.4f);
+    const float pulseAmount = activeAmount * (0.25f + 0.75f * pulseWave);
+    const float scale = 1.0f + hoverAmount * 0.028f + pulseAmount * 0.024f - pressAmount * 0.015f;
+    const float lift = hoverAmount * 3.0f + pulseAmount * 2.2f - pressAmount * 1.6f;
     const Rectangle body = ScaleRectangleFromCenter((Rectangle){bounds.x, bounds.y - lift, bounds.width, bounds.height}, scale);
     const Rectangle shadow = {body.x + 4.0f, body.y + 6.0f + hoverAmount * 1.4f, body.width, body.height};
-    const Rectangle glow = {body.x - 3.0f, body.y - 3.0f, body.width + 6.0f, body.height + 6.0f};
+    const float glowExpand = 3.0f + 4.0f * pulseAmount;
+    const Rectangle glow = {body.x - glowExpand, body.y - glowExpand, body.width + glowExpand * 2.0f, body.height + glowExpand * 2.0f};
     const int labelWidth = MeasureUiText(label, fontSize);
     const float labelX = body.x + body.width * 0.5f - labelWidth * 0.5f;
     const float labelY = body.y + body.height * 0.5f - (float)fontSize * 0.48f + pressAmount * 1.0f;
 
     DrawRectangleRounded(shadow, 0.22f, 8, Fade(BLACK, 0.10f + hoverAmount * 0.08f - pressAmount * 0.03f));
-    if (hoverAmount > 0.01f || pressAmount > 0.01f) {
-        DrawRectangleRounded(glow, 0.24f, 8, Fade(glowColor, hoverAmount * 0.10f + pressAmount * 0.16f));
+    if (hoverAmount > 0.01f || pressAmount > 0.01f || pulseAmount > 0.01f)
+    {
+        DrawRectangleRounded(glow, 0.24f, 8, Fade(glowColor, hoverAmount * 0.10f + pressAmount * 0.16f + pulseAmount * 0.20f));
     }
-    DrawRectangleRounded(body, 0.18f, 8, ColorBrightness(fillColor, hoverAmount * 0.10f - pressAmount * 0.08f));
-    DrawRectangleLinesEx(body, 2.0f, ColorBrightness(borderColor, hoverAmount * 0.10f));
+    DrawRectangleRounded(body, 0.18f, 8, ColorBrightness(fillColor, hoverAmount * 0.10f + pulseAmount * 0.07f - pressAmount * 0.08f));
+    DrawRectangleLinesEx(body, 2.0f, ColorBrightness(borderColor, hoverAmount * 0.10f + pulseAmount * 0.12f));
     DrawUiText(label, labelX, labelY, fontSize, textColor);
 }
 

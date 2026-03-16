@@ -182,3 +182,63 @@ At the time of the latest update, the suite passes:
 ```text
 11/11 rule tests passed
 ```
+
+## Share Build With Friends (Windows + macOS)
+
+You can package a friend-ready zip that does not require raylib to be installed on the target machine.
+
+### Windows package
+
+Build and package:
+
+```bash
+make
+make package-windows
+```
+
+Or run directly:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/package_windows.ps1 -Version 0.1.0
+```
+
+Output:
+
+- `dist/SoC-<version>-windows-x64.zip`
+- `dist/SoC-<version>-windows-x64.sha256.txt`
+
+### macOS package
+
+Build and package (on macOS):
+
+```bash
+make
+make package-macos
+```
+
+Or run directly:
+
+```bash
+bash scripts/package_macos.sh 0.1.0
+```
+
+Output:
+
+- `dist/SoC-<version>-macos-<arch>.zip`
+- `dist/SoC-<version>-macos-<arch>.sha256.txt`
+
+### What your friend runs
+
+Each zip includes:
+
+- game binary (`settlers.exe` on Windows, `settlers` on macOS)
+- quick-start script for host
+- quick-start script for join
+- `QUICKSTART.txt`
+
+Notes:
+
+- Use host LAN IP for remote machine joins, not `127.0.0.1`.
+- Default port is `24680`.
+- macOS first-run may require removing quarantine:
+  - `xattr -dr com.apple.quarantine <folder>`
