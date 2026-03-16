@@ -106,6 +106,15 @@ if command -v otool >/dev/null 2>&1 && command -v install_name_tool >/dev/null 2
   rm -f "$DEPS_FILE"
 fi
 
+if command -v codesign >/dev/null 2>&1; then
+  if [[ -d "$STAGE_DIR/lib" ]]; then
+    while IFS= read -r -d '' dylib; do
+      codesign --force --sign - "$dylib" || true
+    done < <(find "$STAGE_DIR/lib" -type f -name "*.dylib" -print0)
+  fi
+  codesign --force --deep --sign - "$STAGE_DIR/settlers" || true
+fi
+
 cat > "$STAGE_DIR/run_host.command" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -128,7 +137,9 @@ SoC quick start (macOS)
 
 1) Right click run_host.command and choose Open on one machine.
 2) On the second machine, run_join.command <HOST_LAN_IP>.
-3) If macOS blocks execution, run: xattr -dr com.apple.quarantine <folder>
+3) If macOS blocks execution, run:
+  xattr -dr com.apple.quarantine <folder>
+  chmod +x settlers run_host.command run_join.command
 
 Notes:
 - Use LAN IP, not 127.0.0.1, for remote machines.
