@@ -146,7 +146,7 @@ void DrawMap(const struct Map *map)
     const float recentRollHighlightProgress = uiGetRecentRollHighlightProgress();
     const float uiFadeProgress = uiGetBoardUiFadeProgress();
     const bool boardCreationAnimating = uiIsBoardCreationAnimating();
-    const bool showPlacementPreviews = matchSessionLocalControlsPlayer(matchSessionGetActive(), map->currentPlayer);
+    const bool showPlacementPreviews = matchSessionLocalCanActOnCurrentDecision(matchSessionGetActive());
 
     struct AxialCoord oceanCoords[HEX_CORNERS * 6];
     int oceanCount = 0;

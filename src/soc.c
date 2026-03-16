@@ -411,7 +411,8 @@ static void ConfigurePrivateMatch(struct MatchSession *session,
     }
     else
     {
-        matchSessionConfigurePrivateClient(session, remotePlayer);
+        /* Client seat is authoritative from host hello; avoid guessing via menu color. */
+        matchSessionConfigurePrivateClient(session, PLAYER_NONE);
         matchSessionSetSeatAuthority(session, hostPlayer, MATCH_SEAT_REMOTE);
     }
 
