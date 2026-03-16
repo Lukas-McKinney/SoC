@@ -4,6 +4,7 @@
 #include "localization.h"
 #include "renderer.h"
 #include "ui_state.h"
+#include "netplay.h"
 
 #include <math.h>
 #include <stddef.h>
@@ -62,6 +63,43 @@ static void BuildVictorySubheadline(const struct Map *map, enum PlayerType winne
 static void FormatElapsedDuration(unsigned long long totalSeconds, char *buffer, size_t bufferSize);
 static void DrawTurnPanelPlaytime(const struct Map *map, Rectangle panel, Color color);
 static const char *NetplayStatusLabel(const struct MatchSession *session);
+static const char *MaskIpForSettings(const char *ipAddress, char *buffer, size_t bufferSize);
+
+static const char *MaskIpForSettings(const char *ipAddress, char *buffer, size_t bufferSize)
+{
+    const char *lastDot = NULL;
+    size_t prefixLength = 0u;
+
+    if (buffer == NULL || bufferSize == 0u)
+    {
+        return "***.***.***.***";
+    }
+
+    if (ipAddress == NULL || ipAddress[0] == '\0')
+    {
+        snprintf(buffer, bufferSize, "%s", "***.***.***.***");
+        return buffer;
+    }
+
+    lastDot = strrchr(ipAddress, '.');
+    if (lastDot == NULL)
+    {
+        snprintf(buffer, bufferSize, "%s", "***.***.***.***");
+        return buffer;
+    }
+
+    prefixLength = (size_t)(lastDot - ipAddress);
+    if (prefixLength + 5u >= bufferSize)
+    {
+        snprintf(buffer, bufferSize, "%s", "***.***.***.***");
+        return buffer;
+    }
+
+    memcpy(buffer, ipAddress, prefixLength);
+    buffer[prefixLength] = '\0';
+    strncat(buffer, ".***", bufferSize - strlen(buffer) - 1u);
+    return buffer;
+}
 
 static int BuildWrappedUiLines(const char *message, int fontSize, int maxWidth, char lines[][96], int maxLines)
 {
@@ -399,7 +437,22 @@ void DrawSettingsModal(void)
     const int aiSpeed = uiGetAiSpeedSetting();
     const float aiSpeedNormalized = (float)aiSpeed / 10.0f;
     const float aiSpeedKnobX = aiSpeedTrack.x + aiSpeedTrack.width * aiSpeedNormalized;
+    const struct MatchSession *session = matchSessionGetActive();
+    const Vector2 mouse = GetMousePosition();
+    const char *localIp = "";
+    char maskedIp[32];
+    char ipLine[96];
+    char portLine[64];
+    const Rectangle multiplayerIpHoverRow = {panel.x + 24.0f, multiplayerInfoButton.y + 68.0f, panel.width - 48.0f, 20.0f};
+    const bool revealLocalIp = CheckCollisionPointRec(mouse, multiplayerIpHoverRow);
     char languageButtonLabel[64];
+
+    if (session != NULL && session->netplay != NULL)
+    {
+        localIp = netplayGetLocalAddress(session->netplay);
+    }
+    snprintf(ipLine, sizeof(ipLine), "%s: %s", loc("Your IP"), revealLocalIp ? (localIp[0] != '\0' ? localIp : "-") : MaskIpForSettings(localIp, maskedIp, sizeof(maskedIp)));
+    snprintf(portLine, sizeof(portLine), "%s: %u", loc("Port"), (unsigned int)((session != NULL && session->netplay != NULL) ? netplayGetPort(session->netplay) : 0u));
 
     snprintf(languageButtonLabel, sizeof(languageButtonLabel), "%s: %s", loc("Language"), locLanguageDisplayName(locGetLanguage()));
 
@@ -448,8 +501,8 @@ void DrawSettingsModal(void)
     if (showMultiplayerInfo)
     {
         DrawUiText(loc("Host waits for one remote player."), panel.x + 26.0f, multiplayerInfoButton.y + 52.0f, 16, mutedText);
-        DrawUiText(loc("Client follows host-authoritative state."), panel.x + 26.0f, multiplayerInfoButton.y + 74.0f, 16, mutedText);
-        DrawUiText(loc("Trade offers support accept and decline."), panel.x + 26.0f, multiplayerInfoButton.y + 96.0f, 16, mutedText);
+        DrawUiText(ipLine, panel.x + 26.0f, multiplayerInfoButton.y + 74.0f, 16, mutedText);
+        DrawUiText(portLine, panel.x + 26.0f, multiplayerInfoButton.y + 96.0f, 16, mutedText);
     }
 
     DrawUiText(loc("Game"), panel.x + 22.0f, gameSectionY, 18, mutedText);

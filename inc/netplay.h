@@ -98,6 +98,7 @@ enum NetplayConnectionState netplayGetConnectionState(const struct NetplayState 
 bool netplayIsConnected(const struct NetplayState *state);
 const char *netplayGetLastError(const struct NetplayState *state);
 const char *netplayGetPeerAddress(const struct NetplayState *state);
+const char *netplayGetLocalAddress(const struct NetplayState *state);
 unsigned short netplayGetPort(const struct NetplayState *state);
 
 #endif

@@ -131,6 +131,7 @@ struct NetplayState
     NetSocket peerSocket;
     unsigned short port;
     char peerAddress[NETPLAY_MAX_PEER_ADDRESS + 1];
+    char localAddress[NETPLAY_MAX_PEER_ADDRESS + 1];
     char lastError[NETPLAY_MAX_STATUS_TEXT];
     unsigned char recvBuffer[NETPLAY_RECV_BUFFER_SIZE];
     size_t recvLength;
@@ -148,6 +149,7 @@ static bool gSocketLayerReady = false;
 
 static bool net_socket_layer_init(void);
 static bool is_loopback_host(const char *hostAddress);
+static void detect_local_ipv4_address(char *buffer, size_t bufferSize);
 static void clear_last_error(struct NetplayState *state);
 static void set_last_error(struct NetplayState *state, const char *message);
 static bool set_socket_nonblocking(NetSocket socketHandle);
@@ -235,6 +237,54 @@ static bool is_loopback_host(const char *hostAddress)
     return strcmp(hostAddress, "127.0.0.1") == 0 ||
            strcmp(hostAddress, "localhost") == 0 ||
            strcmp(hostAddress, "::1") == 0;
+}
+
+static void detect_local_ipv4_address(char *buffer, size_t bufferSize)
+{
+    struct addrinfo hints;
+    struct addrinfo *results = NULL;
+    struct addrinfo *current = NULL;
+    char hostName[256];
+
+    if (buffer == NULL || bufferSize == 0u)
+    {
+        return;
+    }
+
+    snprintf(buffer, bufferSize, "%s", "127.0.0.1");
+    if (gethostname(hostName, (int)sizeof(hostName)) != 0)
+    {
+        return;
+    }
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(hostName, NULL, &hints, &results) != 0 || results == NULL)
+    {
+        return;
+    }
+
+    for (current = results; current != NULL; current = current->ai_next)
+    {
+        const struct sockaddr_in *ipv4 = (const struct sockaddr_in *)current->ai_addr;
+        const char *addressText = inet_ntoa(ipv4->sin_addr);
+
+        if (addressText == NULL)
+        {
+            continue;
+        }
+
+        if (strncmp(addressText, "127.", 4) == 0)
+        {
+            continue;
+        }
+
+        snprintf(buffer, bufferSize, "%s", addressText);
+        break;
+    }
+
+    freeaddrinfo(results);
 }
 
 static void clear_last_error(struct NetplayState *state)
@@ -836,6 +886,7 @@ bool netplayStartHost(struct NetplayState *state, unsigned short port)
     state->eventCount = 0;
     state->mode = NETPLAY_MODE_HOST;
     state->port = port;
+    detect_local_ipv4_address(state->localAddress, sizeof(state->localAddress));
     state->listenSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (state->listenSocket == NET_INVALID_SOCKET)
     {
@@ -890,6 +941,7 @@ bool netplayStartClient(struct NetplayState *state, const char *hostAddress, uns
     state->eventCount = 0;
     state->mode = NETPLAY_MODE_CLIENT;
     state->port = port;
+    detect_local_ipv4_address(state->localAddress, sizeof(state->localAddress));
     snprintf(state->peerAddress, sizeof(state->peerAddress), "%s", hostAddress);
     snprintf(portText, sizeof(portText), "%hu", port);
     memset(&hints, 0, sizeof(hints));
@@ -1131,6 +1183,11 @@ const char *netplayGetLastError(const struct NetplayState *state)
 const char *netplayGetPeerAddress(const struct NetplayState *state)
 {
     return state == NULL ? "" : state->peerAddress;
+}
+
+const char *netplayGetLocalAddress(const struct NetplayState *state)
+{
+    return state == NULL ? "" : state->localAddress;
 }
 
 unsigned short netplayGetPort(const struct NetplayState *state)
