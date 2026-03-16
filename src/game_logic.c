@@ -318,7 +318,7 @@ void gameMoveThief(struct Map *map, int tileId)
            map->awaitingThiefVictimSelection ? 1 : 0);
 }
 
-bool gameStealRandomResource(struct Map *map, enum PlayerType victim)
+bool gameStealRandomResourceDetailed(struct Map *map, enum PlayerType victim, enum ResourceType *stolenResourceOut)
 {
   if (!gameCanStealFromPlayer(map, victim))
   {
@@ -348,7 +348,16 @@ bool gameStealRandomResource(struct Map *map, enum PlayerType victim)
            map->currentPlayer,
            victim,
            stolenResource);
+  if (stolenResourceOut != NULL)
+  {
+    *stolenResourceOut = (enum ResourceType)stolenResource;
+  }
   return true;
+}
+
+bool gameStealRandomResource(struct Map *map, enum PlayerType victim)
+{
+  return gameStealRandomResourceDetailed(map, victim, NULL);
 }
 
 void gameEndTurn(struct Map *map)

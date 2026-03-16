@@ -1,5 +1,6 @@
 #include "ui_state.h"
 #include "debug_log.h"
+#include "game_action.h"
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -7,6 +8,7 @@
 #include <raylib.h>
 #include "game_logic.h"
 #include "localization.h"
+#include "match_session.h"
 
 #define PLAYER_NOTIFICATION_SLOTS 8
 #define PLAYER_NOTIFICATION_TEXT_CAPACITY 96
@@ -28,6 +30,7 @@ static bool gPlayerTradeMenuOpen = false;
 static float gPlayerTradeMenuOpenAmount = 0.0f;
 static bool gSettingsMenuOpen = false;
 static float gSettingsMenuOpenAmount = 0.0f;
+static bool gSettingsMultiplayerInfoExpanded = false;
 static enum UiSettingsConfirmAction gSettingsConfirmAction = UI_SETTINGS_CONFIRM_NONE;
 static bool gBuildPanelOpen = false;
 static float gBuildPanelOpenAmount = 0.0f;
@@ -133,6 +136,7 @@ static void reset_ui_state(bool resetTheme)
     gPlayerTradeMenuOpenAmount = 0.0f;
     gSettingsMenuOpen = false;
     gSettingsMenuOpenAmount = 0.0f;
+    gSettingsMultiplayerInfoExpanded = false;
     gSettingsConfirmAction = UI_SETTINGS_CONFIRM_NONE;
     gBuildPanelOpen = false;
     gBuildPanelOpenAmount = 0.0f;
@@ -506,6 +510,7 @@ void uiToggleSettingsMenu(void)
     gSettingsMenuOpen = !gSettingsMenuOpen;
     if (!gSettingsMenuOpen)
     {
+        gSettingsMultiplayerInfoExpanded = false;
         gSettingsConfirmAction = UI_SETTINGS_CONFIRM_NONE;
     }
 }
@@ -515,6 +520,7 @@ void uiSetSettingsMenuOpen(bool open)
     gSettingsMenuOpen = open;
     if (!open)
     {
+        gSettingsMultiplayerInfoExpanded = false;
         gSettingsConfirmAction = UI_SETTINGS_CONFIRM_NONE;
     }
 }
@@ -527,6 +533,21 @@ bool uiIsSettingsMenuOpen(void)
 float uiGetSettingsMenuOpenAmount(void)
 {
     return gSettingsMenuOpenAmount;
+}
+
+void uiToggleSettingsMultiplayerInfoExpanded(void)
+{
+    gSettingsMultiplayerInfoExpanded = !gSettingsMultiplayerInfoExpanded;
+}
+
+void uiSetSettingsMultiplayerInfoExpanded(bool expanded)
+{
+    gSettingsMultiplayerInfoExpanded = expanded;
+}
+
+bool uiIsSettingsMultiplayerInfoExpanded(void)
+{
+    return gSettingsMultiplayerInfoExpanded;
 }
 
 void uiSetTheme(enum UiTheme theme)
@@ -1111,7 +1132,24 @@ static void update_dice_animation(struct Map *map)
         gRecentRollHighlightValue = resolvedRoll;
         gRecentRollHighlightStartTime = now;
         debugLog("UI", "dice animation resolve total=%d", resolvedRoll);
-        gameRollDice(map, resolvedRoll);
+        if (!(matchSessionGetActiveMutable() != NULL && &matchSessionGetActiveMutable()->map == map
+                  ? matchSessionSubmitAction(matchSessionGetActiveMutable(),
+                                             &(struct GameAction){
+                                                 .type = GAME_ACTION_ROLL_DICE,
+                                                 .diceRoll = resolvedRoll},
+                                             NULL,
+                                             NULL)
+                  : gameApplyAction(map,
+                                    &(struct GameAction){
+                                        .type = GAME_ACTION_ROLL_DICE,
+                                        .diceRoll = resolvedRoll},
+                                    NULL,
+                                    NULL)))
+        {
+            debugLog("UI", "dice animation apply failed total=%d sessionHash=%u",
+                     resolvedRoll,
+                     matchSessionGetActive() != NULL ? matchSessionGetStateHash(matchSessionGetActive()) : 0u);
+        }
         debugLog("UI", "dice animation resolved total=%d elapsed=%.3f pendingDiscards=%d thiefPlacement=%d thiefVictim=%d",
                  resolvedRoll,
                  GetTime() - rollResolveStarted,

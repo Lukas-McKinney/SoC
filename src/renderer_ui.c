@@ -61,6 +61,7 @@ static void BuildVictoryHeadline(const struct Map *map, enum PlayerType winner, 
 static void BuildVictorySubheadline(const struct Map *map, enum PlayerType winner, char *buffer, size_t bufferSize);
 static void FormatElapsedDuration(unsigned long long totalSeconds, char *buffer, size_t bufferSize);
 static void DrawTurnPanelPlaytime(const struct Map *map, Rectangle panel, Color color);
+static const char *NetplayStatusLabel(const struct MatchSession *session);
 
 static int BuildWrappedUiLines(const char *message, int fontSize, int maxWidth, char lines[][96], int maxLines)
 {
@@ -231,6 +232,33 @@ static void DrawTurnPanelPlaytime(const struct Map *map, Rectangle panel, Color 
     DrawUiText(label, panel.x + panel.width - 16.0f - width, panel.y + 18.0f, fontSize, color);
 }
 
+static const char *NetplayStatusLabel(const struct MatchSession *session)
+{
+    if (session == NULL || !matchSessionIsNetplay(session))
+    {
+        return "";
+    }
+
+    switch (matchSessionGetConnectionStatus(session))
+    {
+    case MATCH_CONNECTION_WAITING_FOR_PLAYER:
+        return loc("Waiting for remote player...");
+    case MATCH_CONNECTION_CONNECTING:
+        return loc("Connecting to host...");
+    case MATCH_CONNECTION_SYNCING:
+        return loc("Syncing match state...");
+    case MATCH_CONNECTION_CONNECTED:
+        return loc("Private multiplayer connected");
+    case MATCH_CONNECTION_DISCONNECTED:
+        return loc("Disconnected from remote player");
+    case MATCH_CONNECTION_ERROR:
+        return loc("Private multiplayer error");
+    case MATCH_CONNECTION_LOCAL:
+    default:
+        return "";
+    }
+}
+
 void DrawBuildPanel(const struct Map *map)
 {
     const Rectangle panel = GetBuildPanelBounds();
@@ -350,10 +378,14 @@ void DrawSettingsModal(void)
     const Rectangle darkButton = {panel.x + 24.0f, panel.y + 136.0f, panel.width - 48.0f, 42.0f};
     const Rectangle languageButton = {panel.x + 24.0f, panel.y + 222.0f, panel.width - 48.0f, 42.0f};
     const Rectangle aiSpeedTrack = {panel.x + 36.0f, panel.y + 318.0f, panel.width - 72.0f, 10.0f};
-    const Rectangle restartButton = {panel.x + 24.0f, panel.y + 390.0f, panel.width - 48.0f, 42.0f};
-    const Rectangle backToMenuButton = {panel.x + 24.0f, panel.y + 444.0f, panel.width - 48.0f, 42.0f};
-    const Rectangle quitButton = {panel.x + 24.0f, panel.y + 498.0f, panel.width - 48.0f, 42.0f};
-    const Rectangle confirmPanel = {panel.x + 26.0f, panel.y + 372.0f, panel.width - 52.0f, 140.0f};
+    const bool showMultiplayerInfo = uiIsSettingsMultiplayerInfoExpanded();
+    const Rectangle multiplayerInfoButton = {panel.x + 24.0f, panel.y + 376.0f, panel.width - 48.0f, 42.0f};
+    const float multiplayerInfoExtra = showMultiplayerInfo ? 62.0f : 0.0f;
+    const float gameSectionY = panel.y + 422.0f + multiplayerInfoExtra;
+    const Rectangle restartButton = {panel.x + 24.0f, gameSectionY + 24.0f, panel.width - 48.0f, 42.0f};
+    const Rectangle backToMenuButton = {panel.x + 24.0f, gameSectionY + 78.0f, panel.width - 48.0f, 42.0f};
+    const Rectangle quitButton = {panel.x + 24.0f, gameSectionY + 132.0f, panel.width - 48.0f, 42.0f};
+    const Rectangle confirmPanel = {panel.x + 26.0f, restartButton.y - 18.0f, panel.width - 52.0f, 140.0f};
     const Rectangle confirmButton = {confirmPanel.x + 18.0f, confirmPanel.y + confirmPanel.height - 46.0f, 132.0f, 30.0f};
     const Rectangle cancelButton = {confirmPanel.x + confirmPanel.width - 110.0f, confirmPanel.y + confirmPanel.height - 46.0f, 92.0f, 30.0f};
     const Color panelColor = (Color){244, 236, 217, 250};
@@ -408,7 +440,19 @@ void DrawSettingsModal(void)
     DrawCircleLines((int)aiSpeedKnobX, (int)(aiSpeedTrack.y + aiSpeedTrack.height * 0.5f), 9.0f, borderColor);
     DrawUiText(TextFormat("%d", aiSpeed), panel.x + panel.width * 0.5f - 5.0f, aiSpeedTrack.y - 24.0f, 18, textColor);
 
-    DrawUiText(loc("Game"), panel.x + 22.0f, panel.y + 360.0f, 18, mutedText);
+    DrawUiText(loc("Multiplayer"), panel.x + 22.0f, panel.y + 352.0f, 18, mutedText);
+    DrawRectangleRounded(multiplayerInfoButton, 0.18f, 8, showMultiplayerInfo ? (Color){171, 82, 54, 255} : (Color){236, 228, 208, 255});
+    DrawRectangleLinesEx(multiplayerInfoButton, 2.0f, showMultiplayerInfo ? borderColor : (Color){154, 132, 108, 255});
+    DrawUiText(showMultiplayerInfo ? loc("Hide Multiplayer Info") : loc("Show Multiplayer Info"), multiplayerInfoButton.x + 18.0f, multiplayerInfoButton.y + 10.0f, 20, showMultiplayerInfo ? RAYWHITE : textColor);
+
+    if (showMultiplayerInfo)
+    {
+        DrawUiText(loc("Host waits for one remote player."), panel.x + 26.0f, multiplayerInfoButton.y + 52.0f, 16, mutedText);
+        DrawUiText(loc("Client follows host-authoritative state."), panel.x + 26.0f, multiplayerInfoButton.y + 74.0f, 16, mutedText);
+        DrawUiText(loc("Trade offers support accept and decline."), panel.x + 26.0f, multiplayerInfoButton.y + 96.0f, 16, mutedText);
+    }
+
+    DrawUiText(loc("Game"), panel.x + 22.0f, gameSectionY, 18, mutedText);
 
     DrawRectangleRounded(restartButton, 0.18f, 8, (Color){236, 228, 208, 255});
     DrawRectangleLinesEx(restartButton, 2.0f, (Color){154, 132, 108, 255});
@@ -688,6 +732,70 @@ void DrawPlayerTradeModal(const struct Map *map)
     }
 }
 
+void DrawIncomingTradeOfferModal(const struct Map *map)
+{
+    struct GameAction offer;
+    const struct MatchSession *session = matchSessionGetActive();
+    const Vector2 mouse = GetMousePosition();
+    const Rectangle panel = GetIncomingTradeOfferModalBounds();
+    const Rectangle acceptButton = GetIncomingTradeOfferAcceptButtonBounds();
+    const Rectangle declineButton = GetIncomingTradeOfferDeclineButtonBounds();
+    const Color borderColor = (Color){118, 88, 56, 255};
+    const bool acceptHovered = CheckCollisionPointRec(mouse, acceptButton);
+    const bool declineHovered = CheckCollisionPointRec(mouse, declineButton);
+    const bool acceptPressed = acceptHovered && IsMouseButtonDown(MOUSE_BUTTON_LEFT);
+    const bool declinePressed = declineHovered && IsMouseButtonDown(MOUSE_BUTTON_LEFT);
+    const float acceptYOffset = acceptPressed ? 2.0f : (acceptHovered ? -2.0f : 0.0f);
+    const float declineYOffset = declinePressed ? 2.0f : (declineHovered ? -2.0f : 0.0f);
+    const Rectangle acceptBody = {acceptButton.x, acceptButton.y + acceptYOffset, acceptButton.width, acceptButton.height};
+    const Rectangle declineBody = {declineButton.x, declineButton.y + declineYOffset, declineButton.width, declineButton.height};
+    const Color acceptFill = acceptHovered ? ColorBrightness((Color){84, 146, 82, 255}, 0.08f) : (Color){84, 146, 82, 255};
+    const Color acceptBorder = acceptHovered ? ColorBrightness((Color){60, 108, 58, 255}, 0.08f) : (Color){60, 108, 58, 255};
+    const Color declineFill = declineHovered ? ColorBrightness((Color){222, 212, 193, 255}, 0.06f) : (Color){222, 212, 193, 255};
+    const Color declineBorder = declineHovered ? ColorBrightness(borderColor, 0.10f) : borderColor;
+    const Color panelColor = (Color){244, 236, 217, 252};
+    const Color textColor = (Color){54, 39, 29, 255};
+    const Color mutedText = (Color){92, 70, 50, 255};
+    const int titleWidth = MeasureUiText(loc("Incoming Trade Offer"), 28);
+
+    if (map == NULL || session == NULL ||
+        !matchSessionHasPendingTradeOfferForLocalResponse(session) ||
+        !matchSessionGetPendingTradeOffer(session, &offer))
+    {
+        return;
+    }
+
+    DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, 0.34f));
+    DrawRectangleRounded((Rectangle){panel.x + 8.0f, panel.y + 10.0f, panel.width, panel.height}, 0.08f, 8, Fade(BLACK, 0.14f));
+    DrawRectangleRounded(panel, 0.08f, 8, panelColor);
+    DrawRectangleLinesEx(panel, 2.0f, borderColor);
+
+    DrawUiText(loc("Incoming Trade Offer"), panel.x + panel.width * 0.5f - titleWidth * 0.5f, panel.y + 20.0f, 28, textColor);
+    DrawUiText(TextFormat(loc("From %s"), PlayerName(map->currentPlayer)), panel.x + 24.0f, panel.y + 66.0f, 18, mutedText);
+
+    DrawUiText(loc("You Receive"), panel.x + 24.0f, panel.y + 104.0f, 18, mutedText);
+    DrawRectangleRounded((Rectangle){panel.x + 24.0f, panel.y + 130.0f, panel.width - 48.0f, 36.0f}, 0.16f, 6, (Color){236, 228, 208, 255});
+    DrawRectangleLinesEx((Rectangle){panel.x + 24.0f, panel.y + 130.0f, panel.width - 48.0f, 36.0f}, 1.5f, (Color){154, 132, 108, 255});
+    DrawUiText(TextFormat("%d %s", offer.amountA, ResourceName(offer.resourceA)), panel.x + 36.0f, panel.y + 138.0f, 20, textColor);
+
+    DrawUiText(loc("You Give"), panel.x + 24.0f, panel.y + 182.0f, 18, mutedText);
+    DrawRectangleRounded((Rectangle){panel.x + 24.0f, panel.y + 208.0f, panel.width - 48.0f, 36.0f}, 0.16f, 6, (Color){236, 228, 208, 255});
+    DrawRectangleLinesEx((Rectangle){panel.x + 24.0f, panel.y + 208.0f, panel.width - 48.0f, 36.0f}, 1.5f, (Color){154, 132, 108, 255});
+    DrawUiText(TextFormat("%d %s", offer.amountB, ResourceName(offer.resourceB)), panel.x + 36.0f, panel.y + 216.0f, 20, textColor);
+
+    DrawUiText(loc("Accept or decline this offer."), panel.x + 24.0f, panel.y + 260.0f, 17, mutedText);
+
+    DrawRectangleRounded((Rectangle){acceptBody.x + 4.0f, acceptBody.y + 6.0f, acceptBody.width, acceptBody.height}, 0.20f, 8, Fade(BLACK, 0.10f));
+    DrawRectangleRounded(acceptBody, 0.20f, 8, acceptFill);
+    DrawRectangleLinesEx(acceptBody, 2.0f, acceptBorder);
+    DrawUiText(loc("Accept"), acceptBody.x + acceptBody.width * 0.5f - MeasureUiText(loc("Accept"), 20) * 0.5f, acceptBody.y + 10.0f, 20, RAYWHITE);
+
+    DrawRectangleRounded((Rectangle){declineBody.x + 4.0f, declineBody.y + 6.0f, declineBody.width, declineBody.height}, 0.20f, 8, Fade(BLACK, 0.10f));
+    DrawRectangleRounded(declineBody, 0.20f, 8, declineFill);
+    DrawRectangleLinesEx(declineBody, 2.0f, declineBorder);
+    DrawUiText(loc("Decline"), declineBody.x + declineBody.width * 0.5f - MeasureUiText(loc("Decline"), 20) * 0.5f, declineBody.y + 10.0f, 20, textColor);
+}
+
 void DrawDiscardModal(const struct Map *map)
 {
     const Rectangle panel = GetDiscardModalBounds();
@@ -901,7 +1009,16 @@ void DrawPlayerPanel(const struct Map *map)
         DrawUiText(deckCountLabel, deckCountX + 0.8f, panelY + 108.0f, 14, deckCountColor);
     }
 
-    DrawUiText(loc("Resources"), panelX + 16.0f, panelY + 126.0f, 18, buttonText);
+    {
+        int totalResources = 0;
+        const char *resourcesLabel = NULL;
+        for (int resource = 0; resource < 5; resource++)
+        {
+            totalResources += player->resources[resource];
+        }
+        resourcesLabel = TextFormat("%s (%d)", loc("Resources"), totalResources);
+        DrawUiText(resourcesLabel, panelX + 16.0f, panelY + 126.0f, 18, buttonText);
+    }
     for (int resource = 0; resource < 5; resource++)
     {
         const float rowY = panelY + 148.0f + resource * 14.0f;
@@ -1493,14 +1610,13 @@ void DrawTurnPanel(const struct Map *map)
     const Rectangle panel = GetTurnPanelBounds();
     const Rectangle rollDiceButton = GetRollDiceButtonBounds();
     const Rectangle endTurnButton = GetEndTurnButtonBounds();
+    const struct MatchSession *session = matchSessionGetActive();
     const Color panelColor = (Color){244, 236, 217, 245};
     const Color borderColor = (Color){118, 88, 56, 255};
     const Color actionColor = (Color){171, 82, 54, 255};
     const Color mutedButton = (Color){214, 202, 181, 255};
     const Color textColor = (Color){54, 39, 29, 255};
-    const bool humanControlledTurn = map->currentPlayer >= PLAYER_RED &&
-                                     map->currentPlayer <= PLAYER_BLACK &&
-                                     map->players[map->currentPlayer].controlMode == PLAYER_CONTROL_HUMAN;
+    const bool humanControlledTurn = matchSessionLocalControlsPlayer(session, map->currentPlayer);
     const bool canEndTurn = gameCanEndTurn(map);
     const bool diceLocked = map->rolledThisTurn || uiIsDiceRolling();
     const bool rollButtonInteractive = humanControlledTurn && !diceLocked;
@@ -1508,13 +1624,27 @@ void DrawTurnPanel(const struct Map *map)
     const Rectangle dieA = {panel.x + 20.0f, panel.y + 76.0f, 54.0f, 54.0f};
     const Rectangle dieB = {panel.x + 84.0f, panel.y + 76.0f, 54.0f, 54.0f};
     const int shownTotal = uiIsDiceRolling() ? (uiGetDisplayedDieA() + uiGetDisplayedDieB()) : map->lastDiceRoll;
+    const char *activePlayerLabel = TextFormat("%s: %s", loc("Current Player"), PlayerName(map->currentPlayer));
 
     DrawRectangleRounded((Rectangle){panel.x + 6.0f, panel.y + 8.0f, panel.width, panel.height}, 0.08f, 8, Fade(BLACK, 0.10f));
     DrawRectangleRounded(panel, 0.08f, 8, panelColor);
     DrawRectangleLinesEx(panel, 2.0f, borderColor);
 
     DrawUiText(loc("Turn"), panel.x + 16.0f, panel.y + 14.0f, 24, textColor);
+    DrawUiText(activePlayerLabel, panel.x + 84.0f, panel.y + 20.0f, 14, (Color){92, 70, 50, 255});
     DrawTurnPanelPlaytime(map, panel, (Color){92, 70, 50, 255});
+    if (matchSessionIsNetplay(session) && !gameHasWinner(map))
+    {
+        DrawUiText(humanControlledTurn ? loc("Your turn") : loc("Waiting for turn"), panel.x + 16.0f, panel.y + 40.0f, 15, (Color){92, 70, 50, 255});
+    }
+    if (matchSessionIsNetplay(session))
+    {
+        const char *statusLabel = NetplayStatusLabel(session);
+        if (statusLabel[0] != '\0')
+        {
+            DrawUiText(statusLabel, panel.x + 16.0f, panel.y + panel.height - 22.0f, 14, (Color){92, 70, 50, 255});
+        }
+    }
     if (gameHasWinner(map))
     {
         const enum PlayerType winner = gameGetWinner(map);
@@ -1793,7 +1923,7 @@ Rectangle GetTradeModalBounds(void)
 Rectangle GetSettingsModalBounds(void)
 {
     const float panelWidth = 320.0f;
-    const float panelHeight = 566.0f;
+    const float panelHeight = 690.0f;
     return (Rectangle){(float)GetScreenWidth() * 0.5f - panelWidth * 0.5f, (float)GetScreenHeight() * 0.5f - panelHeight * 0.5f, panelWidth, panelHeight};
 }
 
@@ -1802,6 +1932,25 @@ Rectangle GetPlayerTradeModalBounds(void)
     const float panelWidth = 440.0f;
     const float panelHeight = 430.0f;
     return (Rectangle){(float)GetScreenWidth() * 0.5f - panelWidth * 0.5f, (float)GetScreenHeight() * 0.5f - panelHeight * 0.5f, panelWidth, panelHeight};
+}
+
+Rectangle GetIncomingTradeOfferModalBounds(void)
+{
+    const float panelWidth = 430.0f;
+    const float panelHeight = 372.0f;
+    return (Rectangle){(float)GetScreenWidth() * 0.5f - panelWidth * 0.5f, (float)GetScreenHeight() * 0.5f - panelHeight * 0.5f, panelWidth, panelHeight};
+}
+
+Rectangle GetIncomingTradeOfferAcceptButtonBounds(void)
+{
+    const Rectangle panel = GetIncomingTradeOfferModalBounds();
+    return (Rectangle){panel.x + 24.0f, panel.y + panel.height - 58.0f, panel.width * 0.5f - 30.0f, 40.0f};
+}
+
+Rectangle GetIncomingTradeOfferDeclineButtonBounds(void)
+{
+    const Rectangle panel = GetIncomingTradeOfferModalBounds();
+    return (Rectangle){panel.x + panel.width * 0.5f + 6.0f, panel.y + panel.height - 58.0f, panel.width * 0.5f - 30.0f, 40.0f};
 }
 
 Rectangle GetDiscardModalBounds(void)
@@ -2001,6 +2150,7 @@ static const struct PlayerState *CurrentPlayerState(const struct Map *map)
 
 static enum PlayerType LocalHumanPlayer(const struct Map *map)
 {
+    const struct MatchSession *session = matchSessionGetActive();
     enum PlayerType humanPlayer = PLAYER_NONE;
     int humanCount = 0;
     int aiCount = 0;
@@ -2008,6 +2158,11 @@ static enum PlayerType LocalHumanPlayer(const struct Map *map)
     if (map == NULL)
     {
         return PLAYER_NONE;
+    }
+
+    if (session != NULL && session->localPlayer >= PLAYER_RED && session->localPlayer <= PLAYER_BLACK)
+    {
+        return session->localPlayer;
     }
 
     for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)

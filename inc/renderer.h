@@ -1,7 +1,7 @@
 #ifndef RENDERER_H
 #define RENDERER_H
 
-#include "map.h"
+#include "match_session.h"
 #include <raylib.h>
 
 /* Loads textures, fonts, and render targets used by the renderer subsystem. */
@@ -11,7 +11,7 @@ void LoadRendererAssets(void);
 void UnloadRendererAssets(void);
 
 /* Processes board, build, trade, and modal input for the current frame. */
-void HandleMapInput(struct Map *map);
+void HandleMapInput(struct MatchSession *session);
 
 /* Draws the board, pieces, overlays, and the game HUD for the current frame. */
 void DrawMap(const struct Map *map);

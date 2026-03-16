@@ -1,7 +1,8 @@
 #ifndef RESOURCE_H
 #define RESOURCE_H
 
-enum ResourceType {
+enum ResourceType
+{
     RESOURCE_WOOD,
     RESOURCE_WHEAT,
     RESOURCE_CLAY,
@@ -9,7 +10,8 @@ enum ResourceType {
     RESOURCE_STONE
 };
 
-struct Resource {
+struct Resource
+{
     enum ResourceType type;
 };
 

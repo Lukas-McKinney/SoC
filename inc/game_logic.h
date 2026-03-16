@@ -18,6 +18,7 @@ bool gameNeedsThiefPlacement(const struct Map *map);
 bool gameCanMoveThiefToTile(const struct Map *map, int tileId);
 bool gameNeedsThiefVictimSelection(const struct Map *map);
 bool gameCanStealFromPlayer(const struct Map *map, enum PlayerType victim);
+bool gameStealRandomResourceDetailed(struct Map *map, enum PlayerType victim, enum ResourceType *stolenResource);
 void gameRollDice(struct Map *map, int diceRoll);
 void gameMoveThief(struct Map *map, int tileId);
 bool gameStealRandomResource(struct Map *map, enum PlayerType victim);

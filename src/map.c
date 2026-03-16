@@ -1,5 +1,6 @@
 #include "map.h"
 #include <stdlib.h>
+#include <string.h>
 
 static int random_int(int min, int max);
 static void createRandomizedDevelopmentDeck(enum DevelopmentCardType deck[DEVELOPMENT_DECK_SIZE]);
@@ -78,6 +79,12 @@ void createRandomizedDiceNumbers(int diceNumbers[MAX_TILES])
 
 bool setupMap(struct Map *map)
 {
+  if (map == NULL)
+  {
+    return false;
+  }
+
+  memset(map, 0, sizeof(*map));
   // Create Array to be filled
   enum TileType shuffledTypes[MAX_TILES];
   // Shuffle Array

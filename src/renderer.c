@@ -1,7 +1,9 @@
 #include "ai_controller.h"
 #include "board_rules.h"
+#include "game_action.h"
 #include "game_logic.h"
 #include "localization.h"
+#include "match_session.h"
 #include "renderer.h"
 #include "renderer_internal.h"
 #include "renderer_ui.h"
@@ -183,6 +185,7 @@ static void NormalizePlayerTradeSelection(const struct Map *map)
 
 static enum PlayerType LocalHumanPlayer(const struct Map *map)
 {
+    const struct MatchSession *session = matchSessionGetActive();
     enum PlayerType humanPlayer = PLAYER_NONE;
     int humanCount = 0;
     int aiCount = 0;
@@ -190,6 +193,11 @@ static enum PlayerType LocalHumanPlayer(const struct Map *map)
     if (map == NULL)
     {
         return PLAYER_NONE;
+    }
+
+    if (session != NULL && session->localPlayer >= PLAYER_RED && session->localPlayer <= PLAYER_BLACK)
+    {
+        return session->localPlayer;
     }
 
     for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
@@ -255,8 +263,10 @@ static bool CanOpenDevelopmentPlayOverlay(const struct Map *map, enum Developmen
     return true;
 }
 
-void HandleMapInput(struct Map *map)
+void HandleMapInput(struct MatchSession *session)
 {
+    struct Map *map = session != NULL ? &session->map : NULL;
+
     if (!gAssetsLoaded || map == NULL)
     {
         return;
@@ -305,7 +315,7 @@ void HandleMapInput(struct Map *map)
     const Rectangle tradeModal = GetTradeModalBounds();
     const Rectangle playerTradeModal = GetPlayerTradeModalBounds();
     const Rectangle settingsButton = GetSettingsButtonBounds();
-    const Rectangle settingsModal = GetSettingsModalBounds();
+    const Rectangle settingsModalTarget = GetSettingsModalBounds();
     const Rectangle discardModal = GetDiscardModalBounds();
     const Rectangle thiefVictimModal = GetThiefVictimModalBounds();
     const Rectangle victoryOverlay = GetVictoryOverlayBounds();
@@ -318,15 +328,46 @@ void HandleMapInput(struct Map *map)
     const bool needsThiefVictimSelection = gameNeedsThiefVictimSelection(map);
     const bool hasWinner = gameHasWinner(map);
     const bool aiControlledDecision = aiControlsActiveDecision(map);
-    const bool humanControlledTurn = map->currentPlayer >= PLAYER_RED &&
-                                     map->currentPlayer <= PLAYER_BLACK &&
-                                     map->players[map->currentPlayer].controlMode == PLAYER_CONTROL_HUMAN;
+    const bool localControlledDecision = matchSessionLocalCanActOnCurrentDecision(session);
+    const bool humanControlledTurn = matchSessionLocalControlsPlayer(session, map->currentPlayer);
     const bool canBuyRoad = setupRoadMode || gameCanAffordRoad(map);
     const bool canBuySettlement = setupSettlementMode || gameCanAffordSettlement(map);
     const bool canBuyCity = map->phase == GAME_PHASE_PLAY && gameCanAffordCity(map);
     const bool canBuyDevelopment = gameCanBuyDevelopment(map);
     const bool hasFreeRoadPlacements = gameHasFreeRoadPlacements(map);
+    const bool hasPendingIncomingTradeOffer = matchSessionHasPendingTradeOfferForLocalResponse(session);
     const Vector2 boardOrigin = origin;
+    const struct GameActionContext actionContext = {boardOrigin, radius};
+
+    if (hasPendingIncomingTradeOffer)
+    {
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+        {
+            const Rectangle offerModal = GetIncomingTradeOfferModalBounds();
+            const Rectangle acceptButton = GetIncomingTradeOfferAcceptButtonBounds();
+            const Rectangle declineButton = GetIncomingTradeOfferDeclineButtonBounds();
+
+            if (!CheckCollisionPointRec(mouse, offerModal) || CheckCollisionPointRec(mouse, declineButton))
+            {
+                if (matchSessionRespondToPendingTradeOffer(session, false))
+                {
+                    uiShowCenteredStatus(loc("Trade declined."), UI_NOTIFICATION_NEGATIVE);
+                }
+                return;
+            }
+
+            if (CheckCollisionPointRec(mouse, acceptButton))
+            {
+                if (matchSessionRespondToPendingTradeOffer(session, true))
+                {
+                    uiShowCenteredStatus(loc("Trade accepted."), UI_NOTIFICATION_POSITIVE);
+                }
+                return;
+            }
+        }
+
+        return;
+    }
 
     if (!hasPendingDiscards)
     {
@@ -346,12 +387,14 @@ void HandleMapInput(struct Map *map)
     {
         const enum PlayerType discardPlayer = gameGetCurrentDiscardPlayer(map);
         const enum PlayerType localHuman = LocalHumanPlayer(map);
+        const bool localControlsDiscard = matchSessionLocalControlsPlayer(session, discardPlayer);
         const int discardRequired = gameGetDiscardAmountForPlayer(map, discardPlayer);
         int discardSelected = 0;
         if (gDiscardSelectionPlayer != discardPlayer)
         {
             gDiscardSelectionPlayer = discardPlayer;
             gDiscardRevealPlayer = map->players[discardPlayer].controlMode == PLAYER_CONTROL_AI ||
+                                           !localControlsDiscard ||
                                            (discardPlayer != map->currentPlayer && discardPlayer != localHuman)
                                        ? PLAYER_NONE
                                        : discardPlayer;
@@ -363,6 +406,12 @@ void HandleMapInput(struct Map *map)
 
         if (map->players[discardPlayer].controlMode == PLAYER_CONTROL_AI)
         {
+            return;
+        }
+
+        if (!localControlsDiscard)
+        {
+            gDiscardRevealPlayer = PLAYER_NONE;
             return;
         }
 
@@ -403,7 +452,13 @@ void HandleMapInput(struct Map *map)
             Rectangle confirmButton = {discardModal.x + 38.0f, discardModal.y + discardModal.height - 52.0f, discardModal.width - 76.0f, 36.0f};
             if (CheckCollisionPointRec(mouse, confirmButton) &&
                 discardSelected == discardRequired &&
-                gameTrySubmitDiscard(map, discardPlayer, gDiscardSelection))
+                matchSessionSubmitAction(session,
+                                         &(struct GameAction){
+                                             .type = GAME_ACTION_SUBMIT_DISCARD,
+                                             .player = discardPlayer,
+                                             .resources = {gDiscardSelection[0], gDiscardSelection[1], gDiscardSelection[2], gDiscardSelection[3], gDiscardSelection[4]}},
+                                         &actionContext,
+                                         NULL))
             {
                 gDiscardSelectionPlayer = PLAYER_NONE;
                 gDiscardRevealPlayer = PLAYER_NONE;
@@ -419,7 +474,8 @@ void HandleMapInput(struct Map *map)
 
     if (needsThiefVictimSelection)
     {
-        if (map->players[map->currentPlayer].controlMode == PLAYER_CONTROL_AI)
+        if (map->players[map->currentPlayer].controlMode == PLAYER_CONTROL_AI ||
+            !matchSessionLocalControlsPlayer(session, map->currentPlayer))
         {
             gThiefVictimRevealPlayer = PLAYER_NONE;
             return;
@@ -443,7 +499,12 @@ void HandleMapInput(struct Map *map)
 
                 Rectangle victimButton = {thiefVictimModal.x + 26.0f + victimIndex * 118.0f, thiefVictimModal.y + 102.0f, 102.0f, 42.0f};
                 if (CheckCollisionPointRec(mouse, victimButton) &&
-                    gameStealRandomResource(map, victim))
+                    matchSessionSubmitAction(session,
+                                             &(struct GameAction){
+                                                 .type = GAME_ACTION_STEAL_RANDOM_RESOURCE,
+                                                 .player = victim},
+                                             &actionContext,
+                                             NULL))
                 {
                     gThiefVictimRevealPlayer = PLAYER_NONE;
                     return;
@@ -454,17 +515,29 @@ void HandleMapInput(struct Map *map)
         return;
     }
 
-    if (!hasWinner && uiGetSettingsMenuOpenAmount() > 0.98f)
+    if (!hasWinner && uiGetSettingsMenuOpenAmount() > 0.90f)
     {
+        const float openAmount = uiGetSettingsMenuOpenAmount();
+        const float eased = openAmount * openAmount * (3.0f - 2.0f * openAmount);
+        const float scale = 0.9f + 0.1f * eased;
+        const Rectangle settingsModal = {
+            settingsModalTarget.x + settingsModalTarget.width * (1.0f - scale) * 0.5f,
+            settingsModalTarget.y + settingsModalTarget.height * (1.0f - scale) * 0.5f,
+            settingsModalTarget.width * scale,
+            settingsModalTarget.height * scale};
         const enum UiSettingsConfirmAction confirmAction = uiGetSettingsConfirmAction();
+        const bool showMultiplayerInfo = uiIsSettingsMultiplayerInfoExpanded();
         Rectangle lightButton = {settingsModal.x + 24.0f, settingsModal.y + 82.0f, settingsModal.width - 48.0f, 42.0f};
         Rectangle darkButton = {settingsModal.x + 24.0f, settingsModal.y + 136.0f, settingsModal.width - 48.0f, 42.0f};
         Rectangle languageButton = {settingsModal.x + 24.0f, settingsModal.y + 222.0f, settingsModal.width - 48.0f, 42.0f};
         Rectangle aiSpeedSlider = {settingsModal.x + 28.0f, settingsModal.y + 306.0f, settingsModal.width - 56.0f, 36.0f};
-        Rectangle restartButton = {settingsModal.x + 24.0f, settingsModal.y + 390.0f, settingsModal.width - 48.0f, 42.0f};
-        Rectangle backToMenuButton = {settingsModal.x + 24.0f, settingsModal.y + 444.0f, settingsModal.width - 48.0f, 42.0f};
-        Rectangle quitButton = {settingsModal.x + 24.0f, settingsModal.y + 498.0f, settingsModal.width - 48.0f, 42.0f};
-        Rectangle confirmPanel = {settingsModal.x + 26.0f, settingsModal.y + 372.0f, settingsModal.width - 52.0f, 140.0f};
+        Rectangle multiplayerInfoButton = {settingsModal.x + 24.0f, settingsModal.y + 376.0f, settingsModal.width - 48.0f, 42.0f};
+        const float multiplayerInfoExtra = showMultiplayerInfo ? 62.0f : 0.0f;
+        const float gameSectionY = settingsModal.y + 422.0f + multiplayerInfoExtra;
+        Rectangle restartButton = {settingsModal.x + 24.0f, gameSectionY + 24.0f, settingsModal.width - 48.0f, 42.0f};
+        Rectangle backToMenuButton = {settingsModal.x + 24.0f, gameSectionY + 78.0f, settingsModal.width - 48.0f, 42.0f};
+        Rectangle quitButton = {settingsModal.x + 24.0f, gameSectionY + 132.0f, settingsModal.width - 48.0f, 42.0f};
+        Rectangle confirmPanel = {settingsModal.x + 26.0f, restartButton.y - 18.0f, settingsModal.width - 52.0f, 140.0f};
         Rectangle confirmButton = {confirmPanel.x + 18.0f, confirmPanel.y + confirmPanel.height - 46.0f, 132.0f, 30.0f};
         Rectangle cancelButton = {confirmPanel.x + confirmPanel.width - 110.0f, confirmPanel.y + confirmPanel.height - 46.0f, 92.0f, 30.0f};
         Rectangle closeButton = {settingsModal.x + settingsModal.width - 42.0f, settingsModal.y + 12.0f, 28.0f, 28.0f};
@@ -535,6 +608,11 @@ void HandleMapInput(struct Map *map)
             settingsStoreSaveCurrent();
             return;
         }
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, multiplayerInfoButton))
+        {
+            uiToggleSettingsMultiplayerInfoExpanded();
+            return;
+        }
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, restartButton))
         {
             uiSetSettingsConfirmAction(UI_SETTINGS_CONFIRM_RESTART);
@@ -561,12 +639,15 @@ void HandleMapInput(struct Map *map)
     {
         if (CheckCollisionPointRec(mouse, developmentPurchaseConfirmButton) && canBuyDevelopment)
         {
-            enum DevelopmentCardType drawnCard;
+            struct GameActionResult actionResult;
             uiSetDevelopmentPurchaseConfirmOpen(false);
-            if (gameTryBuyDevelopment(map, &drawnCard))
+            if (matchSessionSubmitAction(session,
+                                         &(struct GameAction){.type = GAME_ACTION_BUY_DEVELOPMENT},
+                                         &actionContext,
+                                         &actionResult))
             {
-                uiStartDevelopmentCardDrawAnimation(drawnCard);
-                if (gameCheckVictory(map, map->currentPlayer))
+                uiStartDevelopmentCardDrawAnimation(actionResult.drawnCard);
+                if (gameHasWinner(map))
                 {
                     uiSetBuildPanelOpen(false);
                     uiSetTradeMenuOpen(false);
@@ -636,41 +717,49 @@ void HandleMapInput(struct Map *map)
             CanOpenDevelopmentPlayOverlay(map, type, boardOrigin, radius))
         {
             bool played = false;
+            struct GameAction action = {.type = GAME_ACTION_NONE};
             uiSetDevelopmentPlayConfirmOpen(false);
             if (type == DEVELOPMENT_CARD_KNIGHT)
             {
-                played = gameTryPlayKnight(map);
-                if (played && gameCheckVictory(map, map->currentPlayer))
-                {
-                    uiSetBuildPanelOpen(false);
-                    uiSetTradeMenuOpen(false);
-                    uiSetPlayerTradeMenuOpen(false);
-                }
+                action.type = GAME_ACTION_PLAY_KNIGHT;
             }
             else if (type == DEVELOPMENT_CARD_ROAD_BUILDING)
             {
-                played = gameTryPlayRoadBuilding(map);
-                if (played)
-                {
-                    gBuildMode = BUILD_MODE_ROAD;
-                    uiSetBuildPanelOpen(true);
-                    if (!HasAnyValidRoadPlacement(map, boardOrigin, radius))
-                    {
-                        gBuildMode = BUILD_MODE_NONE;
-                    }
-                }
+                action.type = GAME_ACTION_PLAY_ROAD_BUILDING;
             }
             else if (type == DEVELOPMENT_CARD_YEAR_OF_PLENTY)
             {
-                played = gameTryPlayYearOfPlenty(map, gDevelopmentPlayPrimaryResource, gDevelopmentPlaySecondaryResource);
+                action.type = GAME_ACTION_PLAY_YEAR_OF_PLENTY;
+                action.resourceA = gDevelopmentPlayPrimaryResource;
+                action.resourceB = gDevelopmentPlaySecondaryResource;
             }
             else if (type == DEVELOPMENT_CARD_MONOPOLY)
             {
-                played = gameTryPlayMonopoly(map, gDevelopmentPlayPrimaryResource);
+                action.type = GAME_ACTION_PLAY_MONOPOLY;
+                action.resourceA = gDevelopmentPlayPrimaryResource;
+            }
+
+            if (action.type != GAME_ACTION_NONE)
+            {
+                played = matchSessionSubmitAction(session, &action, &actionContext, NULL);
+            }
+
+            if (played && type == DEVELOPMENT_CARD_ROAD_BUILDING)
+            {
+                gBuildMode = BUILD_MODE_ROAD;
+                uiSetBuildPanelOpen(true);
+                if (!HasAnyValidRoadPlacement(map, boardOrigin, radius))
+                {
+                    gBuildMode = BUILD_MODE_NONE;
+                }
             }
 
             if (played)
             {
+                if (gameHasWinner(map))
+                {
+                    uiSetBuildPanelOpen(false);
+                }
                 uiSetDevelopmentPurchaseConfirmOpen(false);
                 uiSetTradeMenuOpen(false);
                 uiSetPlayerTradeMenuOpen(false);
@@ -748,7 +837,7 @@ void HandleMapInput(struct Map *map)
         return;
     }
 
-    if (aiControlledDecision)
+    if (aiControlledDecision || !localControlledDecision)
     {
         gBuildMode = BUILD_MODE_NONE;
         gHoveredTileId = -1;
@@ -838,7 +927,17 @@ void HandleMapInput(struct Map *map)
         IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
         CheckCollisionPointRec(mouse, rollDiceButton))
     {
-        uiStartDiceRollAnimation();
+        if (matchSessionShouldAnimateLocalRoll(session))
+        {
+            uiStartDiceRollAnimation();
+        }
+        else
+        {
+            matchSessionSubmitAction(session,
+                                     &(struct GameAction){.type = GAME_ACTION_ROLL_DICE},
+                                     &actionContext,
+                                     NULL);
+        }
         return;
     }
 
@@ -847,12 +946,17 @@ void HandleMapInput(struct Map *map)
         IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
         CheckCollisionPointRec(mouse, endTurnButton))
     {
-        gameEndTurn(map);
-        gBuildMode = BUILD_MODE_NONE;
-        gHoveredTileId = -1;
-        gHoveredSideIndex = -1;
-        gHoveredCornerTileId = -1;
-        gHoveredCornerIndex = -1;
+        if (matchSessionSubmitAction(session,
+                                     &(struct GameAction){.type = GAME_ACTION_END_TURN},
+                                     &actionContext,
+                                     NULL))
+        {
+            gBuildMode = BUILD_MODE_NONE;
+            gHoveredTileId = -1;
+            gHoveredSideIndex = -1;
+            gHoveredCornerTileId = -1;
+            gHoveredCornerIndex = -1;
+        }
         return;
     }
 
@@ -949,7 +1053,14 @@ void HandleMapInput(struct Map *map)
 
         Rectangle confirmButton = {tradeModal.x + 26.0f, tradeModal.y + tradeModal.height - 48.0f, 388.0f, 34.0f};
         if (CheckCollisionPointRec(mouse, confirmButton) &&
-            gameTryTradeMaritime(map, (enum ResourceType)gTradeGiveResource, gTradeAmount, (enum ResourceType)gTradeReceiveResource))
+            matchSessionSubmitAction(session,
+                                     &(struct GameAction){
+                                         .type = GAME_ACTION_TRADE_MARITIME,
+                                         .resourceA = (enum ResourceType)gTradeGiveResource,
+                                         .resourceB = (enum ResourceType)gTradeReceiveResource,
+                                         .amountA = gTradeAmount},
+                                     &actionContext,
+                                     NULL))
         {
             uiSetTradeMenuOpen(false);
             return;
@@ -1045,7 +1156,16 @@ void HandleMapInput(struct Map *map)
             if (targetIsAi)
             {
                 if (aiShouldAcceptPlayerTradeOffer(map, gPlayerTradeTarget, give, gPlayerTradeGiveAmount, receive, gPlayerTradeReceiveAmount) &&
-                    gameTryTradeWithPlayer(map, gPlayerTradeTarget, give, gPlayerTradeGiveAmount, receive, gPlayerTradeReceiveAmount))
+                    matchSessionSubmitAction(session,
+                                             &(struct GameAction){
+                                                 .type = GAME_ACTION_TRADE_WITH_PLAYER,
+                                                 .player = gPlayerTradeTarget,
+                                                 .resourceA = give,
+                                                 .resourceB = receive,
+                                                 .amountA = gPlayerTradeGiveAmount,
+                                                 .amountB = gPlayerTradeReceiveAmount},
+                                             &actionContext,
+                                             NULL))
                 {
                     uiShowCenteredStatus(TextFormat(loc("%s accepts your trade."), PlayerNameLabel(gPlayerTradeTarget)), UI_NOTIFICATION_POSITIVE);
                 }
@@ -1057,7 +1177,16 @@ void HandleMapInput(struct Map *map)
                 return;
             }
 
-            if (gameTryTradeWithPlayer(map, gPlayerTradeTarget, give, gPlayerTradeGiveAmount, receive, gPlayerTradeReceiveAmount))
+            if (matchSessionSubmitAction(session,
+                                         &(struct GameAction){
+                                             .type = GAME_ACTION_TRADE_WITH_PLAYER,
+                                             .player = gPlayerTradeTarget,
+                                             .resourceA = give,
+                                             .resourceB = receive,
+                                             .amountA = gPlayerTradeGiveAmount,
+                                             .amountB = gPlayerTradeReceiveAmount},
+                                         &actionContext,
+                                         NULL))
             {
                 uiSetPlayerTradeMenuOpen(false);
                 return;
@@ -1094,8 +1223,15 @@ void HandleMapInput(struct Map *map)
 
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && gHoveredTileId >= 0)
         {
-            gameMoveThief(map, gHoveredTileId);
-            gHoveredTileId = -1;
+            if (matchSessionSubmitAction(session,
+                                         &(struct GameAction){
+                                             .type = GAME_ACTION_MOVE_THIEF,
+                                             .tileId = gHoveredTileId},
+                                         &actionContext,
+                                         NULL))
+            {
+                gHoveredTileId = -1;
+            }
         }
         return;
     }
@@ -1159,46 +1295,47 @@ void HandleMapInput(struct Map *map)
         boardIsValidRoadPlacement(map, gHoveredTileId, gHoveredSideIndex, map->currentPlayer, boardOrigin, radius) &&
         (!setupRoadMode || boardEdgeTouchesCorner(gHoveredTileId, gHoveredSideIndex, map->setupSettlementTileId, map->setupSettlementCornerIndex, boardOrigin, radius)))
     {
-        if (!setupRoadMode && !hasFreeRoadPlacements && !gameTryBuyRoad(map))
+        if (matchSessionSubmitAction(session,
+                                     &(struct GameAction){
+                                         .type = GAME_ACTION_PLACE_ROAD,
+                                         .tileId = gHoveredTileId,
+                                         .sideIndex = gHoveredSideIndex},
+                                     &actionContext,
+                                     NULL))
         {
-            return;
-        }
-        PlaceRoadOnSharedEdge(map, gHoveredTileId, gHoveredSideIndex, map->currentPlayer);
-        gameRefreshAwards(map);
-        gHoveredTileId = -1;
-        gHoveredSideIndex = -1;
+            gHoveredTileId = -1;
+            gHoveredSideIndex = -1;
 
-        if (setupRoadMode)
-        {
-            gameHandlePlacedRoad(map);
-            gBuildMode = map->phase == GAME_PHASE_PLAY ? BUILD_MODE_NONE : BUILD_MODE_SETTLEMENT;
-        }
-        else if (hasFreeRoadPlacements)
-        {
-            gameConsumeFreeRoadPlacement(map);
-            if (gameCheckVictory(map, map->currentPlayer))
+            if (setupRoadMode)
             {
-                uiSetBuildPanelOpen(false);
-                uiSetTradeMenuOpen(false);
-                uiSetPlayerTradeMenuOpen(false);
-                gBuildMode = BUILD_MODE_NONE;
+                gBuildMode = map->phase == GAME_PHASE_PLAY ? BUILD_MODE_NONE : BUILD_MODE_SETTLEMENT;
+            }
+            else if (hasFreeRoadPlacements)
+            {
+                if (gameHasWinner(map))
+                {
+                    uiSetBuildPanelOpen(false);
+                    uiSetTradeMenuOpen(false);
+                    uiSetPlayerTradeMenuOpen(false);
+                    gBuildMode = BUILD_MODE_NONE;
+                }
+                else
+                {
+                    gBuildMode = gameHasFreeRoadPlacements(map) && HasAnyValidRoadPlacement(map, boardOrigin, radius)
+                                     ? BUILD_MODE_ROAD
+                                     : BUILD_MODE_NONE;
+                }
             }
             else
             {
-                gBuildMode = gameHasFreeRoadPlacements(map) && HasAnyValidRoadPlacement(map, boardOrigin, radius)
-                                 ? BUILD_MODE_ROAD
-                                 : BUILD_MODE_NONE;
+                if (gameHasWinner(map))
+                {
+                    uiSetBuildPanelOpen(false);
+                    uiSetTradeMenuOpen(false);
+                    uiSetPlayerTradeMenuOpen(false);
+                }
+                gBuildMode = BUILD_MODE_NONE;
             }
-        }
-        else
-        {
-            if (gameCheckVictory(map, map->currentPlayer))
-            {
-                uiSetBuildPanelOpen(false);
-                uiSetTradeMenuOpen(false);
-                uiSetPlayerTradeMenuOpen(false);
-            }
-            gBuildMode = BUILD_MODE_NONE;
         }
     }
 
@@ -1209,29 +1346,31 @@ void HandleMapInput(struct Map *map)
         (setupSettlementMode || gameCanAffordSettlement(map)) &&
         boardIsValidSettlementPlacement(map, gHoveredCornerTileId, gHoveredCornerIndex, map->currentPlayer, boardOrigin, radius))
     {
-        if (!setupSettlementMode && !gameTryBuySettlement(map))
+        if (matchSessionSubmitAction(session,
+                                     &(struct GameAction){
+                                         .type = GAME_ACTION_PLACE_SETTLEMENT,
+                                         .tileId = gHoveredCornerTileId,
+                                         .cornerIndex = gHoveredCornerIndex},
+                                     &actionContext,
+                                     NULL))
         {
-            return;
-        }
-        PlaceSettlementOnSharedCorner(map, gHoveredCornerTileId, gHoveredCornerIndex, map->currentPlayer, STRUCTURE_TOWN);
-        gameRefreshAwards(map);
-        if (setupSettlementMode)
-        {
-            gameHandlePlacedSettlement(map, gHoveredCornerTileId, gHoveredCornerIndex);
-            gBuildMode = BUILD_MODE_ROAD;
-        }
-        else
-        {
-            if (gameCheckVictory(map, map->currentPlayer))
+            if (setupSettlementMode)
             {
-                uiSetBuildPanelOpen(false);
-                uiSetTradeMenuOpen(false);
-                uiSetPlayerTradeMenuOpen(false);
+                gBuildMode = BUILD_MODE_ROAD;
             }
-            gBuildMode = BUILD_MODE_NONE;
+            else
+            {
+                if (gameHasWinner(map))
+                {
+                    uiSetBuildPanelOpen(false);
+                    uiSetTradeMenuOpen(false);
+                    uiSetPlayerTradeMenuOpen(false);
+                }
+                gBuildMode = BUILD_MODE_NONE;
+            }
+            gHoveredCornerTileId = -1;
+            gHoveredCornerIndex = -1;
         }
-        gHoveredCornerTileId = -1;
-        gHoveredCornerIndex = -1;
     }
 
     if (gBuildMode == BUILD_MODE_CITY &&
@@ -1240,21 +1379,24 @@ void HandleMapInput(struct Map *map)
         gHoveredCornerIndex >= 0 &&
         boardIsValidCityPlacement(map, gHoveredCornerTileId, gHoveredCornerIndex, map->currentPlayer))
     {
-        if (!gameTryBuyCity(map))
+        if (matchSessionSubmitAction(session,
+                                     &(struct GameAction){
+                                         .type = GAME_ACTION_PLACE_CITY,
+                                         .tileId = gHoveredCornerTileId,
+                                         .cornerIndex = gHoveredCornerIndex},
+                                     &actionContext,
+                                     NULL))
         {
-            return;
+            if (gameHasWinner(map))
+            {
+                uiSetBuildPanelOpen(false);
+                uiSetTradeMenuOpen(false);
+                uiSetPlayerTradeMenuOpen(false);
+            }
+            gBuildMode = BUILD_MODE_NONE;
+            gHoveredCornerTileId = -1;
+            gHoveredCornerIndex = -1;
         }
-        PlaceSettlementOnSharedCorner(map, gHoveredCornerTileId, gHoveredCornerIndex, map->currentPlayer, STRUCTURE_CITY);
-        gameRefreshAwards(map);
-        if (gameCheckVictory(map, map->currentPlayer))
-        {
-            uiSetBuildPanelOpen(false);
-            uiSetTradeMenuOpen(false);
-            uiSetPlayerTradeMenuOpen(false);
-        }
-        gBuildMode = BUILD_MODE_NONE;
-        gHoveredCornerTileId = -1;
-        gHoveredCornerIndex = -1;
     }
 }
 

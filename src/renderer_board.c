@@ -1,5 +1,6 @@
 #include "board_rules.h"
 #include "game_logic.h"
+#include "match_session.h"
 #include "renderer_internal.h"
 #include "renderer_tiles.h"
 #include "ui_state.h"
@@ -145,9 +146,7 @@ void DrawMap(const struct Map *map)
     const float recentRollHighlightProgress = uiGetRecentRollHighlightProgress();
     const float uiFadeProgress = uiGetBoardUiFadeProgress();
     const bool boardCreationAnimating = uiIsBoardCreationAnimating();
-    const bool showPlacementPreviews = map->currentPlayer >= PLAYER_RED &&
-                                       map->currentPlayer <= PLAYER_BLACK &&
-                                       map->players[map->currentPlayer].controlMode == PLAYER_CONTROL_HUMAN;
+    const bool showPlacementPreviews = matchSessionLocalControlsPlayer(matchSessionGetActive(), map->currentPlayer);
 
     struct AxialCoord oceanCoords[HEX_CORNERS * 6];
     int oceanCount = 0;
@@ -435,6 +434,10 @@ static void DrawMapUiLayer(const struct Map *map)
         if (uiGetPlayerTradeMenuOpenAmount() > 0.01f)
         {
             DrawPlayerTradeModal(map);
+        }
+        if (matchSessionHasPendingTradeOfferForLocalResponse(matchSessionGetActive()))
+        {
+            DrawIncomingTradeOfferModal(map);
         }
         if (gameHasPendingDiscards(map))
         {

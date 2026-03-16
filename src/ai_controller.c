@@ -2,6 +2,7 @@
 
 #include "board_rules.h"
 #include "debug_log.h"
+#include "game_action.h"
 #include "game_logic.h"
 #include "localization.h"
 #include "renderer_internal.h"
@@ -104,7 +105,7 @@ static void schedule_next_ai_action(const struct Map *map, enum AiDifficulty dif
 static void reset_ai_turn_state(void);
 static void prepare_ui_for_ai_turn(void);
 static bool ai_is_blocked_by_ui(void);
-static bool finalize_ai_victory(struct Map *map);
+static bool ai_action_to_game_action(const struct AiAction *action, struct GameAction *gameAction);
 
 static int min_int(int a, int b);
 static int max_int(int a, int b);
@@ -443,10 +444,20 @@ void aiUpdateTurn(struct Map *map)
     if (gameCanEndTurn(map))
     {
         debugLog("AI", "end turn player=%d", map->currentPlayer);
-        gameEndTurn(map);
-        gTrackedDecisionPlayer = active_decision_player(map);
-        gTrackedTurnPlayer = map->currentPlayer;
-        reset_ai_turn_state();
+        if ((matchSessionGetActiveMutable() != NULL && &matchSessionGetActiveMutable()->map == map)
+                ? matchSessionSubmitAction(matchSessionGetActiveMutable(),
+                                           &(struct GameAction){.type = GAME_ACTION_END_TURN},
+                                           NULL,
+                                           NULL)
+                : gameApplyAction(map,
+                                  &(struct GameAction){.type = GAME_ACTION_END_TURN},
+                                  NULL,
+                                  NULL))
+        {
+            gTrackedDecisionPlayer = active_decision_player(map);
+            gTrackedTurnPlayer = map->currentPlayer;
+            reset_ai_turn_state();
+        }
     }
 }
 
@@ -694,15 +705,68 @@ static bool ai_is_blocked_by_ui(void)
            uiIsDevelopmentPlayConfirmOpen();
 }
 
-static bool finalize_ai_victory(struct Map *map)
+static bool ai_action_to_game_action(const struct AiAction *action, struct GameAction *gameAction)
 {
-    if (!gameCheckVictory(map, map->currentPlayer))
+    if (action == NULL || gameAction == NULL)
     {
         return false;
     }
 
-    prepare_ui_for_ai_turn();
-    return true;
+    memset(gameAction, 0, sizeof(*gameAction));
+    gameAction->type = GAME_ACTION_NONE;
+    gameAction->tileId = action->tileId;
+    gameAction->cornerIndex = action->cornerIndex;
+    gameAction->sideIndex = action->sideIndex;
+    gameAction->player = action->player;
+    gameAction->resourceA = action->resourceA;
+    gameAction->resourceB = action->resourceB;
+    gameAction->amountA = 1;
+    memcpy(gameAction->resources, action->discardPlan, sizeof(gameAction->resources));
+
+    switch (action->type)
+    {
+    case AI_ACTION_BUILD_SETTLEMENT:
+    case AI_ACTION_SETUP_SETTLEMENT:
+        gameAction->type = GAME_ACTION_PLACE_SETTLEMENT;
+        return true;
+    case AI_ACTION_BUILD_CITY:
+        gameAction->type = GAME_ACTION_PLACE_CITY;
+        return true;
+    case AI_ACTION_BUILD_ROAD:
+    case AI_ACTION_SETUP_ROAD:
+        gameAction->type = GAME_ACTION_PLACE_ROAD;
+        return true;
+    case AI_ACTION_BUY_DEVELOPMENT:
+        gameAction->type = GAME_ACTION_BUY_DEVELOPMENT;
+        return true;
+    case AI_ACTION_PLAY_KNIGHT:
+        gameAction->type = GAME_ACTION_PLAY_KNIGHT;
+        return true;
+    case AI_ACTION_PLAY_ROAD_BUILDING:
+        gameAction->type = GAME_ACTION_PLAY_ROAD_BUILDING;
+        return true;
+    case AI_ACTION_PLAY_YEAR_OF_PLENTY:
+        gameAction->type = GAME_ACTION_PLAY_YEAR_OF_PLENTY;
+        return true;
+    case AI_ACTION_PLAY_MONOPOLY:
+        gameAction->type = GAME_ACTION_PLAY_MONOPOLY;
+        return true;
+    case AI_ACTION_MARITIME_TRADE:
+        gameAction->type = GAME_ACTION_TRADE_MARITIME;
+        return true;
+    case AI_ACTION_MOVE_THIEF:
+        gameAction->type = GAME_ACTION_MOVE_THIEF;
+        return true;
+    case AI_ACTION_CHOOSE_THIEF_VICTIM:
+        gameAction->type = GAME_ACTION_STEAL_RANDOM_RESOURCE;
+        return true;
+    case AI_ACTION_DISCARD:
+        gameAction->type = GAME_ACTION_SUBMIT_DISCARD;
+        return true;
+    case AI_ACTION_NONE:
+    default:
+        return false;
+    }
 }
 
 static int min_int(int a, int b)
@@ -1382,8 +1446,19 @@ static bool handle_ai_roll(struct Map *map)
                  dieA,
                  dieB,
                  dieA + dieB);
-        gameRollDice(map, dieA + dieB);
-        return true;
+        return (matchSessionGetActiveMutable() != NULL && &matchSessionGetActiveMutable()->map == map)
+                   ? matchSessionSubmitAction(matchSessionGetActiveMutable(),
+                                              &(struct GameAction){
+                                                  .type = GAME_ACTION_ROLL_DICE,
+                                                  .diceRoll = dieA + dieB},
+                                              NULL,
+                                              NULL)
+                   : gameApplyAction(map,
+                                     &(struct GameAction){
+                                         .type = GAME_ACTION_ROLL_DICE,
+                                         .diceRoll = dieA + dieB},
+                                     NULL,
+                                     NULL);
     }
 
     debugLog("AI", "roll animation start player=%d", player);
@@ -2150,8 +2225,10 @@ static bool find_best_play_phase_action(const struct Map *map, enum AiDifficulty
 
 static bool execute_ai_action(struct Map *map, const struct AiAction *action)
 {
-    Vector2 origin = {(float)GetScreenWidth() * BOARD_ORIGIN_X_FACTOR, (float)GetScreenHeight() * BOARD_ORIGIN_Y_FACTOR};
     const double started = GetTime();
+    struct GameAction gameAction;
+    struct GameActionResult result;
+    bool success;
 
     if (map == NULL || action == NULL)
     {
@@ -2160,173 +2237,29 @@ static bool execute_ai_action(struct Map *map, const struct AiAction *action)
 
     log_ai_action("action execute start", map, action);
 
-    switch (action->type)
+    if (!ai_action_to_game_action(action, &gameAction))
     {
-    case AI_ACTION_BUILD_SETTLEMENT:
-        if (!IsCanonicalSharedCorner(action->tileId, action->cornerIndex) ||
-            !boardIsValidSettlementPlacement(map, action->tileId, action->cornerIndex, map->currentPlayer, origin, BOARD_HEX_RADIUS) ||
-            !gameTryBuySettlement(map))
-        {
-            debugLog("AI", "action execute end type=%s success=0 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
-            return false;
-        }
-        PlaceSettlementOnSharedCorner(map, action->tileId, action->cornerIndex, map->currentPlayer, STRUCTURE_TOWN);
-        gameRefreshAwards(map);
-        finalize_ai_victory(map);
-        debugLog("AI", "action execute end type=%s success=1 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
-        return true;
-
-    case AI_ACTION_BUILD_CITY:
-        if (!IsCanonicalSharedCorner(action->tileId, action->cornerIndex) ||
-            !boardIsValidCityPlacement(map, action->tileId, action->cornerIndex, map->currentPlayer) ||
-            !gameTryBuyCity(map))
-        {
-            debugLog("AI", "action execute end type=%s success=0 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
-            return false;
-        }
-        PlaceSettlementOnSharedCorner(map, action->tileId, action->cornerIndex, map->currentPlayer, STRUCTURE_CITY);
-        gameRefreshAwards(map);
-        finalize_ai_victory(map);
-        debugLog("AI", "action execute end type=%s success=1 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
-        return true;
-
-    case AI_ACTION_BUILD_ROAD:
-        if (!IsCanonicalSharedEdge(action->tileId, action->sideIndex) ||
-            IsSharedEdgeOccupied(map, action->tileId, action->sideIndex) ||
-            !boardIsValidRoadPlacement(map, action->tileId, action->sideIndex, map->currentPlayer, origin, BOARD_HEX_RADIUS))
-        {
-            debugLog("AI", "action execute end type=%s success=0 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
-            return false;
-        }
-
-        if (!gameHasFreeRoadPlacements(map) && !gameTryBuyRoad(map))
-        {
-            debugLog("AI", "action execute end type=%s success=0 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
-            return false;
-        }
-
-        PlaceRoadOnSharedEdge(map, action->tileId, action->sideIndex, map->currentPlayer);
-        gameRefreshAwards(map);
-        if (gameHasFreeRoadPlacements(map))
-        {
-            gameConsumeFreeRoadPlacement(map);
-        }
-        finalize_ai_victory(map);
-        debugLog("AI", "action execute end type=%s success=1 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
-        return true;
-
-    case AI_ACTION_BUY_DEVELOPMENT:
-    {
-        enum DevelopmentCardType drawnCard = DEVELOPMENT_CARD_KNIGHT;
-        if (!gameTryBuyDevelopment(map, &drawnCard))
-        {
-            debugLog("AI", "action execute end type=%s success=0 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
-            return false;
-        }
-        if (uiGetAiSpeedSetting() < 10)
-        {
-            uiStartDevelopmentCardDrawAnimation(drawnCard);
-        }
-        finalize_ai_victory(map);
-        debugLog("AI", "action execute end type=%s success=1 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
-        return true;
-    }
-
-    case AI_ACTION_PLAY_KNIGHT:
-        if (!gameTryPlayKnight(map))
-        {
-            debugLog("AI", "action execute end type=%s success=0 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
-            return false;
-        }
-        finalize_ai_victory(map);
-        debugLog("AI", "action execute end type=%s success=1 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
-        return true;
-
-    case AI_ACTION_PLAY_ROAD_BUILDING:
-    {
-        const bool success = gameTryPlayRoadBuilding(map);
-        debugLog("AI", "action execute end type=%s success=%d elapsed=%.3f", ai_action_type_label(action->type), success ? 1 : 0, GetTime() - started);
-        return success;
-    }
-
-    case AI_ACTION_PLAY_YEAR_OF_PLENTY:
-    {
-        const bool success = gameTryPlayYearOfPlenty(map, action->resourceA, action->resourceB);
-        debugLog("AI", "action execute end type=%s success=%d elapsed=%.3f", ai_action_type_label(action->type), success ? 1 : 0, GetTime() - started);
-        return success;
-    }
-
-    case AI_ACTION_PLAY_MONOPOLY:
-    {
-        const bool success = gameTryPlayMonopoly(map, action->resourceA);
-        debugLog("AI", "action execute end type=%s success=%d elapsed=%.3f", ai_action_type_label(action->type), success ? 1 : 0, GetTime() - started);
-        return success;
-    }
-
-    case AI_ACTION_MARITIME_TRADE:
-    {
-        const bool success = gameTryTradeMaritime(map, action->resourceA, 1, action->resourceB);
-        debugLog("AI", "action execute end type=%s success=%d elapsed=%.3f", ai_action_type_label(action->type), success ? 1 : 0, GetTime() - started);
-        return success;
-    }
-
-    case AI_ACTION_MOVE_THIEF:
-        if (!gameCanMoveThiefToTile(map, action->tileId))
-        {
-            debugLog("AI", "action execute end type=%s success=0 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
-            return false;
-        }
-        gameMoveThief(map, action->tileId);
-        debugLog("AI", "action execute end type=%s success=1 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
-        return true;
-
-    case AI_ACTION_CHOOSE_THIEF_VICTIM:
-    {
-        const bool success = gameStealRandomResource(map, action->player);
-        debugLog("AI", "action execute end type=%s success=%d elapsed=%.3f", ai_action_type_label(action->type), success ? 1 : 0, GetTime() - started);
-        return success;
-    }
-
-    case AI_ACTION_SETUP_SETTLEMENT:
-        if (!IsCanonicalSharedCorner(action->tileId, action->cornerIndex) ||
-            !boardIsValidSettlementPlacement(map, action->tileId, action->cornerIndex, map->currentPlayer, origin, BOARD_HEX_RADIUS))
-        {
-            debugLog("AI", "action execute end type=%s success=0 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
-            return false;
-        }
-        PlaceSettlementOnSharedCorner(map, action->tileId, action->cornerIndex, map->currentPlayer, STRUCTURE_TOWN);
-        gameRefreshAwards(map);
-        gameHandlePlacedSettlement(map, action->tileId, action->cornerIndex);
-        debugLog("AI", "action execute end type=%s success=1 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
-        return true;
-
-    case AI_ACTION_SETUP_ROAD:
-        if (!IsCanonicalSharedEdge(action->tileId, action->sideIndex) ||
-            IsSharedEdgeOccupied(map, action->tileId, action->sideIndex) ||
-            !boardIsValidRoadPlacement(map, action->tileId, action->sideIndex, map->currentPlayer, origin, BOARD_HEX_RADIUS) ||
-            !boardEdgeTouchesCorner(action->tileId, action->sideIndex, map->setupSettlementTileId, map->setupSettlementCornerIndex, origin, BOARD_HEX_RADIUS))
-        {
-            debugLog("AI", "action execute end type=%s success=0 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
-            return false;
-        }
-        PlaceRoadOnSharedEdge(map, action->tileId, action->sideIndex, map->currentPlayer);
-        gameRefreshAwards(map);
-        gameHandlePlacedRoad(map);
-        debugLog("AI", "action execute end type=%s success=1 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
-        return true;
-
-    case AI_ACTION_DISCARD:
-    {
-        const bool success = gameTrySubmitDiscard(map, action->player, action->discardPlan);
-        debugLog("AI", "action execute end type=%s success=%d elapsed=%.3f", ai_action_type_label(action->type), success ? 1 : 0, GetTime() - started);
-        return success;
-    }
-
-    case AI_ACTION_NONE:
-    default:
         debugLog("AI", "action execute end type=%s success=0 elapsed=%.3f", ai_action_type_label(action->type), GetTime() - started);
         return false;
     }
+
+    success = (matchSessionGetActiveMutable() != NULL && &matchSessionGetActiveMutable()->map == map)
+                  ? matchSessionSubmitAction(matchSessionGetActiveMutable(), &gameAction, NULL, &result)
+                  : gameApplyAction(map, &gameAction, NULL, &result);
+    if (success && action->type == AI_ACTION_BUY_DEVELOPMENT && uiGetAiSpeedSetting() < 10 && result.drawnCard < DEVELOPMENT_CARD_COUNT)
+    {
+        uiStartDevelopmentCardDrawAnimation(result.drawnCard);
+    }
+    if (success && gameHasWinner(map))
+    {
+        prepare_ui_for_ai_turn();
+    }
+
+    debugLog("AI", "action execute end type=%s success=%d elapsed=%.3f",
+             ai_action_type_label(action->type),
+             success ? 1 : 0,
+             GetTime() - started);
+    return success;
 }
 
 static float score_discard_plan(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty, const int discardPlan[5])

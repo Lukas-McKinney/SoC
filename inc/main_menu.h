@@ -9,6 +9,8 @@ enum MainMenuAction
     MAIN_MENU_ACTION_NONE,
     MAIN_MENU_ACTION_START_GAME,
     MAIN_MENU_ACTION_START_AI_GAME,
+    MAIN_MENU_ACTION_START_PRIVATE_HOST,
+    MAIN_MENU_ACTION_START_PRIVATE_JOIN,
     MAIN_MENU_ACTION_CYCLE_AI_DIFFICULTY,
     MAIN_MENU_ACTION_CYCLE_HUMAN_COLOR,
     MAIN_MENU_ACTION_TOGGLE_THEME,
@@ -28,5 +30,13 @@ void MainMenuSetAiDifficulty(enum AiDifficulty difficulty);
 /* Returns the currently selected human color for AI matches. */
 enum PlayerType MainMenuGetHumanColor(void);
 void MainMenuSetHumanColor(enum PlayerType player);
+
+enum PlayerType MainMenuGetMultiplayerLocalColor(void);
+enum PlayerType MainMenuGetMultiplayerRemoteColor(void);
+enum AiDifficulty MainMenuGetMultiplayerAiDifficulty(void);
+unsigned short MainMenuGetMultiplayerPort(void);
+const char *MainMenuGetMultiplayerHostAddress(void);
+void MainMenuSetMultiplayerOpen(bool open);
+void MainMenuSetMultiplayerError(const char *message);
 
 #endif

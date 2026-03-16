@@ -8,8 +8,8 @@ ifeq ($(OS),Windows_NT)
 RAYLIB_INCLUDE ?= C:/raylib/w64devkit/x86_64-w64-mingw32/include
 RAYLIB_LIB ?= C:/raylib/w64devkit/x86_64-w64-mingw32/lib
 
-CFLAGS = $(COMMON_CFLAGS) -I$(RAYLIB_INCLUDE)
-GAME_LDFLAGS = -L$(RAYLIB_LIB) -lraylib -lopengl32 -lgdi32 -lwinmm
+CFLAGS = $(COMMON_CFLAGS) -Wno-expansion-to-defined -isystem $(RAYLIB_INCLUDE)
+GAME_LDFLAGS = -L$(RAYLIB_LIB) -lraylib -lopengl32 -lgdi32 -lwinmm -lws2_32
 RULE_TEST_LDFLAGS = $(GAME_LDFLAGS) -lm
 TARGET = settlers.exe
 RULE_TEST_TARGET = rules_test.exe
