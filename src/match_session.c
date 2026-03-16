@@ -92,13 +92,18 @@ static void clear_connection_error(struct MatchSession *session)
 
 static void set_connection_error(struct MatchSession *session, const char *message)
 {
+    char nextMessage[sizeof(session->connectionError)];
+    bool changed = false;
+
     if (session == NULL)
     {
         return;
     }
 
-    snprintf(session->connectionError, sizeof(session->connectionError), "%s", message == NULL ? "" : message);
-    if (session->connectionError[0] != '\0')
+    snprintf(nextMessage, sizeof(nextMessage), "%s", message == NULL ? "" : message);
+    changed = strncmp(session->connectionError, nextMessage, sizeof(session->connectionError)) != 0;
+    snprintf(session->connectionError, sizeof(session->connectionError), "%s", nextMessage);
+    if (changed && session->connectionError[0] != '\0')
     {
         debugLog("NET", "connection error (%s): %s",
                  session->networkMode == MATCH_NETWORK_PRIVATE_HOST ? "host" :
@@ -876,7 +881,6 @@ void matchSessionUpdate(struct MatchSession *session)
     {
         session->connectionStatus = MATCH_CONNECTION_ERROR;
         set_connection_error(session, netplayGetLastError(session->netplay));
-        debugLog("NET", "netplay entered error state: %s", netplayGetLastError(session->netplay));
     }
 
     while (netplayPollEvent(session->netplay, &event))

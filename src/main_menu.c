@@ -703,6 +703,7 @@ static void DrawMultiplayerPopup(void)
 
     if (joinMode)
     {
+        DrawUiText(loc("For another machine, use host LAN IP (not 127.0.0.1)."), layout.panel.x + 26.0f, layout.hostAddressField.y - 44.0f, 15, bodyColor);
         DrawTextField(layout.hostAddressField, loc("Host Address"),
                       gMainMenuMultiplayerHostAddress,
                       "127.0.0.1",

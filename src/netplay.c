@@ -147,6 +147,7 @@ static bool gSocketLayerReady = false;
 #endif
 
 static bool net_socket_layer_init(void);
+static bool is_loopback_host(const char *hostAddress);
 static void clear_last_error(struct NetplayState *state);
 static void set_last_error(struct NetplayState *state, const char *message);
 static bool set_socket_nonblocking(NetSocket socketHandle);
@@ -222,6 +223,18 @@ static bool net_socket_layer_init(void)
     gSocketLayerReady = true;
 #endif
     return true;
+}
+
+static bool is_loopback_host(const char *hostAddress)
+{
+    if (hostAddress == NULL)
+    {
+        return false;
+    }
+
+    return strcmp(hostAddress, "127.0.0.1") == 0 ||
+           strcmp(hostAddress, "localhost") == 0 ||
+           strcmp(hostAddress, "::1") == 0;
 }
 
 static void clear_last_error(struct NetplayState *state)
@@ -486,7 +499,16 @@ static void advance_pending_connect(struct NetplayState *state)
 
     if (getsockopt(state->peerSocket, SOL_SOCKET, SO_ERROR, (char *)&socketError, &optionLength) != 0 || socketError != 0)
     {
-        set_last_error(state, "connect failed");
+        char errorText[NETPLAY_MAX_STATUS_TEXT];
+        if (is_loopback_host(state->peerAddress))
+        {
+            snprintf(errorText, sizeof(errorText), "%s", "connect failed (use host LAN IP)");
+        }
+        else
+        {
+            snprintf(errorText, sizeof(errorText), "connect failed (code %d)", socketError);
+        }
+        set_last_error(state, errorText);
         close_socket_if_open(&state->peerSocket);
         state->connectionState = NETPLAY_CONNECTION_ERROR;
         return;
@@ -876,7 +898,14 @@ bool netplayStartClient(struct NetplayState *state, const char *hostAddress, uns
     lookupResult = getaddrinfo(hostAddress, portText, &hints, &results);
     if (lookupResult != 0 || results == NULL)
     {
-        set_last_error(state, "host lookup failed");
+        if (is_loopback_host(hostAddress))
+        {
+            set_last_error(state, "host lookup failed (use host LAN IP)");
+        }
+        else
+        {
+            set_last_error(state, "host lookup failed");
+        }
         state->connectionState = NETPLAY_CONNECTION_ERROR;
         return false;
     }
@@ -927,7 +956,14 @@ bool netplayStartClient(struct NetplayState *state, const char *hostAddress, uns
     }
 
     freeaddrinfo(results);
-    set_last_error(state, "connect failed");
+    if (is_loopback_host(hostAddress))
+    {
+        set_last_error(state, "connect failed (use host LAN IP)");
+    }
+    else
+    {
+        set_last_error(state, "connect failed");
+    }
     state->connectionState = NETPLAY_CONNECTION_ERROR;
     return false;
 }
