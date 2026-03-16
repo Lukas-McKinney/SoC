@@ -707,18 +707,41 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
         break;
 
     case NETPLAY_EVENT_HELLO:
+        {
+            enum PlayerType inferredLocalPlayer = PLAYER_NONE;
+
         session->isHost = false;
         session->localPlayer = event->hello.assignedPlayer != PLAYER_NONE ? event->hello.assignedPlayer : session->localPlayer;
         for (int player = 0; player < MAX_PLAYERS; player++)
         {
             session->seatAuthority[player] = (enum MatchSeatAuthority)event->hello.seatAuthority[player];
+            if (session->seatAuthority[player] == MATCH_SEAT_LOCAL)
+            {
+                inferredLocalPlayer = (enum PlayerType)player;
+            }
         }
-        session->connectionStatus = MATCH_CONNECTION_CONNECTED;
-        session->ready = true;
+        if (session->localPlayer == PLAYER_NONE && inferredLocalPlayer != PLAYER_NONE)
+        {
+            session->localPlayer = inferredLocalPlayer;
+        }
+        session->connectionStatus = MATCH_CONNECTION_SYNCING;
+        session->ready = false;
         session->awaitingAuthoritativeUpdate = false;
         clear_connection_error(session);
         reset_client_transient_ui();
-        debugLog("NET", "hello received; assigned local player=%d", (int)session->localPlayer);
+        debugLog("NET",
+                 "hello received; assigned local=%d host=%d authorities=[%d,%d,%d,%d]",
+                 (int)session->localPlayer,
+                 (int)event->hello.hostPlayer,
+                 event->hello.seatAuthority[0],
+                 event->hello.seatAuthority[1],
+                 event->hello.seatAuthority[2],
+                 event->hello.seatAuthority[3]);
+        if (session->localPlayer == PLAYER_NONE)
+        {
+            debugLog("NET", "warning: host hello assigned PLAYER_NONE; awaiting snapshot but local actions will stay blocked");
+        }
+        }
         break;
 
     case NETPLAY_EVENT_SNAPSHOT:
@@ -732,6 +755,12 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
             matchSessionRefreshStateHash(session);
             reset_client_transient_ui();
             debugLog("NET", "snapshot applied (size=%zu, hash=%u)", event->payloadSize, session->stateHash);
+        }
+        else
+        {
+            debugLog("NET", "snapshot rejected (size=%zu, expected=%zu)",
+                     event->payloadSize,
+                     mapSnapshotSerializedSize());
         }
         break;
 
