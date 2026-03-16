@@ -20,14 +20,47 @@ rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR"
 rm -f "$ZIP_PATH" "$HASH_PATH"
 
-cp "$BINARY_PATH" "$STAGE_DIR/settlers"
-chmod +x "$STAGE_DIR/settlers"
+APP_DIR="$STAGE_DIR/SoC.app"
+APP_CONTENTS="$APP_DIR/Contents"
+APP_MACOS_DIR="$APP_CONTENTS/MacOS"
+APP_FRAMEWORKS_DIR="$APP_CONTENTS/Frameworks"
+APP_BIN="$APP_MACOS_DIR/settlers"
+
+mkdir -p "$APP_MACOS_DIR" "$APP_FRAMEWORKS_DIR"
+cp "$BINARY_PATH" "$APP_BIN"
+chmod +x "$APP_BIN"
 [[ -f README.md ]] && cp README.md "$STAGE_DIR/"
 [[ -f LICENSE ]] && cp LICENSE "$STAGE_DIR/"
 
+cat > "$APP_CONTENTS/Info.plist" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleExecutable</key>
+  <string>settlers</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.soc.settlers</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>SoC</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>12.0</string>
+</dict>
+</plist>
+EOF
+
 if command -v otool >/dev/null 2>&1 && command -v install_name_tool >/dev/null 2>&1; then
-  LIB_DIR="$STAGE_DIR/lib"
-  mkdir -p "$LIB_DIR"
+  LIB_DIR="$APP_FRAMEWORKS_DIR"
 
   DEPS_FILE="$OUT_DIR/.macos_deps_${PACKAGE_NAME}.txt"
   > "$DEPS_FILE"
@@ -60,7 +93,7 @@ if command -v otool >/dev/null 2>&1 && command -v install_name_tool >/dev/null 2
     fi
   }
 
-  collect_abs_deps "$STAGE_DIR/settlers" | while IFS= read -r dep; do
+  collect_abs_deps "$APP_BIN" | while IFS= read -r dep; do
     add_dep "$dep"
   done
 
@@ -85,7 +118,7 @@ if command -v otool >/dev/null 2>&1 && command -v install_name_tool >/dev/null 2
   while IFS= read -r dep; do
     [[ -z "$dep" ]] && continue
     base="$(basename "$dep")"
-    install_name_tool -change "$dep" "@loader_path/lib/$base" "$STAGE_DIR/settlers" || true
+    install_name_tool -change "$dep" "@executable_path/../Frameworks/$base" "$APP_BIN" || true
   done < "$DEPS_FILE"
 
   while IFS= read -r dep; do
@@ -107,19 +140,19 @@ if command -v otool >/dev/null 2>&1 && command -v install_name_tool >/dev/null 2
 fi
 
 if command -v codesign >/dev/null 2>&1; then
-  if [[ -d "$STAGE_DIR/lib" ]]; then
+  if [[ -d "$APP_FRAMEWORKS_DIR" ]]; then
     while IFS= read -r -d '' dylib; do
       codesign --force --sign - "$dylib" || true
-    done < <(find "$STAGE_DIR/lib" -type f -name "*.dylib" -print0)
+    done < <(find "$APP_FRAMEWORKS_DIR" -type f -name "*.dylib" -print0)
   fi
-  codesign --force --deep --sign - "$STAGE_DIR/settlers" || true
+  codesign --force --deep --sign - "$APP_DIR" || true
 fi
 
 cat > "$STAGE_DIR/run_host.command" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"
-./settlers --host --player red --remote-player blue --port 24680
+./SoC.app/Contents/MacOS/settlers --host --player red --remote-player blue --port 24680
 EOF
 chmod +x "$STAGE_DIR/run_host.command"
 
@@ -128,7 +161,7 @@ cat > "$STAGE_DIR/run_join.command" <<'EOF'
 set -euo pipefail
 cd "$(dirname "$0")"
 HOST_IP="${1:-127.0.0.1}"
-./settlers --join "$HOST_IP" --player blue --remote-player red --port 24680
+./SoC.app/Contents/MacOS/settlers --join "$HOST_IP" --player blue --remote-player red --port 24680
 EOF
 chmod +x "$STAGE_DIR/run_join.command"
 
@@ -139,7 +172,7 @@ SoC quick start (macOS)
 2) On the second machine, run_join.command <HOST_LAN_IP>.
 3) If macOS blocks execution, run:
   xattr -dr com.apple.quarantine <folder>
-  chmod +x settlers run_host.command run_join.command
+  chmod +x run_host.command run_join.command
 
 Notes:
 - Use LAN IP, not 127.0.0.1, for remote machines.

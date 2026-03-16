@@ -228,12 +228,13 @@ Output:
 - `dist/SoC-<version>-macos-<arch>.sha256.txt`
 
 The macOS packager bundles non-system `.dylib` dependencies (such as raylib) and rewrites loader paths so the zip is portable to machines without raylib installed.
+The macOS zip now contains a signed `SoC.app` bundle with embedded frameworks to reduce repeated security prompts for individual dylibs.
 
 ### What your friend runs
 
 Each zip includes:
 
-- game binary (`settlers.exe` on Windows, `settlers` on macOS)
+- game executable (`settlers.exe` on Windows, `SoC.app` on macOS)
 - quick-start script for host
 - quick-start script for join
 - `QUICKSTART.txt`
