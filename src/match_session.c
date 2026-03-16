@@ -713,7 +713,9 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
         {
             session->seatAuthority[player] = (enum MatchSeatAuthority)event->hello.seatAuthority[player];
         }
-        session->connectionStatus = MATCH_CONNECTION_SYNCING;
+        session->connectionStatus = MATCH_CONNECTION_CONNECTED;
+        session->ready = true;
+        session->awaitingAuthoritativeUpdate = false;
         clear_connection_error(session);
         reset_client_transient_ui();
         debugLog("NET", "hello received; assigned local player=%d", (int)session->localPlayer);
