@@ -101,7 +101,9 @@ These are intentional shortcuts or current prototype settings:
 
 ## Build
 
-The `Makefile` is set up for Windows with Raylib installed at:
+### Windows
+
+The `Makefile` supports the current Windows setup with Raylib installed at:
 
 - `C:/raylib/w64devkit/x86_64-w64-mingw32/include`
 - `C:/raylib/w64devkit/x86_64-w64-mingw32/lib`
@@ -118,14 +120,56 @@ This produces:
 settlers.exe
 ```
 
+If your Raylib install lives somewhere else, override the paths when invoking `make`:
+
+```bash
+make RAYLIB_INCLUDE=... RAYLIB_LIB=...
+```
+
+### macOS
+
+Install the Apple command-line toolchain once:
+
+```bash
+xcode-select --install
+```
+
+Install Raylib and `pkg-config` with Homebrew:
+
+```bash
+brew install raylib pkg-config
+```
+
+Build the game:
+
+```bash
+make
+```
+
+This produces:
+
+```bash
+./settlers
+```
+
+The macOS build path uses `pkg-config` to discover Raylib automatically. If your Raylib install is not exposed through `pkg-config`, pass the flags explicitly:
+
+```bash
+make RAYLIB_CFLAGS="..." RAYLIB_LIBS="..."
+```
+
 ## Validation
 
 Run the headless rules suite:
 
 ```bash
 make rules-test
-.\rules_test.exe
 ```
+
+Run the test binary:
+
+- Windows PowerShell: `.\rules_test.exe`
+- macOS / Linux shell: `./rules_test`
 
 The current suite covers:
 
