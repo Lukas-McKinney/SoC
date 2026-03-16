@@ -33,6 +33,8 @@ void settingsStoreLoadDefaults(struct PersistedSettings *settings)
     settings->totalPlaytimeSeconds = 0ULL;
     settings->totalWins = 0ULL;
     settings->totalLosses = 0ULL;
+    snprintf(settings->multiplayerHostAddress, sizeof(settings->multiplayerHostAddress), "%s", "127.0.0.1");
+    settings->multiplayerPort = 24680u;
 }
 
 const char *settingsStorePath(void)
@@ -172,6 +174,24 @@ bool settingsStoreLoad(struct PersistedSettings *settings)
                 loaded = true;
             }
         }
+        else if (strcmp(key, "multiplayer_host") == 0)
+        {
+            snprintf(settings->multiplayerHostAddress,
+                     sizeof(settings->multiplayerHostAddress),
+                     "%s",
+                     value[0] != '\0' ? value : "127.0.0.1");
+            loaded = true;
+        }
+        else if (strcmp(key, "multiplayer_port") == 0)
+        {
+            char *end = NULL;
+            const long parsed = strtol(value, &end, 10);
+            if (end != value && parsed > 0L && parsed <= 65535L)
+            {
+                settings->multiplayerPort = (unsigned short)parsed;
+                loaded = true;
+            }
+        }
     }
 
     fclose(file);
@@ -201,6 +221,8 @@ bool settingsStoreSave(const struct PersistedSettings *settings)
     fprintf(file, "total_playtime_seconds=%llu\n", settings->totalPlaytimeSeconds);
     fprintf(file, "total_wins=%llu\n", settings->totalWins);
     fprintf(file, "total_losses=%llu\n", settings->totalLosses);
+    fprintf(file, "multiplayer_host=%s\n", settings->multiplayerHostAddress);
+    fprintf(file, "multiplayer_port=%u\n", (unsigned int)settings->multiplayerPort);
 
     fclose(file);
     return true;
@@ -218,6 +240,11 @@ bool settingsStoreSaveCurrent(void)
     settings.totalPlaytimeSeconds = uiGetTotalPlaytimeSeconds();
     settings.totalWins = uiGetTotalWins();
     settings.totalLosses = uiGetTotalLosses();
+    snprintf(settings.multiplayerHostAddress,
+             sizeof(settings.multiplayerHostAddress),
+             "%s",
+             MainMenuGetMultiplayerHostAddress());
+    settings.multiplayerPort = MainMenuGetMultiplayerPort();
     return settingsStoreSave(&settings);
 }
 

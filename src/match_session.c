@@ -715,6 +715,7 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
         }
         session->connectionStatus = MATCH_CONNECTION_SYNCING;
         clear_connection_error(session);
+        reset_client_transient_ui();
         debugLog("NET", "hello received; assigned local player=%d", (int)session->localPlayer);
         break;
 
@@ -789,6 +790,7 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
         break;
 
     case NETPLAY_EVENT_ACTION_RESULT:
+        session->awaitingAuthoritativeUpdate = false;
         apply_client_authoritative_result(&event->action, &event->result);
         break;
 

@@ -437,6 +437,8 @@ static void LoadPersistedSettings(void)
     uiSetAiSpeedSetting(settings.aiSpeed);
     MainMenuSetAiDifficulty(settings.aiDifficulty);
     MainMenuSetHumanColor(settings.humanColor);
+    MainMenuSetMultiplayerHostAddress(settings.multiplayerHostAddress);
+    MainMenuSetMultiplayerPort(settings.multiplayerPort);
     uiSetPersistedTotalPlaytimeSeconds(settings.totalPlaytimeSeconds);
     uiSetPersistedMatchRecord(settings.totalWins, settings.totalLosses);
 }

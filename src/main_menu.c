@@ -530,6 +530,24 @@ const char *MainMenuGetMultiplayerHostAddress(void)
     return gMainMenuMultiplayerHostAddress;
 }
 
+void MainMenuSetMultiplayerPort(unsigned short port)
+{
+    if (port == 0u)
+    {
+        port = 24680u;
+    }
+
+    snprintf(gMainMenuMultiplayerPortText, sizeof(gMainMenuMultiplayerPortText), "%u", (unsigned int)port);
+}
+
+void MainMenuSetMultiplayerHostAddress(const char *address)
+{
+    snprintf(gMainMenuMultiplayerHostAddress,
+             sizeof(gMainMenuMultiplayerHostAddress),
+             "%s",
+             (address != NULL && address[0] != '\0') ? address : "127.0.0.1");
+}
+
 void MainMenuSetMultiplayerOpen(bool open)
 {
     gMainMenuMultiplayerOpen = open;

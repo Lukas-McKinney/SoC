@@ -36,6 +36,8 @@ enum PlayerType MainMenuGetMultiplayerRemoteColor(void);
 enum AiDifficulty MainMenuGetMultiplayerAiDifficulty(void);
 unsigned short MainMenuGetMultiplayerPort(void);
 const char *MainMenuGetMultiplayerHostAddress(void);
+void MainMenuSetMultiplayerPort(unsigned short port);
+void MainMenuSetMultiplayerHostAddress(const char *address);
 void MainMenuSetMultiplayerOpen(bool open);
 void MainMenuSetMultiplayerError(const char *message);
 
