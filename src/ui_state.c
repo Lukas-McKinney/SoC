@@ -5,6 +5,7 @@
 #include <string.h>
 #include <raylib.h>
 #include "game_logic.h"
+#include "localization.h"
 
 #define PLAYER_NOTIFICATION_SLOTS 8
 #define PLAYER_NOTIFICATION_TEXT_CAPACITY 96
@@ -39,6 +40,12 @@ static int gAiSpeedSetting = 3;
 static bool gReturnToMainMenuRequested = false;
 static bool gRestartGameRequested = false;
 static bool gQuitGameRequested = false;
+static unsigned long long gCommittedTotalPlaytimeSeconds = 0ULL;
+static unsigned long long gCommittedTotalWins = 0ULL;
+static unsigned long long gCommittedTotalLosses = 0ULL;
+static double gCurrentMatchStartTime = -1.0;
+static double gCurrentMatchFrozenDurationSeconds = -1.0;
+static bool gCurrentMatchResultCommitted = false;
 static double gLastRoadPlacementTime = -1.0;
 static int gLastRoadAx = 0;
 static int gLastRoadAy = 0;
@@ -93,6 +100,8 @@ static void show_local_resource_feedback(const struct Map *map, enum PlayerType 
                                          bool localTurnStarted, bool *showedStatus);
 static void format_resource_delta_list(const int deltas[5], char *buffer, size_t bufferSize);
 static void reset_ui_state(bool resetTheme);
+static unsigned long long current_match_elapsed_seconds(void);
+static void commit_match_result_if_needed(const struct Map *map);
 
 void initUiState(void)
 {
@@ -104,8 +113,19 @@ void uiResetForNewGame(void)
     reset_ui_state(false);
 }
 
+void uiBeginMatch(void)
+{
+    gCurrentMatchStartTime = GetTime();
+    gCurrentMatchFrozenDurationSeconds = -1.0;
+    gCurrentMatchResultCommitted = false;
+}
+
 static void reset_ui_state(bool resetTheme)
 {
+    gCommittedTotalPlaytimeSeconds += current_match_elapsed_seconds();
+    gCurrentMatchStartTime = -1.0;
+    gCurrentMatchFrozenDurationSeconds = -1.0;
+    gCurrentMatchResultCommitted = false;
     gTradeMenuOpen = false;
     gTradeMenuOpenAmount = 0.0f;
     gPlayerTradeMenuOpen = false;
@@ -149,11 +169,23 @@ static void reset_ui_state(bool resetTheme)
     {
         gTheme = UI_THEME_LIGHT;
         gAiSpeedSetting = 3;
+        gCommittedTotalPlaytimeSeconds = 0ULL;
+        gCommittedTotalWins = 0ULL;
+        gCommittedTotalLosses = 0ULL;
     }
 }
 
 void updateUiState(struct Map *map)
 {
+    if (map != NULL &&
+        gCurrentMatchStartTime >= 0.0 &&
+        gCurrentMatchFrozenDurationSeconds < 0.0 &&
+        gameHasWinner(map))
+    {
+        gCurrentMatchFrozenDurationSeconds = GetTime() - gCurrentMatchStartTime;
+    }
+    commit_match_result_if_needed(map);
+
     update_build_panel_animation();
     update_development_purchase_confirm_animation();
     update_development_play_confirm_animation();
@@ -570,6 +602,37 @@ bool uiConsumeQuitGameRequest(void)
     return requested;
 }
 
+void uiSetPersistedTotalPlaytimeSeconds(unsigned long long seconds)
+{
+    gCommittedTotalPlaytimeSeconds = seconds;
+}
+
+void uiSetPersistedMatchRecord(unsigned long long wins, unsigned long long losses)
+{
+    gCommittedTotalWins = wins;
+    gCommittedTotalLosses = losses;
+}
+
+unsigned long long uiGetCurrentMatchPlaytimeSeconds(void)
+{
+    return current_match_elapsed_seconds();
+}
+
+unsigned long long uiGetTotalPlaytimeSeconds(void)
+{
+    return gCommittedTotalPlaytimeSeconds + current_match_elapsed_seconds();
+}
+
+unsigned long long uiGetTotalWins(void)
+{
+    return gCommittedTotalWins;
+}
+
+unsigned long long uiGetTotalLosses(void)
+{
+    return gCommittedTotalLosses;
+}
+
 void uiStartDiceRollAnimation(void)
 {
     gDiceRolling = true;
@@ -915,6 +978,54 @@ static void update_build_panel_animation(void)
     }
 }
 
+static unsigned long long current_match_elapsed_seconds(void)
+{
+    double elapsed = 0.0;
+
+    if (gCurrentMatchStartTime < 0.0)
+    {
+        return 0ULL;
+    }
+
+    elapsed = gCurrentMatchFrozenDurationSeconds >= 0.0
+                  ? gCurrentMatchFrozenDurationSeconds
+                  : (GetTime() - gCurrentMatchStartTime);
+
+    if (elapsed <= 0.0)
+    {
+        return 0ULL;
+    }
+
+    return (unsigned long long)elapsed;
+}
+
+static void commit_match_result_if_needed(const struct Map *map)
+{
+    enum PlayerType localHuman = PLAYER_NONE;
+    enum PlayerType winner = PLAYER_NONE;
+
+    if (map == NULL || gCurrentMatchResultCommitted || !gameHasWinner(map))
+    {
+        return;
+    }
+
+    localHuman = local_human_player(map);
+    winner = gameGetWinner(map);
+    if (localHuman != PLAYER_NONE)
+    {
+        if (winner == localHuman)
+        {
+            gCommittedTotalWins++;
+        }
+        else
+        {
+            gCommittedTotalLosses++;
+        }
+    }
+
+    gCurrentMatchResultCommitted = true;
+}
+
 static void update_development_purchase_confirm_animation(void)
 {
     const float target = gDevelopmentPurchaseConfirmOpen ? 1.0f : 0.0f;
@@ -1034,7 +1145,7 @@ static void update_player_delta_notifications(const struct Map *map)
         localTurnStarted = localPlayer != PLAYER_NONE && map->currentPlayer == localPlayer;
         if (localTurnStarted)
         {
-            uiShowCenteredStatus("Your turn.", UI_NOTIFICATION_NEUTRAL);
+            uiShowCenteredStatus(loc("Your turn."), UI_NOTIFICATION_NEUTRAL);
         }
         return;
     }
@@ -1057,7 +1168,7 @@ static void update_player_delta_notifications(const struct Map *map)
             if (visibleVpDelta > 0)
             {
                 char vpBuffer[32];
-                snprintf(vpBuffer, sizeof(vpBuffer), "+%dVP", visibleVpDelta);
+                snprintf(vpBuffer, sizeof(vpBuffer), "+%d%s", visibleVpDelta, loc("VP"));
                 push_player_notification((enum PlayerType)player, vpBuffer, UI_NOTIFICATION_VICTORY);
             }
         }
@@ -1113,7 +1224,7 @@ static void update_player_delta_notifications(const struct Map *map)
 
     if (localTurnStarted && !showedStatus)
     {
-        uiShowCenteredStatus("Your turn.", UI_NOTIFICATION_NEUTRAL);
+        uiShowCenteredStatus(loc("Your turn."), UI_NOTIFICATION_NEUTRAL);
     }
     snapshot_player_delta_state(map);
 }
@@ -1201,35 +1312,21 @@ static const char *resource_label(enum ResourceType resource, bool abbreviated)
         switch (resource)
         {
         case RESOURCE_WOOD:
-            return "Wd";
+            return locResourceShort(RESOURCE_WOOD);
         case RESOURCE_WHEAT:
-            return "Wh";
+            return locResourceShort(RESOURCE_WHEAT);
         case RESOURCE_CLAY:
-            return "Cl";
+            return locResourceShort(RESOURCE_CLAY);
         case RESOURCE_SHEEP:
-            return "Sh";
+            return locResourceShort(RESOURCE_SHEEP);
         case RESOURCE_STONE:
-            return "St";
+            return locResourceShort(RESOURCE_STONE);
         default:
             return "";
         }
     }
 
-    switch (resource)
-    {
-    case RESOURCE_WOOD:
-        return "Wood";
-    case RESOURCE_WHEAT:
-        return "Wheat";
-    case RESOURCE_CLAY:
-        return "Clay";
-    case RESOURCE_SHEEP:
-        return "Sheep";
-    case RESOURCE_STONE:
-        return "Stone";
-    default:
-        return "";
-    }
+    return locResourceName(resource);
 }
 
 static enum PlayerType local_human_player(const struct Map *map)
@@ -1295,7 +1392,7 @@ static void show_local_resource_feedback(const struct Map *map, enum PlayerType 
     {
         format_resource_delta_list(positiveDeltas, resourceText, sizeof(resourceText));
         snprintf(message, sizeof(message),
-                 localTurnStarted ? "Your turn. You got %s." : "You got %s.",
+                 localTurnStarted ? loc("Your turn. You got %s.") : loc("You got %s."),
                  resourceText);
         uiShowCenteredStatus(message, UI_NOTIFICATION_POSITIVE);
         if (showedStatus != NULL)
@@ -1311,14 +1408,14 @@ static void show_local_resource_feedback(const struct Map *map, enum PlayerType 
     {
         if (negativeTotal == 1 && negativeKinds == 1 && lastNegativeResource >= RESOURCE_WOOD && lastNegativeResource <= RESOURCE_STONE)
         {
-            snprintf(message, sizeof(message), "%s stole %s.",
-                     map->currentPlayer >= PLAYER_RED && map->currentPlayer <= PLAYER_BLACK ? player_label(map->currentPlayer) : "A player",
+            snprintf(message, sizeof(message), loc("%s stole %s."),
+                     map->currentPlayer >= PLAYER_RED && map->currentPlayer <= PLAYER_BLACK ? player_label(map->currentPlayer) : loc("A player"),
                      resource_label((enum ResourceType)lastNegativeResource, false));
         }
         else
         {
             format_resource_delta_list(negativeDeltas, resourceText, sizeof(resourceText));
-            snprintf(message, sizeof(message), "Lost %s.", resourceText);
+            snprintf(message, sizeof(message), loc("Lost %s."), resourceText);
         }
         uiShowCenteredStatus(message, UI_NOTIFICATION_NEGATIVE);
         if (showedStatus != NULL)
@@ -1354,17 +1451,5 @@ static void format_resource_delta_list(const int deltas[5], char *buffer, size_t
 
 static const char *player_label(enum PlayerType player)
 {
-    switch (player)
-    {
-    case PLAYER_RED:
-        return "Red";
-    case PLAYER_BLUE:
-        return "Blue";
-    case PLAYER_GREEN:
-        return "Green";
-    case PLAYER_BLACK:
-        return "Black";
-    default:
-        return "Player";
-    }
+    return locPlayerName(player);
 }

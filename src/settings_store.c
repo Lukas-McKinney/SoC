@@ -1,5 +1,6 @@
 #include "settings_store.h"
 
+#include "localization.h"
 #include "main_menu.h"
 
 #include <ctype.h>
@@ -9,9 +10,11 @@
 
 static char *trim_whitespace(char *text);
 static bool parse_theme(const char *value, enum UiTheme *theme);
+static bool parse_language(const char *value, enum UiLanguage *language);
 static bool parse_difficulty(const char *value, enum AiDifficulty *difficulty);
 static bool parse_player_color(const char *value, enum PlayerType *player);
 static const char *theme_label(enum UiTheme theme);
+static const char *language_label(enum UiLanguage language);
 static const char *difficulty_label(enum AiDifficulty difficulty);
 static const char *player_color_label(enum PlayerType player);
 
@@ -23,9 +26,13 @@ void settingsStoreLoadDefaults(struct PersistedSettings *settings)
     }
 
     settings->theme = UI_THEME_LIGHT;
+    settings->language = UI_LANGUAGE_ENGLISH;
     settings->aiSpeed = 3;
     settings->aiDifficulty = AI_DIFFICULTY_MEDIUM;
     settings->humanColor = PLAYER_RED;
+    settings->totalPlaytimeSeconds = 0ULL;
+    settings->totalWins = 0ULL;
+    settings->totalLosses = 0ULL;
 }
 
 const char *settingsStorePath(void)
@@ -117,6 +124,10 @@ bool settingsStoreLoad(struct PersistedSettings *settings)
         {
             loaded |= parse_theme(value, &settings->theme);
         }
+        else if (strcmp(key, "language") == 0)
+        {
+            loaded |= parse_language(value, &settings->language);
+        }
         else if (strcmp(key, "ai_speed") == 0)
         {
             const int parsed = atoi(value);
@@ -130,6 +141,36 @@ bool settingsStoreLoad(struct PersistedSettings *settings)
         else if (strcmp(key, "human_color") == 0)
         {
             loaded |= parse_player_color(value, &settings->humanColor);
+        }
+        else if (strcmp(key, "total_playtime_seconds") == 0)
+        {
+            char *end = NULL;
+            const unsigned long long parsed = strtoull(value, &end, 10);
+            if (end != value)
+            {
+                settings->totalPlaytimeSeconds = parsed;
+                loaded = true;
+            }
+        }
+        else if (strcmp(key, "total_wins") == 0)
+        {
+            char *end = NULL;
+            const unsigned long long parsed = strtoull(value, &end, 10);
+            if (end != value)
+            {
+                settings->totalWins = parsed;
+                loaded = true;
+            }
+        }
+        else if (strcmp(key, "total_losses") == 0)
+        {
+            char *end = NULL;
+            const unsigned long long parsed = strtoull(value, &end, 10);
+            if (end != value)
+            {
+                settings->totalLosses = parsed;
+                loaded = true;
+            }
         }
     }
 
@@ -153,9 +194,13 @@ bool settingsStoreSave(const struct PersistedSettings *settings)
     }
 
     fprintf(file, "theme=%s\n", theme_label(settings->theme));
+    fprintf(file, "language=%s\n", language_label(settings->language));
     fprintf(file, "ai_speed=%d\n", settings->aiSpeed);
     fprintf(file, "ai_difficulty=%s\n", difficulty_label(settings->aiDifficulty));
     fprintf(file, "human_color=%s\n", player_color_label(settings->humanColor));
+    fprintf(file, "total_playtime_seconds=%llu\n", settings->totalPlaytimeSeconds);
+    fprintf(file, "total_wins=%llu\n", settings->totalWins);
+    fprintf(file, "total_losses=%llu\n", settings->totalLosses);
 
     fclose(file);
     return true;
@@ -166,9 +211,13 @@ bool settingsStoreSaveCurrent(void)
     struct PersistedSettings settings;
 
     settings.theme = uiGetTheme();
+    settings.language = locGetLanguage();
     settings.aiSpeed = uiGetAiSpeedSetting();
     settings.aiDifficulty = MainMenuGetAiDifficulty();
     settings.humanColor = MainMenuGetHumanColor();
+    settings.totalPlaytimeSeconds = uiGetTotalPlaytimeSeconds();
+    settings.totalWins = uiGetTotalWins();
+    settings.totalLosses = uiGetTotalLosses();
     return settingsStoreSave(&settings);
 }
 
@@ -216,6 +265,11 @@ static bool parse_theme(const char *value, enum UiTheme *theme)
     }
 
     return false;
+}
+
+static bool parse_language(const char *value, enum UiLanguage *language)
+{
+    return locParseLanguage(value, language);
 }
 
 static bool parse_difficulty(const char *value, enum AiDifficulty *difficulty)
@@ -278,6 +332,11 @@ static bool parse_player_color(const char *value, enum PlayerType *player)
 static const char *theme_label(enum UiTheme theme)
 {
     return theme == UI_THEME_DARK ? "dark" : "light";
+}
+
+static const char *language_label(enum UiLanguage language)
+{
+    return locLanguageConfigName(language);
 }
 
 static const char *difficulty_label(enum AiDifficulty difficulty)

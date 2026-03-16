@@ -3,6 +3,7 @@
 #include <time.h>
 #include "ai_controller.h"
 #include "game_logic.h"
+#include "localization.h"
 #include "main_menu.h"
 #include "map.h"
 #include "renderer.h"
@@ -43,6 +44,7 @@ int main(void)
 
     while (!WindowShouldClose() && !shouldQuit)
     {
+        SetWindowTitle(loc("Catan Map"));
         if (appScreen == APP_SCREEN_MAIN_MENU)
         {
             switch (HandleMainMenuInput())
@@ -55,6 +57,7 @@ int main(void)
                 ConfigureMatch(&map, aiOpponentsEnabled, aiDifficulty, humanColor);
                 aiResetController();
                 uiResetForNewGame();
+                uiBeginMatch();
                 appScreen = APP_SCREEN_GAME;
                 break;
             case MAIN_MENU_ACTION_START_AI_GAME:
@@ -65,6 +68,7 @@ int main(void)
                 ConfigureMatch(&map, aiOpponentsEnabled, aiDifficulty, humanColor);
                 aiResetController();
                 uiResetForNewGame();
+                uiBeginMatch();
                 appScreen = APP_SCREEN_GAME;
                 break;
             case MAIN_MENU_ACTION_CYCLE_AI_DIFFICULTY:
@@ -137,12 +141,15 @@ int main(void)
                 ConfigureMatch(&map, aiOpponentsEnabled, aiDifficulty, humanColor);
                 aiResetController();
                 uiResetForNewGame();
+                uiBeginMatch();
+                settingsStoreSaveCurrent();
                 continue;
             }
             if (uiConsumeReturnToMainMenuRequest())
             {
                 aiResetController();
                 uiResetForNewGame();
+                settingsStoreSaveCurrent();
                 appScreen = APP_SCREEN_MAIN_MENU;
             }
             if (uiConsumeQuitGameRequest())
@@ -165,6 +172,7 @@ int main(void)
         EndDrawing();
     }
 
+    settingsStoreSaveCurrent();
     UnloadRendererAssets();
     CloseWindow();
     return 0;
@@ -189,9 +197,12 @@ static void LoadPersistedSettings(void)
     settingsStoreLoad(&settings);
 
     uiSetTheme(settings.theme);
+    locSetLanguage(settings.language);
     uiSetAiSpeedSetting(settings.aiSpeed);
     MainMenuSetAiDifficulty(settings.aiDifficulty);
     MainMenuSetHumanColor(settings.humanColor);
+    uiSetPersistedTotalPlaytimeSeconds(settings.totalPlaytimeSeconds);
+    uiSetPersistedMatchRecord(settings.totalWins, settings.totalLosses);
 }
 
 static void DrawSceneBackground(void)

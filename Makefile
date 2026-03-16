@@ -1,6 +1,6 @@
 CC = gcc
 
-COMMON_CFLAGS = -Wall -Wextra -Iinc
+COMMON_CFLAGS = -Wall -Wextra -Iinc -finput-charset=UTF-8 -fexec-charset=UTF-8
 SRC = $(wildcard src/*.c)
 RULE_TEST_SRC = tests/rule_validation.c src/board_rules.c src/game_logic.c src/map.c
 

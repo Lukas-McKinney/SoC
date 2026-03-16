@@ -26,6 +26,7 @@ enum UiSettingsConfirmAction {
 
 void initUiState(void);
 void uiResetForNewGame(void);
+void uiBeginMatch(void);
 void updateUiState(struct Map *map);
 void handleUiGlobalInput(void);
 
@@ -78,6 +79,13 @@ void uiRequestRestartGame(void);
 bool uiConsumeRestartGameRequest(void);
 void uiRequestQuitGame(void);
 bool uiConsumeQuitGameRequest(void);
+
+void uiSetPersistedTotalPlaytimeSeconds(unsigned long long seconds);
+void uiSetPersistedMatchRecord(unsigned long long wins, unsigned long long losses);
+unsigned long long uiGetCurrentMatchPlaytimeSeconds(void);
+unsigned long long uiGetTotalPlaytimeSeconds(void);
+unsigned long long uiGetTotalWins(void);
+unsigned long long uiGetTotalLosses(void);
 
 void uiStartDiceRollAnimation(void);
 bool uiIsDiceRolling(void);

@@ -28,8 +28,39 @@ static float ClampAnimation01(float value);
 static float EaseOutBack(float t);
 static int HexDistance(struct AxialCoord coord);
 static bool GetBoardCreationTransform(struct AxialCoord coord, Vector2 origin, Vector2 finalCenter, float finalRadius, Vector2 *animatedCenter, float *animatedRadius);
+static Font LoadUiFont(const char *fontPath);
 
 #define UI_FONT_SPACING(fontSize) ((float)(fontSize) * 0.04f)
+#define UI_FONT_ASCII_FIRST 32
+#define UI_FONT_ASCII_LAST 126
+#define UI_FONT_EXTRA_GLYPH_COUNT 7
+
+static Font LoadUiFont(const char *fontPath)
+{
+    static const int kExtraCodepoints[UI_FONT_EXTRA_GLYPH_COUNT] = {
+        0x00C4, /* Ä */
+        0x00D6, /* Ö */
+        0x00DC, /* Ü */
+        0x00DF, /* ß */
+        0x00E4, /* ä */
+        0x00F6, /* ö */
+        0x00FC  /* ü */
+    };
+    int codepoints[(UI_FONT_ASCII_LAST - UI_FONT_ASCII_FIRST + 1) + UI_FONT_EXTRA_GLYPH_COUNT];
+    int index = 0;
+
+    for (int codepoint = UI_FONT_ASCII_FIRST; codepoint <= UI_FONT_ASCII_LAST; codepoint++)
+    {
+        codepoints[index++] = codepoint;
+    }
+
+    for (int i = 0; i < UI_FONT_EXTRA_GLYPH_COUNT; i++)
+    {
+        codepoints[index++] = kExtraCodepoints[i];
+    }
+
+    return LoadFontEx(fontPath, 64, codepoints, index);
+}
 
 void LoadRendererAssets(void)
 {
@@ -47,7 +78,7 @@ void LoadRendererAssets(void)
     const char *fontPath = "C:/Windows/Fonts/georgia.ttf";
     if (FileExists(fontPath))
     {
-        gUiFont = LoadFontEx(fontPath, 64, NULL, 0);
+        gUiFont = LoadUiFont(fontPath);
         if (gUiFont.texture.id != 0)
         {
             SetTextureFilter(gUiFont.texture, TEXTURE_FILTER_BILINEAR);

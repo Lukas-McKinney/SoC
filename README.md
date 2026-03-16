@@ -93,7 +93,6 @@ These are intentional shortcuts or current prototype settings:
 - AI now exhaustively searches bounded deterministic play lines
   - robber sub-choices use fast post-resolution scoring so thief turns stay responsive
   - long-horizon strategy is still guided by state evaluation rather than a full-game solve
-- Add Playtime for current match and length after the match, also maybe total playtime?
 ## Build
 
 ### Windows

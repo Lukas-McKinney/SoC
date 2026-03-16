@@ -1,6 +1,7 @@
 #include "renderer_ui.h"
 
 #include "game_logic.h"
+#include "localization.h"
 #include "renderer.h"
 #include "ui_state.h"
 
@@ -57,6 +58,8 @@ static Rectangle DevelopmentHandHitBounds(Rectangle bounds);
 static void DrawAwardCard(Rectangle bounds, const char *title, const char *subtitle, const char *detail, enum PlayerType owner, Color accent);
 static void BuildVictoryHeadline(const struct Map *map, enum PlayerType winner, char *buffer, size_t bufferSize);
 static void BuildVictorySubheadline(const struct Map *map, enum PlayerType winner, char *buffer, size_t bufferSize);
+static void FormatElapsedDuration(unsigned long long totalSeconds, char *buffer, size_t bufferSize);
+static void DrawTurnPanelPlaytime(const struct Map *map, Rectangle panel, Color color);
 
 static int BuildWrappedUiLines(const char *message, int fontSize, int maxWidth, char lines[][96], int maxLines)
 {
@@ -144,11 +147,11 @@ static void BuildVictoryHeadline(const struct Map *map, enum PlayerType winner, 
 
     if (localHuman != PLAYER_NONE)
     {
-        snprintf(buffer, bufferSize, "%s", winner == localHuman ? "You won" : "You lost");
+        snprintf(buffer, bufferSize, "%s", winner == localHuman ? loc("You won") : loc("You lost"));
         return;
     }
 
-    snprintf(buffer, bufferSize, "%s won", PlayerName(winner));
+    snprintf(buffer, bufferSize, loc("%s won"), PlayerName(winner));
 }
 
 static void BuildVictorySubheadline(const struct Map *map, enum PlayerType winner, char *buffer, size_t bufferSize)
@@ -164,16 +167,54 @@ static void BuildVictorySubheadline(const struct Map *map, enum PlayerType winne
     {
         if (winner == localHuman)
         {
-            snprintf(buffer, bufferSize, "%s", "You reached 10 points");
+            snprintf(buffer, bufferSize, "%s", loc("You reached 10 points"));
         }
         else
         {
-            snprintf(buffer, bufferSize, "%s won", PlayerName(winner));
+            snprintf(buffer, bufferSize, loc("%s won"), PlayerName(winner));
         }
         return;
     }
 
-    snprintf(buffer, bufferSize, "%s reaches 10 points", PlayerName(winner));
+    snprintf(buffer, bufferSize, loc("%s reaches 10 points"), PlayerName(winner));
+}
+
+static void FormatElapsedDuration(unsigned long long totalSeconds, char *buffer, size_t bufferSize)
+{
+    const unsigned long long hours = totalSeconds / 3600ULL;
+    const unsigned long long minutes = (totalSeconds % 3600ULL) / 60ULL;
+    const unsigned long long seconds = totalSeconds % 60ULL;
+
+    if (buffer == NULL || bufferSize == 0)
+    {
+        return;
+    }
+
+    if (hours > 0ULL)
+    {
+        snprintf(buffer, bufferSize, "%llu:%02llu:%02llu", hours, minutes, seconds);
+        return;
+    }
+
+    snprintf(buffer, bufferSize, "%02llu:%02llu", minutes, seconds);
+}
+
+static void DrawTurnPanelPlaytime(const struct Map *map, Rectangle panel, Color color)
+{
+    char duration[24];
+    char label[48];
+    const int fontSize = 16;
+    int width = 0;
+
+    if (map == NULL || gameHasWinner(map))
+    {
+        return;
+    }
+
+    FormatElapsedDuration(uiGetCurrentMatchPlaytimeSeconds(), duration, sizeof(duration));
+    snprintf(label, sizeof(label), loc("Playtime %s"), duration);
+    width = MeasureUiText(label, fontSize);
+    DrawUiText(label, panel.x + panel.width - 16.0f - width, panel.y + 18.0f, fontSize, color);
 }
 
 void DrawBuildPanel(const struct Map *map)
@@ -209,7 +250,7 @@ void DrawBuildPanel(const struct Map *map)
         DrawRectangleRounded((Rectangle){panelX + 6.0f, panelY + 8.0f, panel.width, panel.height}, 0.12f, 8, Fade(BLACK, 0.10f));
         DrawRectangleRounded(panel, 0.12f, 8, panelColor);
         DrawRectangleLinesEx(panel, 2.0f, borderColor);
-        DrawUiText("Build (B)", panelX + 18.0f, panelY + 14.0f, 24, (Color){54, 39, 29, 255});
+        DrawUiText(loc("Build (B)"), panelX + 18.0f, panelY + 14.0f, 24, (Color){54, 39, 29, 255});
         if (!uiIsBuildPanelOpen())
         {
             return;
@@ -224,31 +265,31 @@ void DrawBuildPanel(const struct Map *map)
     DrawRectangleRounded((Rectangle){panelX + 6.0f, panelY + 8.0f, panel.width, panel.height}, 0.08f, 8, Fade(BLACK, 0.10f));
     DrawRectangleRounded(panel, 0.08f, 8, panelColor);
     DrawRectangleLinesEx(panel, 2.0f, borderColor);
-    DrawUiText("Build (B)", panelX + 18.0f, panelY + 14.0f, 24, (Color){54, 39, 29, 255});
+    DrawUiText(loc("Build (B)"), panelX + 18.0f, panelY + 14.0f, 24, (Color){54, 39, 29, 255});
 
     DrawRectangleRounded(roadCard, 0.14f, 8, Fade(canBuyRoad ? activeCard : disabledCard, contentAlpha / 255.0f));
     DrawRectangleLinesEx(roadCard, 2.0f, Fade(gBuildMode == BUILD_MODE_ROAD ? armedAccent : (canBuyRoad ? borderColor : disabledBorder), contentAlpha / 255.0f));
-    DrawUiText("Road", roadCard.x + 12.0f, roadCard.y + 8.0f, 20, Fade(canBuyRoad ? (Color){54, 39, 29, 255} : disabledText, contentAlpha / 255.0f));
-    DrawUiText("Wood + Clay", roadCard.x + 12.0f, roadCard.y + 31.0f, 14, Fade(canBuyRoad ? (Color){92, 70, 50, 255} : disabledText, contentAlpha / 255.0f));
+    DrawUiText(loc("Road"), roadCard.x + 12.0f, roadCard.y + 8.0f, 20, Fade(canBuyRoad ? (Color){54, 39, 29, 255} : disabledText, contentAlpha / 255.0f));
+    DrawUiText(loc("Wood + Clay"), roadCard.x + 12.0f, roadCard.y + 31.0f, 14, Fade(canBuyRoad ? (Color){92, 70, 50, 255} : disabledText, contentAlpha / 255.0f));
     DrawLineEx((Vector2){roadCard.x + 112.0f, roadCard.y + 18.0f}, (Vector2){roadCard.x + 152.0f, roadCard.y + 38.0f}, 8.0f, Fade(canBuyRoad ? (Color){230, 41, 55, 255} : Fade((Color){230, 41, 55, 255}, 0.35f), contentAlpha / 255.0f));
     DrawLineEx((Vector2){roadCard.x + 112.0f, roadCard.y + 18.0f}, (Vector2){roadCard.x + 152.0f, roadCard.y + 38.0f}, 2.0f, Fade(RAYWHITE, 0.24f * (contentAlpha / 255.0f)));
     DrawRectangleRounded(settlementCard, 0.14f, 8, Fade(canBuySettlement ? inactiveCard : disabledCard, contentAlpha / 255.0f));
     DrawRectangleLinesEx(settlementCard, 2.0f, Fade(gBuildMode == BUILD_MODE_SETTLEMENT ? armedAccent : (canBuySettlement ? borderColor : disabledBorder), contentAlpha / 255.0f));
-    DrawUiText("Settlement", settlementCard.x + 12.0f, settlementCard.y + 8.0f, 20, Fade(canBuySettlement ? (Color){54, 39, 29, 255} : disabledText, contentAlpha / 255.0f));
-    DrawUiText("Wood Clay Wheat Sheep", settlementCard.x + 12.0f, settlementCard.y + 31.0f, 11, Fade(canBuySettlement ? (Color){92, 70, 50, 255} : disabledText, contentAlpha / 255.0f));
+    DrawUiText(loc("Settlement"), settlementCard.x + 12.0f, settlementCard.y + 8.0f, 20, Fade(canBuySettlement ? (Color){54, 39, 29, 255} : disabledText, contentAlpha / 255.0f));
+    DrawUiText(loc("Wood Clay Wheat Sheep"), settlementCard.x + 12.0f, settlementCard.y + 31.0f, 11, Fade(canBuySettlement ? (Color){92, 70, 50, 255} : disabledText, contentAlpha / 255.0f));
     DrawRectangle((int)(settlementCard.x + 126), (int)(settlementCard.y + 22), 24, 18, Fade(canBuySettlement ? (Color){170, 118, 72, 255} : Fade((Color){170, 118, 72, 255}, 0.45f), contentAlpha / 255.0f));
     DrawTriangle((Vector2){settlementCard.x + 138, settlementCard.y + 10}, (Vector2){settlementCard.x + 124, settlementCard.y + 24}, (Vector2){settlementCard.x + 152, settlementCard.y + 24}, Fade(canBuySettlement ? (Color){132, 80, 49, 255} : Fade((Color){132, 80, 49, 255}, 0.45f), contentAlpha / 255.0f));
     DrawRectangleRounded(cityCard, 0.14f, 8, Fade(canBuyCity ? inactiveCard : disabledCard, contentAlpha / 255.0f));
     DrawRectangleLinesEx(cityCard, 2.0f, Fade(gBuildMode == BUILD_MODE_CITY ? armedAccent : (canBuyCity ? borderColor : disabledBorder), contentAlpha / 255.0f));
-    DrawUiText("City", cityCard.x + 12.0f, cityCard.y + 8.0f, 20, Fade(canBuyCity ? (Color){54, 39, 29, 255} : disabledText, contentAlpha / 255.0f));
-    DrawUiText("2 Wheat + 3 Stone", cityCard.x + 12.0f, cityCard.y + 31.0f, 13, Fade(canBuyCity ? (Color){92, 70, 50, 255} : disabledText, contentAlpha / 255.0f));
+    DrawUiText(loc("City"), cityCard.x + 12.0f, cityCard.y + 8.0f, 20, Fade(canBuyCity ? (Color){54, 39, 29, 255} : disabledText, contentAlpha / 255.0f));
+    DrawUiText(loc("2 Wheat + 3 Stone"), cityCard.x + 12.0f, cityCard.y + 31.0f, 13, Fade(canBuyCity ? (Color){92, 70, 50, 255} : disabledText, contentAlpha / 255.0f));
     DrawRectangle((int)(cityCard.x + 122), (int)(cityCard.y + 24), 30, 18, Fade(canBuyCity ? (Color){170, 118, 72, 255} : Fade((Color){170, 118, 72, 255}, 0.45f), contentAlpha / 255.0f));
     DrawRectangle((int)(cityCard.x + 127), (int)(cityCard.y + 15), 20, 12, Fade(canBuyCity ? (Color){170, 118, 72, 255} : Fade((Color){170, 118, 72, 255}, 0.45f), contentAlpha / 255.0f));
     DrawTriangle((Vector2){cityCard.x + 137, cityCard.y + 6}, (Vector2){cityCard.x + 125, cityCard.y + 16}, (Vector2){cityCard.x + 149, cityCard.y + 16}, Fade(canBuyCity ? (Color){132, 80, 49, 255} : Fade((Color){132, 80, 49, 255}, 0.45f), contentAlpha / 255.0f));
     DrawRectangleRounded(devCard, 0.14f, 8, Fade(canBuyDevelopment ? inactiveCard : disabledCard, contentAlpha / 255.0f));
     DrawRectangleLinesEx(devCard, 2.0f, Fade(canBuyDevelopment ? borderColor : disabledBorder, contentAlpha / 255.0f));
-    DrawUiText("Development", devCard.x + 12.0f, devCard.y + 8.0f, 18, Fade(canBuyDevelopment ? (Color){54, 39, 29, 255} : disabledText, contentAlpha / 255.0f));
-    DrawUiText("Wheat Sheep Stone", devCard.x + 12.0f, devCard.y + 31.0f, 13, Fade(canBuyDevelopment ? (Color){92, 70, 50, 255} : disabledText, contentAlpha / 255.0f));
+    DrawUiText(loc("Development"), devCard.x + 12.0f, devCard.y + 8.0f, 18, Fade(canBuyDevelopment ? (Color){54, 39, 29, 255} : disabledText, contentAlpha / 255.0f));
+    DrawUiText(loc("Wheat Sheep Stone"), devCard.x + 12.0f, devCard.y + 31.0f, 13, Fade(canBuyDevelopment ? (Color){92, 70, 50, 255} : disabledText, contentAlpha / 255.0f));
     DrawRectangleRounded((Rectangle){devCard.x + 126.0f, devCard.y + 10.0f, 22.0f, 32.0f}, 0.12f, 6, Fade(canBuyDevelopment ? (Color){191, 171, 111, 255} : Fade((Color){191, 171, 111, 255}, 0.45f), contentAlpha / 255.0f));
     DrawRectangleLinesEx((Rectangle){devCard.x + 126.0f, devCard.y + 10.0f, 22.0f, 32.0f}, 1.5f, Fade(canBuyDevelopment ? (Color){120, 96, 53, 255} : disabledBorder, contentAlpha / 255.0f));
 }
@@ -259,7 +300,7 @@ void DrawTradeButton(const struct Map *map)
     const bool isPlayable = map->phase == GAME_PHASE_PLAY;
     DrawRectangleRounded(button, 0.18f, 8, isPlayable ? (Color){214, 202, 181, 255} : (Color){228, 220, 202, 255});
     DrawRectangleLinesEx(button, 2.0f, (Color){118, 88, 56, 255});
-    DrawUiText("Water Trade (W)", button.x + 14.0f, button.y + 11.0f, 20, isPlayable ? (Color){54, 39, 29, 255} : (Color){132, 112, 91, 255});
+    DrawUiText(loc("Water Trade (W)"), button.x + 14.0f, button.y + 11.0f, 20, isPlayable ? (Color){54, 39, 29, 255} : (Color){132, 112, 91, 255});
 }
 
 void DrawPlayerTradeButton(const struct Map *map)
@@ -268,7 +309,7 @@ void DrawPlayerTradeButton(const struct Map *map)
     const bool isPlayable = map->phase == GAME_PHASE_PLAY;
     DrawRectangleRounded(button, 0.18f, 8, isPlayable ? (Color){214, 202, 181, 255} : (Color){228, 220, 202, 255});
     DrawRectangleLinesEx(button, 2.0f, (Color){118, 88, 56, 255});
-    DrawUiText("Player Trade (T)", button.x + 10.0f, button.y + 11.0f, 20, isPlayable ? (Color){54, 39, 29, 255} : (Color){132, 112, 91, 255});
+    DrawUiText(loc("Player Trade (T)"), button.x + 10.0f, button.y + 11.0f, 20, isPlayable ? (Color){54, 39, 29, 255} : (Color){132, 112, 91, 255});
 }
 
 void DrawSettingsButton(void)
@@ -276,7 +317,7 @@ void DrawSettingsButton(void)
     const Rectangle button = GetSettingsButtonBounds();
     DrawRectangleRounded(button, 0.18f, 8, (Color){214, 202, 181, 255});
     DrawRectangleLinesEx(button, 2.0f, (Color){118, 88, 56, 255});
-    DrawUiText("Settings (Esc)", button.x + 14.0f, button.y + 10.0f, 20, (Color){54, 39, 29, 255});
+    DrawUiText(loc("Settings (Esc)"), button.x + 14.0f, button.y + 10.0f, 20, (Color){54, 39, 29, 255});
 }
 
 void DrawSettingsModal(void)
@@ -293,11 +334,12 @@ void DrawSettingsModal(void)
     const Rectangle closeButton = {panel.x + panel.width - 42.0f, panel.y + 12.0f, 28.0f, 28.0f};
     const Rectangle lightButton = {panel.x + 24.0f, panel.y + 82.0f, panel.width - 48.0f, 42.0f};
     const Rectangle darkButton = {panel.x + 24.0f, panel.y + 136.0f, panel.width - 48.0f, 42.0f};
-    const Rectangle aiSpeedTrack = {panel.x + 36.0f, panel.y + 220.0f, panel.width - 72.0f, 10.0f};
-    const Rectangle restartButton = {panel.x + 24.0f, panel.y + 292.0f, panel.width - 48.0f, 42.0f};
-    const Rectangle backToMenuButton = {panel.x + 24.0f, panel.y + 346.0f, panel.width - 48.0f, 42.0f};
-    const Rectangle quitButton = {panel.x + 24.0f, panel.y + 400.0f, panel.width - 48.0f, 42.0f};
-    const Rectangle confirmPanel = {panel.x + 26.0f, panel.y + 274.0f, panel.width - 52.0f, 140.0f};
+    const Rectangle languageButton = {panel.x + 24.0f, panel.y + 222.0f, panel.width - 48.0f, 42.0f};
+    const Rectangle aiSpeedTrack = {panel.x + 36.0f, panel.y + 318.0f, panel.width - 72.0f, 10.0f};
+    const Rectangle restartButton = {panel.x + 24.0f, panel.y + 390.0f, panel.width - 48.0f, 42.0f};
+    const Rectangle backToMenuButton = {panel.x + 24.0f, panel.y + 444.0f, panel.width - 48.0f, 42.0f};
+    const Rectangle quitButton = {panel.x + 24.0f, panel.y + 498.0f, panel.width - 48.0f, 42.0f};
+    const Rectangle confirmPanel = {panel.x + 26.0f, panel.y + 372.0f, panel.width - 52.0f, 140.0f};
     const Rectangle confirmButton = {confirmPanel.x + 18.0f, confirmPanel.y + confirmPanel.height - 46.0f, 132.0f, 30.0f};
     const Rectangle cancelButton = {confirmPanel.x + confirmPanel.width - 110.0f, confirmPanel.y + confirmPanel.height - 46.0f, 92.0f, 30.0f};
     const Color panelColor = (Color){244, 236, 217, 250};
@@ -311,6 +353,9 @@ void DrawSettingsModal(void)
     const int aiSpeed = uiGetAiSpeedSetting();
     const float aiSpeedNormalized = (float)aiSpeed / 10.0f;
     const float aiSpeedKnobX = aiSpeedTrack.x + aiSpeedTrack.width * aiSpeedNormalized;
+    char languageButtonLabel[64];
+
+    snprintf(languageButtonLabel, sizeof(languageButtonLabel), "%s: %s", loc("Language"), locLanguageDisplayName(locGetLanguage()));
 
     DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, 0.24f * eased));
     DrawRectangleRounded((Rectangle){panel.x + 8.0f, panel.y + 10.0f, panel.width, panel.height}, 0.06f, 8, Fade(BLACK, 0.14f * eased));
@@ -321,42 +366,47 @@ void DrawSettingsModal(void)
         return;
     }
 
-    DrawUiText("Settings", panel.x + 22.0f, panel.y + 16.0f, 28, textColor);
-    DrawUiText("Theme", panel.x + 22.0f, panel.y + 52.0f, 18, mutedText);
+    DrawUiText(loc("Settings"), panel.x + 22.0f, panel.y + 16.0f, 28, textColor);
+    DrawUiText(loc("Theme"), panel.x + 22.0f, panel.y + 52.0f, 18, mutedText);
     DrawRectangleRounded(closeButton, 0.22f, 6, (Color){224, 216, 198, 255});
     DrawRectangleLinesEx(closeButton, 1.5f, borderColor);
     DrawUiText("X", closeButton.x + 9.0f, closeButton.y + 4.0f, 20, textColor);
 
     DrawRectangleRounded(lightButton, 0.18f, 8, lightSelected ? (Color){171, 82, 54, 255} : (Color){236, 228, 208, 255});
     DrawRectangleLinesEx(lightButton, 2.0f, lightSelected ? borderColor : (Color){154, 132, 108, 255});
-    DrawUiText("Light Mode", lightButton.x + 18.0f, lightButton.y + 10.0f, 20, lightSelected ? RAYWHITE : textColor);
+    DrawUiText(loc("Light Mode"), lightButton.x + 18.0f, lightButton.y + 10.0f, 20, lightSelected ? RAYWHITE : textColor);
 
     DrawRectangleRounded(darkButton, 0.18f, 8, darkSelected ? (Color){171, 82, 54, 255} : (Color){236, 228, 208, 255});
     DrawRectangleLinesEx(darkButton, 2.0f, darkSelected ? borderColor : (Color){154, 132, 108, 255});
-    DrawUiText("Dark Mode", darkButton.x + 18.0f, darkButton.y + 10.0f, 20, darkSelected ? RAYWHITE : textColor);
+    DrawUiText(loc("Dark Mode"), darkButton.x + 18.0f, darkButton.y + 10.0f, 20, darkSelected ? RAYWHITE : textColor);
 
-    DrawUiText("AI Speed", panel.x + 22.0f, panel.y + 192.0f, 18, mutedText);
-    DrawUiText("0 slow", aiSpeedTrack.x, aiSpeedTrack.y + 16.0f, 14, mutedText);
-    DrawUiText("10 instant", aiSpeedTrack.x + aiSpeedTrack.width - MeasureUiText("10 instant", 14), aiSpeedTrack.y + 16.0f, 14, mutedText);
+    DrawUiText(loc("Language"), panel.x + 22.0f, panel.y + 192.0f, 18, mutedText);
+    DrawRectangleRounded(languageButton, 0.18f, 8, (Color){236, 228, 208, 255});
+    DrawRectangleLinesEx(languageButton, 2.0f, (Color){154, 132, 108, 255});
+    DrawUiText(languageButtonLabel, languageButton.x + 18.0f, languageButton.y + 10.0f, 20, textColor);
+
+    DrawUiText(loc("AI Speed"), panel.x + 22.0f, panel.y + 276.0f, 18, mutedText);
+    DrawUiText(loc("0 slow"), aiSpeedTrack.x, aiSpeedTrack.y + 16.0f, 14, mutedText);
+    DrawUiText(loc("10 instant"), aiSpeedTrack.x + aiSpeedTrack.width - MeasureUiText(loc("10 instant"), 14), aiSpeedTrack.y + 16.0f, 14, mutedText);
     DrawRectangleRounded(aiSpeedTrack, 0.45f, 8, (Color){224, 216, 198, 255});
     DrawRectangleRounded((Rectangle){aiSpeedTrack.x, aiSpeedTrack.y, aiSpeedTrack.width * aiSpeedNormalized, aiSpeedTrack.height}, 0.45f, 8, (Color){171, 82, 54, 255});
     DrawCircleV((Vector2){aiSpeedKnobX, aiSpeedTrack.y + aiSpeedTrack.height * 0.5f}, 9.0f, (Color){247, 240, 226, 255});
     DrawCircleLines((int)aiSpeedKnobX, (int)(aiSpeedTrack.y + aiSpeedTrack.height * 0.5f), 9.0f, borderColor);
     DrawUiText(TextFormat("%d", aiSpeed), panel.x + panel.width * 0.5f - 5.0f, aiSpeedTrack.y - 24.0f, 18, textColor);
 
-    DrawUiText("Game", panel.x + 22.0f, panel.y + 262.0f, 18, mutedText);
+    DrawUiText(loc("Game"), panel.x + 22.0f, panel.y + 360.0f, 18, mutedText);
 
     DrawRectangleRounded(restartButton, 0.18f, 8, (Color){236, 228, 208, 255});
     DrawRectangleLinesEx(restartButton, 2.0f, (Color){154, 132, 108, 255});
-    DrawUiText("Restart Game", restartButton.x + 18.0f, restartButton.y + 10.0f, 20, textColor);
+    DrawUiText(loc("Restart Game"), restartButton.x + 18.0f, restartButton.y + 10.0f, 20, textColor);
 
     DrawRectangleRounded(backToMenuButton, 0.18f, 8, (Color){236, 228, 208, 255});
     DrawRectangleLinesEx(backToMenuButton, 2.0f, (Color){154, 132, 108, 255});
-    DrawUiText("Back to Menu", backToMenuButton.x + 18.0f, backToMenuButton.y + 10.0f, 20, textColor);
+    DrawUiText(loc("Back to Menu"), backToMenuButton.x + 18.0f, backToMenuButton.y + 10.0f, 20, textColor);
 
     DrawRectangleRounded(quitButton, 0.18f, 8, (Color){171, 82, 54, 255});
     DrawRectangleLinesEx(quitButton, 2.0f, borderColor);
-    DrawUiText("Quit Game", quitButton.x + 18.0f, quitButton.y + 10.0f, 20, RAYWHITE);
+    DrawUiText(loc("Quit Game"), quitButton.x + 18.0f, quitButton.y + 10.0f, 20, RAYWHITE);
 
     if (!showingConfirm)
     {
@@ -369,37 +419,37 @@ void DrawSettingsModal(void)
 
     if (confirmAction == UI_SETTINGS_CONFIRM_MAIN_MENU)
     {
-        const char *confirmLabel = "Return to Menu";
+        const char *confirmLabel = loc("Return to Menu");
         const int confirmLabelWidth = MeasureUiText(confirmLabel, 17);
-        DrawUiText("Back to main menu?", confirmPanel.x + 18.0f, confirmPanel.y + 16.0f, 24, textColor);
-        DrawUiText("Current progress will be lost.", confirmPanel.x + 18.0f, confirmPanel.y + 48.0f, 17, mutedText);
+        DrawUiText(loc("Back to main menu?"), confirmPanel.x + 18.0f, confirmPanel.y + 16.0f, 24, textColor);
+        DrawUiText(loc("Current progress will be lost."), confirmPanel.x + 18.0f, confirmPanel.y + 48.0f, 17, mutedText);
         DrawRectangleRounded(confirmButton, 0.18f, 8, (Color){182, 141, 97, 255});
         DrawRectangleLinesEx(confirmButton, 1.5f, borderColor);
         DrawUiText(confirmLabel, confirmButton.x + confirmButton.width * 0.5f - confirmLabelWidth * 0.5f, confirmButton.y + 6.0f, 17, RAYWHITE);
     }
     else if (confirmAction == UI_SETTINGS_CONFIRM_RESTART)
     {
-        const char *confirmLabel = "Confirm Restart";
+        const char *confirmLabel = loc("Confirm Restart");
         const int confirmLabelWidth = MeasureUiText(confirmLabel, 17);
-        DrawUiText("Restart game?", confirmPanel.x + 18.0f, confirmPanel.y + 16.0f, 24, textColor);
-        DrawUiText("Current progress will be lost.", confirmPanel.x + 18.0f, confirmPanel.y + 48.0f, 17, mutedText);
+        DrawUiText(loc("Restart game?"), confirmPanel.x + 18.0f, confirmPanel.y + 16.0f, 24, textColor);
+        DrawUiText(loc("Current progress will be lost."), confirmPanel.x + 18.0f, confirmPanel.y + 48.0f, 17, mutedText);
         DrawRectangleRounded(confirmButton, 0.18f, 8, (Color){182, 141, 97, 255});
         DrawRectangleLinesEx(confirmButton, 1.5f, borderColor);
         DrawUiText(confirmLabel, confirmButton.x + confirmButton.width * 0.5f - confirmLabelWidth * 0.5f, confirmButton.y + 6.0f, 17, RAYWHITE);
     }
     else
     {
-        const char *confirmLabel = "Confirm Quit";
+        const char *confirmLabel = loc("Confirm Quit");
         const int confirmLabelWidth = MeasureUiText(confirmLabel, 17);
-        DrawUiText("Quit game?", confirmPanel.x + 18.0f, confirmPanel.y + 16.0f, 24, textColor);
-        DrawUiText("The application will close.", confirmPanel.x + 18.0f, confirmPanel.y + 48.0f, 17, mutedText);
+        DrawUiText(loc("Quit game?"), confirmPanel.x + 18.0f, confirmPanel.y + 16.0f, 24, textColor);
+        DrawUiText(loc("The application will close."), confirmPanel.x + 18.0f, confirmPanel.y + 48.0f, 17, mutedText);
         DrawRectangleRounded(confirmButton, 0.18f, 8, (Color){171, 82, 54, 255});
         DrawRectangleLinesEx(confirmButton, 1.5f, borderColor);
         DrawUiText(confirmLabel, confirmButton.x + confirmButton.width * 0.5f - confirmLabelWidth * 0.5f, confirmButton.y + 6.0f, 17, RAYWHITE);
     }
 
     {
-        const char *cancelLabel = "Cancel";
+        const char *cancelLabel = loc("Cancel");
         const int cancelLabelWidth = MeasureUiText(cancelLabel, 17);
     DrawRectangleRounded(cancelButton, 0.18f, 8, (Color){236, 228, 208, 255});
     DrawRectangleLinesEx(cancelButton, 1.5f, (Color){154, 132, 108, 255});
@@ -440,13 +490,13 @@ void DrawTradeModal(const struct Map *map)
         return;
     }
 
-    DrawUiText("Available Water Trades", panel.x + 22.0f, panel.y + 16.0f, 26, Fade(textColor, alpha));
+    DrawUiText(loc("Available Water Trades"), panel.x + 22.0f, panel.y + 16.0f, 26, Fade(textColor, alpha));
     DrawRectangleRounded(closeButton, 0.22f, 6, Fade((Color){224, 216, 198, 255}, alpha));
     DrawRectangleLinesEx(closeButton, 1.5f, Fade(borderColor, alpha));
     DrawUiText("X", closeButton.x + 9.0f, closeButton.y + 4.0f, 20, Fade(textColor, alpha));
 
-    DrawUiText("Give", panel.x + 24.0f, panel.y + 48.0f, 18, Fade(mutedText, alpha));
-    DrawUiText("Receive", panel.x + 232.0f, panel.y + 48.0f, 18, Fade(mutedText, alpha));
+    DrawUiText(loc("Give"), panel.x + 24.0f, panel.y + 48.0f, 18, Fade(mutedText, alpha));
+    DrawUiText(loc("Receive"), panel.x + 232.0f, panel.y + 48.0f, 18, Fade(mutedText, alpha));
     for (int i = 0; i < 5; i++)
     {
         const int optionRate = gameGetMaritimeTradeRate(map, (enum ResourceType)i);
@@ -466,7 +516,7 @@ void DrawTradeModal(const struct Map *map)
         DrawUiText(ResourceName((enum ResourceType)i), receiveOption.x + 10.0f, receiveOption.y + 6.0f, 16, receiveSelected ? RAYWHITE : (receiveAllowed ? textColor : (Color){132, 112, 91, 255}));
     }
 
-    DrawUiText("Amount", panel.x + panel.width * 0.5f - 32.0f, panel.y + 248.0f, 18, Fade(mutedText, alpha));
+    DrawUiText(loc("Amount"), panel.x + panel.width * 0.5f - 32.0f, panel.y + 248.0f, 18, Fade(mutedText, alpha));
     const Rectangle tradeMinus = {panel.x + panel.width * 0.5f - 112.0f, panel.y + 276.0f, 28.0f, 28.0f};
     const Rectangle tradeTrack = {panel.x + panel.width * 0.5f - 68.0f, panel.y + 284.0f, 136.0f, 12.0f};
     const Rectangle tradePlus = {panel.x + panel.width * 0.5f + 84.0f, panel.y + 276.0f, 28.0f, 28.0f};
@@ -487,7 +537,7 @@ void DrawTradeModal(const struct Map *map)
     DrawRectangleRounded(confirmButton, 0.16f, 8, canTrade ? (Color){171, 82, 54, 255} : (Color){224, 216, 198, 255});
     DrawRectangleLinesEx(confirmButton, 2.0f, canTrade ? borderColor : (Color){154, 132, 108, 255});
     {
-        const char *confirmLabel = TextFormat("Trade %d %s for %d %s", rate * gTradeAmount, ResourceName((enum ResourceType)gTradeGiveResource), gTradeAmount, ResourceName((enum ResourceType)gTradeReceiveResource));
+        const char *confirmLabel = TextFormat(loc("Trade %d %s for %d %s"), rate * gTradeAmount, ResourceName((enum ResourceType)gTradeGiveResource), gTradeAmount, ResourceName((enum ResourceType)gTradeReceiveResource));
         const int labelWidth = MeasureUiText(confirmLabel, 18);
         DrawUiText(confirmLabel, confirmButton.x + confirmButton.width * 0.5f - labelWidth * 0.5f, confirmButton.y + confirmButton.height * 0.5f - 9.0f, 18, canTrade ? RAYWHITE : (Color){132, 112, 91, 255});
     }
@@ -529,12 +579,12 @@ void DrawPlayerTradeModal(const struct Map *map)
         return;
     }
 
-    DrawUiText("Player Trade", panel.x + 22.0f, panel.y + 16.0f, 26, Fade(textColor, alpha));
+    DrawUiText(loc("Player Trade"), panel.x + 22.0f, panel.y + 16.0f, 26, Fade(textColor, alpha));
     DrawRectangleRounded(closeButton, 0.22f, 6, Fade((Color){224, 216, 198, 255}, alpha));
     DrawRectangleLinesEx(closeButton, 1.5f, Fade(borderColor, alpha));
     DrawUiText("X", closeButton.x + 9.0f, closeButton.y + 4.0f, 20, Fade(textColor, alpha));
 
-    DrawUiText("Trade With", panel.x + 24.0f, panel.y + 48.0f, 18, Fade(mutedText, alpha));
+    DrawUiText(loc("Trade With"), panel.x + 24.0f, panel.y + 48.0f, 18, Fade(mutedText, alpha));
     int playerSlot = 0;
     for (int i = 0; i < MAX_PLAYERS; i++)
     {
@@ -556,8 +606,8 @@ void DrawPlayerTradeModal(const struct Map *map)
         playerSlot++;
     }
 
-    DrawUiText("You Give", panel.x + 24.0f, panel.y + 132.0f, 18, Fade(mutedText, alpha));
-    DrawUiText("You Receive", panel.x + 232.0f, panel.y + 132.0f, 18, Fade(mutedText, alpha));
+    DrawUiText(loc("You Give"), panel.x + 24.0f, panel.y + 132.0f, 18, Fade(mutedText, alpha));
+    DrawUiText(loc("You Receive"), panel.x + 232.0f, panel.y + 132.0f, 18, Fade(mutedText, alpha));
     for (int i = 0; i < 5; i++)
     {
         const bool giveAvailable = map->players[map->currentPlayer].resources[i] > 0;
@@ -579,7 +629,7 @@ void DrawPlayerTradeModal(const struct Map *map)
         DrawUiText(ResourceName((enum ResourceType)i), receiveOption.x + 10.0f, receiveOption.y + 3.0f, 14, receiveSelected ? RAYWHITE : (receiveAllowed ? textColor : disabledText));
     }
 
-    DrawUiText("Your Amount", panel.x + 24.0f, panel.y + 294.0f, 18, Fade(mutedText, alpha));
+    DrawUiText(loc("Your Amount"), panel.x + 24.0f, panel.y + 294.0f, 18, Fade(mutedText, alpha));
     const Rectangle giveMinus = {panel.x + 24.0f, panel.y + 326.0f, 28.0f, 28.0f};
     const Rectangle giveTrack = {panel.x + 68.0f, panel.y + 334.0f, 92.0f, 12.0f};
     const Rectangle givePlus = {panel.x + 176.0f, panel.y + 326.0f, 28.0f, 28.0f};
@@ -597,7 +647,7 @@ void DrawPlayerTradeModal(const struct Map *map)
     DrawRectangleLinesEx(givePlus, 1.5f, borderColor);
     DrawUiText("+", givePlus.x + 8.0f, givePlus.y + 2.0f, 24, textColor);
 
-    DrawUiText("Their Amount", panel.x + 232.0f, panel.y + 294.0f, 18, Fade(mutedText, alpha));
+    DrawUiText(loc("Their Amount"), panel.x + 232.0f, panel.y + 294.0f, 18, Fade(mutedText, alpha));
     const Rectangle receiveMinus = {panel.x + 232.0f, panel.y + 326.0f, 28.0f, 28.0f};
     const Rectangle receiveTrack = {panel.x + 276.0f, panel.y + 334.0f, 92.0f, 12.0f};
     const Rectangle receivePlus = {panel.x + 384.0f, panel.y + 326.0f, 28.0f, 28.0f};
@@ -618,7 +668,7 @@ void DrawPlayerTradeModal(const struct Map *map)
     DrawRectangleRounded(confirmButton, 0.16f, 8, canTrade ? (Color){171, 82, 54, 255} : (Color){224, 216, 198, 255});
     DrawRectangleLinesEx(confirmButton, 2.0f, canTrade ? borderColor : (Color){154, 132, 108, 255});
     {
-        const char *confirmLabel = TextFormat("Trade %d %s for %d %s", gPlayerTradeGiveAmount, ResourceName((enum ResourceType)gPlayerTradeGiveResource), gPlayerTradeReceiveAmount, ResourceName((enum ResourceType)gPlayerTradeReceiveResource));
+        const char *confirmLabel = TextFormat(loc("Trade %d %s for %d %s"), gPlayerTradeGiveAmount, ResourceName((enum ResourceType)gPlayerTradeGiveResource), gPlayerTradeReceiveAmount, ResourceName((enum ResourceType)gPlayerTradeReceiveResource));
         const int labelWidth = MeasureUiText(confirmLabel, 18);
         DrawUiText(confirmLabel, confirmButton.x + confirmButton.width * 0.5f - labelWidth * 0.5f, confirmButton.y + confirmButton.height * 0.5f - 9.0f, 18, canTrade ? RAYWHITE : (Color){132, 112, 91, 255});
     }
@@ -656,10 +706,10 @@ void DrawDiscardModal(const struct Map *map)
 
     if (!revealDiscard)
     {
-        const char *title = "Discard Half";
-        const char *lineA = TextFormat("%s needs to discard %d cards.", PlayerName(discardPlayer), discardRequired);
-        const char *lineB = "Pass the screen, then click anywhere here.";
-        const char *lineC = "Resource counts stay hidden until they continue.";
+        const char *title = loc("Discard Half");
+        const char *lineA = TextFormat(loc("%s needs to discard %d cards."), PlayerName(discardPlayer), discardRequired);
+        const char *lineB = loc("Pass the screen, then click anywhere here.");
+        const char *lineC = loc("Resource counts stay hidden until they continue.");
         DrawUiText(title, panel.x + 22.0f, panel.y + 24.0f, 28, textColor);
         DrawUiText(lineA, panel.x + 22.0f, panel.y + 88.0f, 20, mutedText);
         DrawUiText(lineB, panel.x + 22.0f, panel.y + 132.0f, 20, textColor);
@@ -667,8 +717,8 @@ void DrawDiscardModal(const struct Map *map)
         return;
     }
 
-    DrawUiText("Discard Half", panel.x + 22.0f, panel.y + 16.0f, 28, textColor);
-    DrawUiText(TextFormat("%s must discard %d cards", PlayerName(discardPlayer), discardRequired), panel.x + 22.0f, panel.y + 50.0f, 18, mutedText);
+    DrawUiText(loc("Discard Half"), panel.x + 22.0f, panel.y + 16.0f, 28, textColor);
+    DrawUiText(TextFormat(loc("%s must discard %d cards"), PlayerName(discardPlayer), discardRequired), panel.x + 22.0f, panel.y + 50.0f, 18, mutedText);
 
     for (int resource = 0; resource < 5; resource++)
     {
@@ -693,14 +743,14 @@ void DrawDiscardModal(const struct Map *map)
         DrawUiText("+", plusButton.x + 7.0f, plusButton.y + 1.0f, 24, textColor);
     }
 
-    DrawUiText(TextFormat("Selected %d / %d", discardSelected, discardRequired), panel.x + 22.0f, panel.y + 280.0f, 18, discardSelected == discardRequired ? (Color){54, 130, 72, 255} : mutedText);
+    DrawUiText(TextFormat(loc("Selected %d / %d"), discardSelected, discardRequired), panel.x + 22.0f, panel.y + 280.0f, 18, discardSelected == discardRequired ? (Color){54, 130, 72, 255} : mutedText);
     {
         const Rectangle confirmButton = {panel.x + 38.0f, panel.y + panel.height - 48.0f, panel.width - 76.0f, 36.0f};
         const bool ready = discardSelected == discardRequired;
         DrawRectangleRounded(confirmButton, 0.16f, 8, ready ? (Color){171, 82, 54, 255} : (Color){224, 216, 198, 255});
         DrawRectangleLinesEx(confirmButton, 2.0f, ready ? borderColor : (Color){154, 132, 108, 255});
         {
-            const char *label = "Confirm Discard";
+            const char *label = loc("Confirm Discard");
             const int width = MeasureUiText(label, 18);
             DrawUiText(label, confirmButton.x + confirmButton.width * 0.5f - width * 0.5f, confirmButton.y + 8.0f, 18, ready ? RAYWHITE : (Color){132, 112, 91, 255});
         }
@@ -732,13 +782,13 @@ void DrawThiefVictimModal(const struct Map *map)
 
     if (!revealVictims)
     {
-        DrawUiText("Steal Resource", panel.x + 22.0f, panel.y + 20.0f, 28, textColor);
-        DrawUiText(TextFormat("%s is choosing an enemy.", PlayerName(map->currentPlayer)), panel.x + 22.0f, panel.y + 96.0f, 20, mutedText);
+        DrawUiText(loc("Steal Resource"), panel.x + 22.0f, panel.y + 20.0f, 28, textColor);
+        DrawUiText(TextFormat(loc("%s is choosing an enemy."), PlayerName(map->currentPlayer)), panel.x + 22.0f, panel.y + 96.0f, 20, mutedText);
         return;
     }
 
-    DrawUiText("Steal Resource", panel.x + 22.0f, panel.y + 16.0f, 28, textColor);
-    DrawUiText("Choose one adjacent player to steal from", panel.x + 22.0f, panel.y + 52.0f, 18, mutedText);
+    DrawUiText(loc("Steal Resource"), panel.x + 22.0f, panel.y + 16.0f, 28, textColor);
+    DrawUiText(loc("Choose one adjacent player to steal from"), panel.x + 22.0f, panel.y + 52.0f, 18, mutedText);
 
     for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
     {
@@ -772,24 +822,24 @@ void DrawAwardCards(const struct Map *map)
     const Rectangle longestRoadCard = {cardX, firstCardY, cardWidth, cardHeight};
     const Rectangle largestArmyCard = {cardX, firstCardY + cardHeight + gap, cardWidth, cardHeight};
     const char *longestRoadDetail = gameGetLongestRoadLength(map) >= 5
-                                        ? TextFormat("Road length: %d", gameGetLongestRoadLength(map))
-                                        : "Need 5-road chain";
-    const char *largestArmyDetail = "Need 3 knights";
+                                        ? TextFormat(loc("Road length: %d"), gameGetLongestRoadLength(map))
+                                        : loc("Need 5-road chain");
+    const char *largestArmyDetail = loc("Need 3 knights");
 
     if (largestArmyOwner >= PLAYER_RED && largestArmyOwner <= PLAYER_BLACK)
     {
-        largestArmyDetail = TextFormat("Played knights: %d", map->players[largestArmyOwner].playedKnightCount);
+        largestArmyDetail = TextFormat(loc("Played knights: %d"), map->players[largestArmyOwner].playedKnightCount);
     }
 
     DrawAwardCard(longestRoadCard,
-                  "Longest Road",
-                  "2 Victory Points",
+                  loc("Longest Road"),
+                  loc("2 Victory Points"),
                   longestRoadDetail,
                   longestRoadOwner,
                   (Color){159, 103, 58, 255});
     DrawAwardCard(largestArmyCard,
-                  "Largest Army",
-                  "2 Victory Points",
+                  loc("Largest Army"),
+                  loc("2 Victory Points"),
                   largestArmyDetail,
                   largestArmyOwner,
                   (Color){118, 116, 70, 255});
@@ -816,20 +866,20 @@ void DrawPlayerPanel(const struct Map *map)
     DrawRectangleLinesEx(panel, 2.0f, borderColor);
 
     DrawUiText(PlayerName(player->type), panelX + 16.0f, panelY + 14.0f, 26, PlayerColor(player->type));
-    DrawUiText(showingPinnedLocalInfo ? "Your Hand" : "Current Player", panelX + 16.0f, panelY + 44.0f, 16, (Color){92, 70, 50, 255});
+    DrawUiText(showingPinnedLocalInfo ? loc("Your Hand") : loc("Current Player"), panelX + 16.0f, panelY + 44.0f, 16, (Color){92, 70, 50, 255});
 
     const int totalVp = gameComputeVictoryPoints(map, player->type);
     const int visibleVp = gameComputeVisibleVictoryPoints(map, player->type);
-    DrawUiText("Victory Points", panelX + 16.0f, panelY + 78.0f, 18, (Color){54, 39, 29, 255});
+    DrawUiText(loc("Victory Points"), panelX + 16.0f, panelY + 78.0f, 18, (Color){54, 39, 29, 255});
     {
         const char *vpLabel = TextFormat("%d (%d)", totalVp, visibleVp);
         const int vpWidth = MeasureUiText(vpLabel, 24);
         DrawUiText(vpLabel, panelX + panel.width - 18.0f - vpWidth, panelY + 76.0f, 24, (Color){54, 39, 29, 255});
     }
 
-    DrawUiText("Developement Cards", panelX + 16.0f, panelY + 108.0f, 14, (Color){92, 70, 50, 255});
+    DrawUiText(loc("Developement Cards"), panelX + 16.0f, panelY + 108.0f, 14, (Color){92, 70, 50, 255});
     {
-        const char *deckCountLabel = TextFormat("%d left", gameGetDevelopmentDeckCount(map));
+        const char *deckCountLabel = TextFormat(loc("%d left"), gameGetDevelopmentDeckCount(map));
         const int deckCountWidth = MeasureUiText(deckCountLabel, 14);
         const float deckCountX = panelX + panel.width - 32.0f - deckCountWidth;
         const Color deckCountColor = (Color){46, 33, 25, 255};
@@ -837,7 +887,7 @@ void DrawPlayerPanel(const struct Map *map)
         DrawUiText(deckCountLabel, deckCountX + 0.8f, panelY + 108.0f, 14, deckCountColor);
     }
 
-    DrawUiText("Resources", panelX + 16.0f, panelY + 126.0f, 18, buttonText);
+    DrawUiText(loc("Resources"), panelX + 16.0f, panelY + 126.0f, 18, buttonText);
     for (int resource = 0; resource < 5; resource++)
     {
         const float rowY = panelY + 148.0f + resource * 14.0f;
@@ -902,8 +952,8 @@ void DrawOpponentVictoryBar(const struct Map *map)
     DrawRectangleRounded((Rectangle){bar.x + 6.0f, bar.y + 8.0f, bar.width, bar.height}, 0.14f, 8, Fade(BLACK, 0.10f));
     DrawRectangleRounded(bar, 0.14f, 8, panelColor);
     DrawRectangleLinesEx(bar, 2.0f, borderColor);
-    DrawUiText("Opponents", bar.x + padding, bar.y + 8.0f, 18, textColor);
-    DrawUiText("Visible VP", bar.x + padding, bar.y + 30.0f, 13, mutedText);
+    DrawUiText(loc("Opponents"), bar.x + padding, bar.y + 8.0f, 18, textColor);
+    DrawUiText(loc("Visible VP"), bar.x + padding, bar.y + 30.0f, 13, mutedText);
 
     for (int i = 0; i < opponentCount; i++)
     {
@@ -1146,14 +1196,14 @@ void DrawDevelopmentPurchaseOverlay(const struct Map *map)
     DrawRectangleRounded((Rectangle){panel.x + 6.0f, panel.y + 8.0f, panel.width, panel.height}, 0.10f, 8, Fade(BLACK, 0.12f * alpha));
     DrawRectangleRounded(panel, 0.10f, 8, Fade((Color){247, 240, 226, 255}, alpha));
     DrawRectangleLinesEx(panel, 2.0f, Fade((Color){118, 88, 56, 255}, alpha));
-    DrawUiText("Buy Development Card?", panel.x + 18.0f, panel.y + 16.0f, 22, Fade((Color){54, 39, 29, 255}, alpha));
-    DrawUiText("Cost: Wheat + Sheep + Stone", panel.x + 18.0f, panel.y + 50.0f, 16, Fade((Color){92, 70, 50, 255}, alpha));
-    DrawUiText(TextFormat("%d cards left in deck", gameGetDevelopmentDeckCount(map)), panel.x + 18.0f, panel.y + 72.0f, 14, Fade((Color){92, 70, 50, 255}, alpha));
+    DrawUiText(loc("Buy Development Card?"), panel.x + 18.0f, panel.y + 16.0f, 22, Fade((Color){54, 39, 29, 255}, alpha));
+    DrawUiText(loc("Cost: Wheat + Sheep + Stone"), panel.x + 18.0f, panel.y + 50.0f, 16, Fade((Color){92, 70, 50, 255}, alpha));
+    DrawUiText(TextFormat(loc("%d cards left in deck"), gameGetDevelopmentDeckCount(map)), panel.x + 18.0f, panel.y + 72.0f, 14, Fade((Color){92, 70, 50, 255}, alpha));
 
     DrawRectangleRounded(confirmButton, 0.18f, 8, Fade(canBuyDevelopment ? (Color){171, 82, 54, 255} : (Color){224, 216, 198, 255}, alpha));
     DrawRectangleLinesEx(confirmButton, 2.0f, Fade(canBuyDevelopment ? (Color){118, 88, 56, 255} : (Color){154, 132, 108, 255}, alpha));
     {
-        const char *confirmLabel = "Confirm Buy";
+        const char *confirmLabel = loc("Confirm Buy");
         const int confirmWidth = MeasureUiText(confirmLabel, 18);
         DrawUiText(confirmLabel, confirmButton.x + confirmButton.width * 0.5f - confirmWidth * 0.5f, confirmButton.y + 8.0f, 18, Fade(canBuyDevelopment ? RAYWHITE : (Color){132, 112, 91, 255}, alpha));
     }
@@ -1161,7 +1211,7 @@ void DrawDevelopmentPurchaseOverlay(const struct Map *map)
     DrawRectangleRounded(cancelButton, 0.18f, 8, Fade((Color){224, 216, 198, 255}, alpha));
     DrawRectangleLinesEx(cancelButton, 2.0f, Fade((Color){154, 132, 108, 255}, alpha));
     {
-        const char *cancelLabel = "Cancel";
+        const char *cancelLabel = loc("Cancel");
         const int cancelWidth = MeasureUiText(cancelLabel, 18);
         DrawUiText(cancelLabel, cancelButton.x + cancelButton.width * 0.5f - cancelWidth * 0.5f, cancelButton.y + 8.0f, 18, Fade((Color){92, 70, 50, 255}, alpha));
     }
@@ -1192,22 +1242,22 @@ void DrawDevelopmentPlayOverlay(const struct Map *map)
     DrawRectangleRounded((Rectangle){panel.x + 8.0f, panel.y + 10.0f, panel.width, panel.height}, 0.10f, 8, Fade(BLACK, 0.14f * alpha));
     DrawRectangleRounded(panel, 0.10f, 8, Fade((Color){247, 240, 226, 252}, alpha));
     DrawRectangleLinesEx(panel, 2.0f, Fade((Color){118, 88, 56, 255}, alpha));
-    DrawUiText(TextFormat("Use %s?", DevelopmentCardTitle(type)), panel.x + 22.0f, panel.y + 18.0f, 26, Fade(textColor, alpha));
+    DrawUiText(TextFormat(loc("Use %s?"), DevelopmentCardTitle(type)), panel.x + 22.0f, panel.y + 18.0f, 26, Fade(textColor, alpha));
 
     switch (type)
     {
     case DEVELOPMENT_CARD_KNIGHT:
-        DrawUiText("Move the thief and steal 1 random card.", panel.x + 22.0f, panel.y + 60.0f, 18, Fade(mutedText, alpha));
-        DrawUiText("You can still roll this turn afterward.", panel.x + 22.0f, panel.y + 88.0f, 16, Fade((Color){122, 100, 78, 255}, alpha));
+        DrawUiText(loc("Move the thief and steal 1 random card."), panel.x + 22.0f, panel.y + 60.0f, 18, Fade(mutedText, alpha));
+        DrawUiText(loc("You can still roll this turn afterward."), panel.x + 22.0f, panel.y + 88.0f, 16, Fade((Color){122, 100, 78, 255}, alpha));
         break;
     case DEVELOPMENT_CARD_ROAD_BUILDING:
-        DrawUiText("Place up to 2 roads for free.", panel.x + 22.0f, panel.y + 60.0f, 18, Fade(mutedText, alpha));
-        DrawUiText("The board will switch into road placement mode.", panel.x + 22.0f, panel.y + 88.0f, 16, Fade((Color){122, 100, 78, 255}, alpha));
+        DrawUiText(loc("Place up to 2 roads for free."), panel.x + 22.0f, panel.y + 60.0f, 18, Fade(mutedText, alpha));
+        DrawUiText(loc("The board will switch into road placement mode."), panel.x + 22.0f, panel.y + 88.0f, 16, Fade((Color){122, 100, 78, 255}, alpha));
         break;
     case DEVELOPMENT_CARD_YEAR_OF_PLENTY:
-        DrawUiText("Choose 2 resources to take from the bank.", panel.x + 22.0f, panel.y + 60.0f, 18, Fade(mutedText, alpha));
-        DrawUiText("First Resource", panel.x + 24.0f, panel.y + 108.0f, 15, Fade(textColor, alpha));
-        DrawUiText("Second Resource", panel.x + 24.0f, panel.y + 160.0f, 15, Fade(textColor, alpha));
+        DrawUiText(loc("Choose 2 resources to take from the bank."), panel.x + 22.0f, panel.y + 60.0f, 18, Fade(mutedText, alpha));
+        DrawUiText(loc("First Resource"), panel.x + 24.0f, panel.y + 108.0f, 15, Fade(textColor, alpha));
+        DrawUiText(loc("Second Resource"), panel.x + 24.0f, panel.y + 160.0f, 15, Fade(textColor, alpha));
         for (int resource = 0; resource < 5; resource++)
         {
             const Rectangle firstButton = {rowX + resource * (buttonWidth + buttonGap), panel.y + 132.0f, buttonWidth, buttonHeight};
@@ -1231,8 +1281,8 @@ void DrawDevelopmentPlayOverlay(const struct Map *map)
         }
         break;
     case DEVELOPMENT_CARD_MONOPOLY:
-        DrawUiText("Choose 1 resource. Every opponent gives you that type.", panel.x + 22.0f, panel.y + 60.0f, 18, Fade(mutedText, alpha));
-        DrawUiText("Target Resource", panel.x + 24.0f, panel.y + 116.0f, 15, Fade(textColor, alpha));
+        DrawUiText(loc("Choose 1 resource. Every opponent gives you that type."), panel.x + 22.0f, panel.y + 60.0f, 18, Fade(mutedText, alpha));
+        DrawUiText(loc("Target Resource"), panel.x + 24.0f, panel.y + 116.0f, 15, Fade(textColor, alpha));
         for (int resource = 0; resource < 5; resource++)
         {
             const Rectangle button = {rowX + resource * (buttonWidth + buttonGap), panel.y + 144.0f, buttonWidth, buttonHeight};
@@ -1247,25 +1297,25 @@ void DrawDevelopmentPlayOverlay(const struct Map *map)
         break;
     case DEVELOPMENT_CARD_VICTORY_POINT:
     default:
-        DrawUiText("Victory point cards are counted automatically.", panel.x + 22.0f, panel.y + 60.0f, 18, Fade(mutedText, alpha));
+        DrawUiText(loc("Victory point cards are counted automatically."), panel.x + 22.0f, panel.y + 60.0f, 18, Fade(mutedText, alpha));
         break;
     }
 
     DrawRectangleRounded(confirmButton, 0.18f, 8, Fade(canPlay ? (Color){171, 82, 54, 255} : (Color){224, 216, 198, 255}, alpha));
     DrawRectangleLinesEx(confirmButton, 2.0f, Fade(canPlay ? (Color){118, 88, 56, 255} : (Color){154, 132, 108, 255}, alpha));
     {
-        const char *confirmLabel = "Confirm Use";
+        const char *confirmLabel = loc("Confirm Use");
         if (type == DEVELOPMENT_CARD_YEAR_OF_PLENTY)
         {
-            confirmLabel = "Gain Resources";
+            confirmLabel = loc("Gain Resources");
         }
         else if (type == DEVELOPMENT_CARD_MONOPOLY)
         {
-            confirmLabel = "Claim Resource";
+            confirmLabel = loc("Claim Resource");
         }
         else if (type == DEVELOPMENT_CARD_ROAD_BUILDING)
         {
-            confirmLabel = "Place Roads";
+            confirmLabel = loc("Place Roads");
         }
         const int confirmWidth = MeasureUiText(confirmLabel, 18);
         DrawUiText(confirmLabel, confirmButton.x + confirmButton.width * 0.5f - confirmWidth * 0.5f, confirmButton.y + 8.0f, 18, Fade(canPlay ? RAYWHITE : (Color){132, 112, 91, 255}, alpha));
@@ -1274,7 +1324,7 @@ void DrawDevelopmentPlayOverlay(const struct Map *map)
     DrawRectangleRounded(cancelButton, 0.18f, 8, Fade((Color){224, 216, 198, 255}, alpha));
     DrawRectangleLinesEx(cancelButton, 2.0f, Fade((Color){154, 132, 108, 255}, alpha));
     {
-        const char *cancelLabel = "Cancel";
+        const char *cancelLabel = loc("Cancel");
         const int cancelWidth = MeasureUiText(cancelLabel, 18);
         DrawUiText(cancelLabel, cancelButton.x + cancelButton.width * 0.5f - cancelWidth * 0.5f, cancelButton.y + 8.0f, 18, Fade((Color){92, 70, 50, 255}, alpha));
     }
@@ -1443,22 +1493,33 @@ void DrawTurnPanel(const struct Map *map)
     DrawRectangleRounded(panel, 0.08f, 8, panelColor);
     DrawRectangleLinesEx(panel, 2.0f, borderColor);
 
-    DrawUiText("Turn", panel.x + 16.0f, panel.y + 14.0f, 24, textColor);
+    DrawUiText(loc("Turn"), panel.x + 16.0f, panel.y + 14.0f, 24, textColor);
+    DrawTurnPanelPlaytime(map, panel, (Color){92, 70, 50, 255});
     if (gameHasWinner(map))
     {
         const enum PlayerType winner = gameGetWinner(map);
         const int winnerPoints = gameComputeVictoryPoints(map, winner);
         char headline[64];
         char subheadline[64];
+        char matchDuration[24];
+        char totalDuration[24];
+        char matchLength[48];
+        char totalPlaytime[52];
         BuildVictoryHeadline(map, winner, headline, sizeof(headline));
         BuildVictorySubheadline(map, winner, subheadline, sizeof(subheadline));
-        DrawUiText("Game Over", panel.x + 16.0f, panel.y + 52.0f, 24, (Color){171, 82, 54, 255});
+        FormatElapsedDuration(uiGetCurrentMatchPlaytimeSeconds(), matchDuration, sizeof(matchDuration));
+        FormatElapsedDuration(uiGetTotalPlaytimeSeconds(), totalDuration, sizeof(totalDuration));
+        snprintf(matchLength, sizeof(matchLength), loc("Match length %s"), matchDuration);
+        snprintf(totalPlaytime, sizeof(totalPlaytime), loc("Total playtime %s"), totalDuration);
+        DrawUiText(loc("Game Over"), panel.x + 16.0f, panel.y + 52.0f, 24, (Color){171, 82, 54, 255});
         DrawUiText(headline, panel.x + 16.0f, panel.y + 88.0f, 28, winner == LocalHumanPlayer(map) ? (Color){54, 130, 72, 255} : PlayerColor(winner));
         DrawUiText(subheadline, panel.x + 16.0f, panel.y + 124.0f, 18, PlayerColor(winner));
-        DrawUiText(TextFormat("%d victory points", winnerPoints), panel.x + 16.0f, panel.y + 150.0f, 18, (Color){92, 70, 50, 255});
-        DrawUiText("Board is locked", panel.x + 16.0f, panel.y + 174.0f, 20, textColor);
-        DrawUiText("Use the overlay buttons", panel.x + 16.0f, panel.y + 202.0f, 18, (Color){92, 70, 50, 255});
-        DrawUiText("to restart or return", panel.x + 16.0f, panel.y + 224.0f, 18, (Color){92, 70, 50, 255});
+        DrawUiText(TextFormat(loc("%d victory points"), winnerPoints), panel.x + 16.0f, panel.y + 150.0f, 18, (Color){92, 70, 50, 255});
+        DrawUiText(loc("Board is locked"), panel.x + 16.0f, panel.y + 174.0f, 20, textColor);
+        DrawUiText(loc("Use the overlay buttons"), panel.x + 16.0f, panel.y + 202.0f, 18, (Color){92, 70, 50, 255});
+        DrawUiText(loc("to restart or return"), panel.x + 16.0f, panel.y + 224.0f, 18, (Color){92, 70, 50, 255});
+        DrawUiText(matchLength, panel.x + 16.0f, panel.y + 254.0f, 18, textColor);
+        DrawUiText(totalPlaytime, panel.x + 16.0f, panel.y + 278.0f, 18, (Color){92, 70, 50, 255});
         UpdateTurnButtonAnimation(&gRollDiceButtonAnimation, rollDiceButton, false);
         UpdateTurnButtonAnimation(&gEndTurnButtonAnimation, endTurnButton, false);
         return;
@@ -1468,9 +1529,9 @@ void DrawTurnPanel(const struct Map *map)
     {
         UpdateTurnButtonAnimation(&gRollDiceButtonAnimation, rollDiceButton, false);
         UpdateTurnButtonAnimation(&gEndTurnButtonAnimation, endTurnButton, false);
-        DrawUiText("Setup Phase", panel.x + 16.0f, panel.y + 48.0f, 18, (Color){92, 70, 50, 255});
-        DrawUiText(map->setupNeedsRoad ? "Place 1 road" : "Place 1 settlement", panel.x + 16.0f, panel.y + 76.0f, 24, textColor);
-        DrawUiText(TextFormat("Round %d / 8", map->setupStep + 1), panel.x + 16.0f, panel.y + 110.0f, 18, (Color){92, 70, 50, 255});
+        DrawUiText(loc("Setup Phase"), panel.x + 16.0f, panel.y + 48.0f, 18, (Color){92, 70, 50, 255});
+        DrawUiText(map->setupNeedsRoad ? loc("Place 1 road") : loc("Place 1 settlement"), panel.x + 16.0f, panel.y + 76.0f, 24, textColor);
+        DrawUiText(TextFormat(loc("Round %d / 8"), map->setupStep + 1), panel.x + 16.0f, panel.y + 110.0f, 18, (Color){92, 70, 50, 255});
         return;
     }
 
@@ -1484,21 +1545,21 @@ void DrawTurnPanel(const struct Map *map)
                                discardPlayer <= PLAYER_BLACK &&
                                map->players[discardPlayer].controlMode == PLAYER_CONTROL_AI;
         const bool revealDiscard = gDiscardRevealPlayer == discardPlayer;
-        DrawUiText("Dice", panel.x + 16.0f, panel.y + 48.0f, 18, (Color){92, 70, 50, 255});
+        DrawUiText(loc("Dice"), panel.x + 16.0f, panel.y + 48.0f, 18, (Color){92, 70, 50, 255});
         DrawUiText("7", panel.x + 178.0f, panel.y + 72.0f, 30, textColor);
-        DrawUiText("Discard Cards", panel.x + 16.0f, panel.y + 148.0f, 24, (Color){171, 82, 54, 255});
+        DrawUiText(loc("Discard Cards"), panel.x + 16.0f, panel.y + 148.0f, 24, (Color){171, 82, 54, 255});
         if (aiDiscard)
         {
-            DrawUiText("Waiting for AI discard", panel.x + 16.0f, panel.y + 178.0f, 18, (Color){92, 70, 50, 255});
+            DrawUiText(loc("Waiting for AI discard"), panel.x + 16.0f, panel.y + 178.0f, 18, (Color){92, 70, 50, 255});
         }
         else if (!revealDiscard)
         {
-            DrawUiText(TextFormat("%s is up next", PlayerName(discardPlayer)), panel.x + 16.0f, panel.y + 178.0f, 18, (Color){92, 70, 50, 255});
-            DrawUiText("Pass the screen to continue", panel.x + 16.0f, panel.y + 200.0f, 18, (Color){92, 70, 50, 255});
+            DrawUiText(TextFormat(loc("%s is up next"), PlayerName(discardPlayer)), panel.x + 16.0f, panel.y + 178.0f, 18, (Color){92, 70, 50, 255});
+            DrawUiText(loc("Pass the screen to continue"), panel.x + 16.0f, panel.y + 200.0f, 18, (Color){92, 70, 50, 255});
         }
         else
         {
-            DrawUiText(TextFormat("Choose %d cards to discard", discardAmount), panel.x + 16.0f, panel.y + 178.0f, 18, (Color){92, 70, 50, 255});
+            DrawUiText(TextFormat(loc("Choose %d cards to discard"), discardAmount), panel.x + 16.0f, panel.y + 178.0f, 18, (Color){92, 70, 50, 255});
         }
         return;
     }
@@ -1507,13 +1568,13 @@ void DrawTurnPanel(const struct Map *map)
     {
         UpdateTurnButtonAnimation(&gRollDiceButtonAnimation, rollDiceButton, false);
         UpdateTurnButtonAnimation(&gEndTurnButtonAnimation, endTurnButton, false);
-        DrawUiText("Dice", panel.x + 16.0f, panel.y + 48.0f, 18, (Color){92, 70, 50, 255});
+        DrawUiText(loc("Dice"), panel.x + 16.0f, panel.y + 48.0f, 18, (Color){92, 70, 50, 255});
         DrawUiText("7", panel.x + 178.0f, panel.y + 72.0f, 30, textColor);
-        DrawUiText("Move Thief", panel.x + 16.0f, panel.y + 148.0f, 24, (Color){171, 82, 54, 255});
-        DrawUiText("Select a land tile", panel.x + 16.0f, panel.y + 178.0f, 18, (Color){92, 70, 50, 255});
-        DrawUiText("before ending turn", panel.x + 16.0f, panel.y + 200.0f, 18, (Color){92, 70, 50, 255});
-        DrawTurnActionButton(rollDiceButton, "Roll Dice (Enter)", 22, mutedButton, borderColor, (Color){108, 86, 67, 255}, actionColor, &gRollDiceButtonAnimation);
-        DrawTurnActionButton(endTurnButton, "End Turn", 22, (Color){228, 220, 202, 255}, (Color){154, 132, 108, 255}, (Color){132, 112, 91, 255}, mutedButton, &gEndTurnButtonAnimation);
+        DrawUiText(loc("Move Thief"), panel.x + 16.0f, panel.y + 148.0f, 24, (Color){171, 82, 54, 255});
+        DrawUiText(loc("Select a land tile"), panel.x + 16.0f, panel.y + 178.0f, 18, (Color){92, 70, 50, 255});
+        DrawUiText(loc("before ending turn"), panel.x + 16.0f, panel.y + 200.0f, 18, (Color){92, 70, 50, 255});
+        DrawTurnActionButton(rollDiceButton, loc("Roll Dice (Enter)"), 22, mutedButton, borderColor, (Color){108, 86, 67, 255}, actionColor, &gRollDiceButtonAnimation);
+        DrawTurnActionButton(endTurnButton, loc("End Turn"), 22, (Color){228, 220, 202, 255}, (Color){154, 132, 108, 255}, (Color){132, 112, 91, 255}, mutedButton, &gEndTurnButtonAnimation);
         return;
     }
 
@@ -1521,35 +1582,35 @@ void DrawTurnPanel(const struct Map *map)
     {
         UpdateTurnButtonAnimation(&gRollDiceButtonAnimation, rollDiceButton, false);
         UpdateTurnButtonAnimation(&gEndTurnButtonAnimation, endTurnButton, false);
-        DrawUiText("Dice", panel.x + 16.0f, panel.y + 48.0f, 18, (Color){92, 70, 50, 255});
+        DrawUiText(loc("Dice"), panel.x + 16.0f, panel.y + 48.0f, 18, (Color){92, 70, 50, 255});
         DrawUiText("7", panel.x + 178.0f, panel.y + 72.0f, 30, textColor);
-        DrawUiText("Steal Resource", panel.x + 16.0f, panel.y + 148.0f, 24, (Color){171, 82, 54, 255});
+        DrawUiText(loc("Steal Resource"), panel.x + 16.0f, panel.y + 148.0f, 24, (Color){171, 82, 54, 255});
         if (map->players[map->currentPlayer].controlMode == PLAYER_CONTROL_AI)
         {
-            DrawUiText(TextFormat("%s is choosing", PlayerName(map->currentPlayer)), panel.x + 16.0f, panel.y + 178.0f, 18, (Color){92, 70, 50, 255});
-            DrawUiText("an enemy", panel.x + 16.0f, panel.y + 200.0f, 18, (Color){92, 70, 50, 255});
+            DrawUiText(TextFormat(loc("%s is choosing"), PlayerName(map->currentPlayer)), panel.x + 16.0f, panel.y + 178.0f, 18, (Color){92, 70, 50, 255});
+            DrawUiText(loc("an enemy"), panel.x + 16.0f, panel.y + 200.0f, 18, (Color){92, 70, 50, 255});
         }
         else
         {
-            DrawUiText("Choose one adjacent", panel.x + 16.0f, panel.y + 178.0f, 18, (Color){92, 70, 50, 255});
-            DrawUiText("player to rob", panel.x + 16.0f, panel.y + 200.0f, 18, (Color){92, 70, 50, 255});
+            DrawUiText(loc("Choose one adjacent"), panel.x + 16.0f, panel.y + 178.0f, 18, (Color){92, 70, 50, 255});
+            DrawUiText(loc("player to rob"), panel.x + 16.0f, panel.y + 200.0f, 18, (Color){92, 70, 50, 255});
         }
         return;
     }
 
-    DrawUiText("Dice", panel.x + 16.0f, panel.y + 48.0f, 18, (Color){92, 70, 50, 255});
+    DrawUiText(loc("Dice"), panel.x + 16.0f, panel.y + 48.0f, 18, (Color){92, 70, 50, 255});
     DrawDie(dieA, uiGetDisplayedDieA(), uiIsDiceRolling() ? -8.0f : -2.0f, 1.0f);
     DrawDie(dieB, uiGetDisplayedDieB(), uiIsDiceRolling() ? 7.0f : 2.0f, 1.0f);
     DrawUiText(shownTotal > 0 ? TextFormat("%d", shownTotal) : "-", panel.x + 178.0f, panel.y + 72.0f, 30, textColor);
     if (uiIsDiceRolling())
     {
-        DrawUiText("Rolling...", panel.x + 148.0f, panel.y + 106.0f, 16, (Color){92, 70, 50, 255});
+        DrawUiText(loc("Rolling..."), panel.x + 148.0f, panel.y + 106.0f, 16, (Color){92, 70, 50, 255});
     }
 
     UpdateTurnButtonAnimation(&gRollDiceButtonAnimation, rollDiceButton, !diceLocked);
     UpdateTurnButtonAnimation(&gEndTurnButtonAnimation, endTurnButton, canEndTurn);
-    DrawTurnActionButton(rollDiceButton, "Roll Dice (Enter)", 22, diceLocked ? mutedButton : actionColor, diceLocked ? borderColor : ColorBrightness(actionColor, -0.18f), diceLocked ? (Color){108, 86, 67, 255} : RAYWHITE, actionColor, &gRollDiceButtonAnimation);
-    DrawTurnActionButton(endTurnButton, "End Turn", 22, canEndTurn ? mutedButton : (Color){228, 220, 202, 255}, canEndTurn ? borderColor : (Color){154, 132, 108, 255}, canEndTurn ? textColor : (Color){132, 112, 91, 255}, (Color){182, 141, 97, 255}, &gEndTurnButtonAnimation);
+    DrawTurnActionButton(rollDiceButton, loc("Roll Dice (Enter)"), 22, diceLocked ? mutedButton : actionColor, diceLocked ? borderColor : ColorBrightness(actionColor, -0.18f), diceLocked ? (Color){108, 86, 67, 255} : RAYWHITE, actionColor, &gRollDiceButtonAnimation);
+    DrawTurnActionButton(endTurnButton, loc("End Turn"), 22, canEndTurn ? mutedButton : (Color){228, 220, 202, 255}, canEndTurn ? borderColor : (Color){154, 132, 108, 255}, canEndTurn ? textColor : (Color){132, 112, 91, 255}, (Color){182, 141, 97, 255}, &gEndTurnButtonAnimation);
 }
 
 void DrawVictoryOverlay(const struct Map *map)
@@ -1571,16 +1632,26 @@ void DrawVictoryOverlay(const struct Map *map)
     char headline[64];
     char winnerLabel[64];
     char subtitle[48];
+    char matchTimeValue[24];
+    char totalTimeValue[24];
+    char matchTimeLine[48];
+    char totalTimeLine[52];
     BuildVictoryHeadline(map, winner, headline, sizeof(headline));
     BuildVictorySubheadline(map, winner, winnerLabel, sizeof(winnerLabel));
-    snprintf(subtitle, sizeof(subtitle), "%d victory points", winnerPoints);
+    snprintf(subtitle, sizeof(subtitle), loc("%d victory points"), winnerPoints);
+    FormatElapsedDuration(uiGetCurrentMatchPlaytimeSeconds(), matchTimeValue, sizeof(matchTimeValue));
+    FormatElapsedDuration(uiGetTotalPlaytimeSeconds(), totalTimeValue, sizeof(totalTimeValue));
+    snprintf(matchTimeLine, sizeof(matchTimeLine), loc("Match length %s"), matchTimeValue);
+    snprintf(totalTimeLine, sizeof(totalTimeLine), loc("Total playtime %s"), totalTimeValue);
     const int headlineWidth = MeasureUiText(headline, 34);
     const int winnerWidth = MeasureUiText(winnerLabel, 24);
     const int subtitleWidth = MeasureUiText(subtitle, 18);
-    const char *hint = "Choose what to do next.";
+    const int matchTimeWidth = MeasureUiText(matchTimeLine, 18);
+    const int totalTimeWidth = MeasureUiText(totalTimeLine, 18);
+    const char *hint = loc("Choose what to do next.");
     const int hintWidth = MeasureUiText(hint, 18);
-    const char *restartLabel = "Restart Game";
-    const char *menuLabel = "Back to Menu";
+    const char *restartLabel = loc("Restart Game");
+    const char *menuLabel = loc("Back to Menu");
     const int restartWidth = MeasureUiText(restartLabel, 19);
     const int menuWidth = MeasureUiText(menuLabel, 19);
 
@@ -1589,11 +1660,13 @@ void DrawVictoryOverlay(const struct Map *map)
     DrawRectangleRounded(panel, 0.08f, 8, panelColor);
     DrawRectangleLinesEx(panel, 2.0f, borderColor);
 
-    DrawUiText("Game Over", panel.x + panel.width * 0.5f - MeasureUiText("Game Over", 20) * 0.5f, panel.y + 20.0f, 20, mutedText);
+    DrawUiText(loc("Game Over"), panel.x + panel.width * 0.5f - MeasureUiText(loc("Game Over"), 20) * 0.5f, panel.y + 20.0f, 20, mutedText);
     DrawUiText(headline, panel.x + panel.width * 0.5f - headlineWidth * 0.5f, panel.y + 54.0f, 34, winner == LocalHumanPlayer(map) ? (Color){54, 130, 72, 255} : (Color){171, 82, 54, 255});
     DrawUiText(winnerLabel, panel.x + panel.width * 0.5f - winnerWidth * 0.5f, panel.y + 98.0f, 24, PlayerColor(winner));
     DrawUiText(subtitle, panel.x + panel.width * 0.5f - subtitleWidth * 0.5f, panel.y + 130.0f, 18, textColor);
-    DrawUiText(hint, panel.x + panel.width * 0.5f - hintWidth * 0.5f, panel.y + 154.0f, 18, mutedText);
+    DrawUiText(matchTimeLine, panel.x + panel.width * 0.5f - matchTimeWidth * 0.5f, panel.y + 156.0f, 18, textColor);
+    DrawUiText(totalTimeLine, panel.x + panel.width * 0.5f - totalTimeWidth * 0.5f, panel.y + 180.0f, 18, mutedText);
+    DrawUiText(hint, panel.x + panel.width * 0.5f - hintWidth * 0.5f, panel.y + 208.0f, 18, mutedText);
 
     DrawRectangleRounded((Rectangle){restartButton.x + 4.0f, restartButton.y + 6.0f, restartButton.width, restartButton.height}, 0.22f, 8, Fade(BLACK, 0.10f));
     DrawRectangleRounded(restartButton, 0.22f, 8, (Color){171, 82, 54, 255});
@@ -1667,7 +1740,7 @@ Rectangle GetPlayerPanelBounds(void)
 Rectangle GetTurnPanelBounds(void)
 {
     const float panelWidth = 250.0f;
-    const float panelHeight = 280.0f;
+    const float panelHeight = 316.0f;
     return (Rectangle){(float)GetScreenWidth() - panelWidth - 24.0f, (float)GetScreenHeight() * 0.5f - panelHeight * 0.5f - 42.0f, panelWidth, panelHeight};
 }
 
@@ -1700,7 +1773,7 @@ Rectangle GetTradeModalBounds(void)
 Rectangle GetSettingsModalBounds(void)
 {
     const float panelWidth = 320.0f;
-    const float panelHeight = 468.0f;
+    const float panelHeight = 566.0f;
     return (Rectangle){(float)GetScreenWidth() * 0.5f - panelWidth * 0.5f, (float)GetScreenHeight() * 0.5f - panelHeight * 0.5f, panelWidth, panelHeight};
 }
 
@@ -1798,7 +1871,7 @@ Rectangle GetEndTurnButtonBounds(void)
 Rectangle GetVictoryOverlayBounds(void)
 {
     const float panelWidth = 500.0f;
-    const float panelHeight = 262.0f;
+    const float panelHeight = 316.0f;
     return (Rectangle){
         (float)GetScreenWidth() * 0.5f - panelWidth * 0.5f,
         (float)GetScreenHeight() * 0.5f - panelHeight * 0.5f,
@@ -1941,38 +2014,12 @@ static bool IsPrivateInfoPinnedToLocalHuman(const struct Map *map)
 
 static const char *PlayerName(enum PlayerType player)
 {
-    switch (player)
-    {
-    case PLAYER_RED:
-        return "Red";
-    case PLAYER_BLUE:
-        return "Blue";
-    case PLAYER_GREEN:
-        return "Green";
-    case PLAYER_BLACK:
-        return "Black";
-    default:
-        return "None";
-    }
+    return locPlayerName(player);
 }
 
 static const char *ResourceName(enum ResourceType resource)
 {
-    switch (resource)
-    {
-    case RESOURCE_WOOD:
-        return "Wood";
-    case RESOURCE_WHEAT:
-        return "Wheat";
-    case RESOURCE_CLAY:
-        return "Clay";
-    case RESOURCE_SHEEP:
-        return "Sheep";
-    case RESOURCE_STONE:
-        return "Stone";
-    default:
-        return "";
-    }
+    return locResourceName(resource);
 }
 
 static int BuildDevelopmentHandLayout(const struct Map *map, struct DevelopmentHandCard cards[DEVELOPMENT_CARD_COUNT])
@@ -2076,7 +2123,7 @@ static void DrawAwardCard(Rectangle bounds, const char *title, const char *subti
     const bool claimed = owner >= PLAYER_RED && owner <= PLAYER_BLACK;
     const Color chipFill = claimed ? Fade(PlayerColor(owner), 0.92f) : (Color){221, 212, 194, 255};
     const Color chipText = claimed ? RAYWHITE : mutedText;
-    const char *ownerLabel = claimed ? PlayerName(owner) : "Unclaimed";
+    const char *ownerLabel = claimed ? PlayerName(owner) : loc("Unclaimed");
     const int titleWidth = MeasureUiText(title, 22);
     const int subtitleWidth = MeasureUiText(subtitle, 13);
     const int detailWidth = MeasureUiText(detail, 15);
@@ -2103,40 +2150,12 @@ static void DrawAwardCard(Rectangle bounds, const char *title, const char *subti
 
 static const char *DevelopmentCardTitle(enum DevelopmentCardType type)
 {
-    switch (type)
-    {
-    case DEVELOPMENT_CARD_KNIGHT:
-        return "Knight";
-    case DEVELOPMENT_CARD_VICTORY_POINT:
-        return "Victory Point";
-    case DEVELOPMENT_CARD_ROAD_BUILDING:
-        return "Road Building";
-    case DEVELOPMENT_CARD_YEAR_OF_PLENTY:
-        return "Year of Plenty";
-    case DEVELOPMENT_CARD_MONOPOLY:
-        return "Monopoly";
-    default:
-        return "Development";
-    }
+    return locDevelopmentCardTitle(type);
 }
 
 static const char *DevelopmentCardDescription(enum DevelopmentCardType type)
 {
-    switch (type)
-    {
-    case DEVELOPMENT_CARD_KNIGHT:
-        return "Move the thief\nand steal\n1 random card.";
-    case DEVELOPMENT_CARD_VICTORY_POINT:
-        return "Worth 1 hidden\nvictory point\nat the end.";
-    case DEVELOPMENT_CARD_ROAD_BUILDING:
-        return "Place 2 roads\nfor free.";
-    case DEVELOPMENT_CARD_YEAR_OF_PLENTY:
-        return "Take any\n2 resources\nfrom the bank.";
-    case DEVELOPMENT_CARD_MONOPOLY:
-        return "Choose 1 resource.\nAll opponents give\nyou that type.";
-    default:
-        return "";
-    }
+    return locDevelopmentCardDescription(type);
 }
 
 static Color DevelopmentCardAccent(enum DevelopmentCardType type)

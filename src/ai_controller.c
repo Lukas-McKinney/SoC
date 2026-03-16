@@ -2,6 +2,7 @@
 
 #include "board_rules.h"
 #include "game_logic.h"
+#include "localization.h"
 #include "renderer_internal.h"
 #include "ui_state.h"
 
@@ -190,17 +191,7 @@ bool aiControlsActiveDecision(const struct Map *map)
 
 const char *aiDifficultyLabel(enum AiDifficulty difficulty)
 {
-    switch (difficulty)
-    {
-    case AI_DIFFICULTY_EASY:
-        return "Easy";
-    case AI_DIFFICULTY_MEDIUM:
-        return "Medium";
-    case AI_DIFFICULTY_HARD:
-        return "Hard";
-    default:
-        return "Easy";
-    }
+    return locAiDifficultyLabel(difficulty);
 }
 
 void aiUpdateTurn(struct Map *map)

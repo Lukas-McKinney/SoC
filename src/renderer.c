@@ -1,6 +1,7 @@
 #include "ai_controller.h"
 #include "board_rules.h"
 #include "game_logic.h"
+#include "localization.h"
 #include "renderer.h"
 #include "renderer_internal.h"
 #include "renderer_ui.h"
@@ -159,20 +160,7 @@ static enum PlayerType LocalHumanPlayer(const struct Map *map)
 
 static const char *PlayerNameLabel(enum PlayerType player)
 {
-    switch (player)
-    {
-    case PLAYER_RED:
-        return "Red";
-    case PLAYER_BLUE:
-        return "Blue";
-    case PLAYER_GREEN:
-        return "Green";
-    case PLAYER_BLACK:
-        return "Black";
-    case PLAYER_NONE:
-    default:
-        return "Player";
-    }
+    return locPlayerName(player);
 }
 
 static bool HasAnyValidRoadPlacement(const struct Map *map, Vector2 origin, float radius)
@@ -418,11 +406,12 @@ void HandleMapInput(struct Map *map)
         const enum UiSettingsConfirmAction confirmAction = uiGetSettingsConfirmAction();
         Rectangle lightButton = {settingsModal.x + 24.0f, settingsModal.y + 82.0f, settingsModal.width - 48.0f, 42.0f};
         Rectangle darkButton = {settingsModal.x + 24.0f, settingsModal.y + 136.0f, settingsModal.width - 48.0f, 42.0f};
-        Rectangle aiSpeedSlider = {settingsModal.x + 28.0f, settingsModal.y + 208.0f, settingsModal.width - 56.0f, 36.0f};
-        Rectangle restartButton = {settingsModal.x + 24.0f, settingsModal.y + 292.0f, settingsModal.width - 48.0f, 42.0f};
-        Rectangle backToMenuButton = {settingsModal.x + 24.0f, settingsModal.y + 346.0f, settingsModal.width - 48.0f, 42.0f};
-        Rectangle quitButton = {settingsModal.x + 24.0f, settingsModal.y + 400.0f, settingsModal.width - 48.0f, 42.0f};
-        Rectangle confirmPanel = {settingsModal.x + 26.0f, settingsModal.y + 274.0f, settingsModal.width - 52.0f, 140.0f};
+        Rectangle languageButton = {settingsModal.x + 24.0f, settingsModal.y + 222.0f, settingsModal.width - 48.0f, 42.0f};
+        Rectangle aiSpeedSlider = {settingsModal.x + 28.0f, settingsModal.y + 306.0f, settingsModal.width - 56.0f, 36.0f};
+        Rectangle restartButton = {settingsModal.x + 24.0f, settingsModal.y + 390.0f, settingsModal.width - 48.0f, 42.0f};
+        Rectangle backToMenuButton = {settingsModal.x + 24.0f, settingsModal.y + 444.0f, settingsModal.width - 48.0f, 42.0f};
+        Rectangle quitButton = {settingsModal.x + 24.0f, settingsModal.y + 498.0f, settingsModal.width - 48.0f, 42.0f};
+        Rectangle confirmPanel = {settingsModal.x + 26.0f, settingsModal.y + 372.0f, settingsModal.width - 52.0f, 140.0f};
         Rectangle confirmButton = {confirmPanel.x + 18.0f, confirmPanel.y + confirmPanel.height - 46.0f, 132.0f, 30.0f};
         Rectangle cancelButton = {confirmPanel.x + confirmPanel.width - 110.0f, confirmPanel.y + confirmPanel.height - 46.0f, 92.0f, 30.0f};
         Rectangle closeButton = {settingsModal.x + settingsModal.width - 42.0f, settingsModal.y + 12.0f, 28.0f, 28.0f};
@@ -484,6 +473,12 @@ void HandleMapInput(struct Map *map)
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, darkButton))
         {
             uiSetTheme(UI_THEME_DARK);
+            settingsStoreSaveCurrent();
+            return;
+        }
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, languageButton))
+        {
+            locSetLanguage((enum UiLanguage)((locGetLanguage() + 1) % UI_LANGUAGE_COUNT));
             settingsStoreSaveCurrent();
             return;
         }
@@ -734,13 +729,13 @@ void HandleMapInput(struct Map *map)
         {
             if (hoveredCardType == DEVELOPMENT_CARD_VICTORY_POINT)
             {
-                uiShowCenteredWarning("Victory point cards are counted automatically.");
+                uiShowCenteredWarning(loc("Victory point cards are counted automatically."));
             }
             else if (map->players[map->currentPlayer].developmentCards[hoveredCardType] <=
                      map->players[map->currentPlayer].newlyPurchasedDevelopmentCards[hoveredCardType] ||
                      map->playedDevelopmentCardThisTurn)
             {
-                uiShowCenteredWarning("Development cards can't be played the turn you buy them.\nOnly 1 development card can be played per turn.");
+                uiShowCenteredWarning(loc("Development cards can't be played the turn you buy them.\nOnly 1 development card can be played per turn."));
             }
             return;
         }
@@ -991,11 +986,11 @@ void HandleMapInput(struct Map *map)
                 if (aiShouldAcceptPlayerTradeOffer(map, gPlayerTradeTarget, give, gPlayerTradeGiveAmount, receive, gPlayerTradeReceiveAmount) &&
                     gameTryTradeWithPlayer(map, gPlayerTradeTarget, give, gPlayerTradeGiveAmount, receive, gPlayerTradeReceiveAmount))
                 {
-                    uiShowCenteredStatus(TextFormat("%s accepts your trade.", PlayerNameLabel(gPlayerTradeTarget)), UI_NOTIFICATION_POSITIVE);
+                    uiShowCenteredStatus(TextFormat(loc("%s accepts your trade."), PlayerNameLabel(gPlayerTradeTarget)), UI_NOTIFICATION_POSITIVE);
                 }
                 else
                 {
-                    uiShowCenteredStatus(TextFormat("%s declines the trade.", PlayerNameLabel(gPlayerTradeTarget)), UI_NOTIFICATION_NEGATIVE);
+                    uiShowCenteredStatus(TextFormat(loc("%s declines the trade."), PlayerNameLabel(gPlayerTradeTarget)), UI_NOTIFICATION_NEGATIVE);
                 }
                 uiSetPlayerTradeMenuOpen(false);
                 return;
@@ -1502,21 +1497,7 @@ static const char *PortLabel(const struct PortVisual *port)
         return "3:1";
     }
 
-    switch (port->resource)
-    {
-    case RESOURCE_WOOD:
-        return "2:1 W";
-    case RESOURCE_WHEAT:
-        return "2:1 H";
-    case RESOURCE_CLAY:
-        return "2:1 C";
-    case RESOURCE_SHEEP:
-        return "2:1 S";
-    case RESOURCE_STONE:
-        return "2:1 O";
-    default:
-        return "2:1";
-    }
+    return TextFormat("2:1 %s", locPortResourceShort(port->resource));
 }
 
 static float DistancePointToSegment(Vector2 p, Vector2 a, Vector2 b)
