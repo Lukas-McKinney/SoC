@@ -1621,26 +1621,25 @@ void DrawTurnPanel(const struct Map *map)
     const bool diceLocked = map->rolledThisTurn || uiIsDiceRolling();
     const bool rollButtonInteractive = humanControlledTurn && !diceLocked;
     const bool endTurnButtonInteractive = humanControlledTurn && canEndTurn;
+    const bool netplayConnectedAndReady = matchSessionIsNetplay(session) &&
+                                          matchSessionGetConnectionStatus(session) == MATCH_CONNECTION_CONNECTED &&
+                                          matchSessionIsReady(session);
     const Rectangle dieA = {panel.x + 20.0f, panel.y + 76.0f, 54.0f, 54.0f};
     const Rectangle dieB = {panel.x + 84.0f, panel.y + 76.0f, 54.0f, 54.0f};
     const int shownTotal = uiIsDiceRolling() ? (uiGetDisplayedDieA() + uiGetDisplayedDieB()) : map->lastDiceRoll;
-    const char *activePlayerLabel = TextFormat("%s: %s", loc("Current Player"), PlayerName(map->currentPlayer));
+    const char *turnTitle = TextFormat("%s: %s", loc("Turn"), PlayerName(map->currentPlayer));
 
     DrawRectangleRounded((Rectangle){panel.x + 6.0f, panel.y + 8.0f, panel.width, panel.height}, 0.08f, 8, Fade(BLACK, 0.10f));
     DrawRectangleRounded(panel, 0.08f, 8, panelColor);
     DrawRectangleLinesEx(panel, 2.0f, borderColor);
 
-    DrawUiText(loc("Turn"), panel.x + 16.0f, panel.y + 14.0f, 24, textColor);
-    DrawUiText(activePlayerLabel, panel.x + 84.0f, panel.y + 20.0f, 14, (Color){92, 70, 50, 255});
+    DrawUiText(turnTitle, panel.x + 16.0f, panel.y + 16.0f, 20, textColor);
     DrawTurnPanelPlaytime(map, panel, (Color){92, 70, 50, 255});
-    if (matchSessionIsNetplay(session) && !gameHasWinner(map))
-    {
-        DrawUiText(humanControlledTurn ? loc("Your turn") : loc("Waiting for turn"), panel.x + 16.0f, panel.y + 40.0f, 15, (Color){92, 70, 50, 255});
-    }
     if (matchSessionIsNetplay(session))
     {
         const char *statusLabel = NetplayStatusLabel(session);
         const char *errorLabel = matchSessionGetConnectionError(session);
+        const char *turnHint = humanControlledTurn ? loc("Your turn") : loc("Waiting for turn");
         if (statusLabel[0] != '\0')
         {
             DrawUiText(statusLabel, panel.x + 16.0f, panel.y + panel.height - 22.0f, 14, (Color){92, 70, 50, 255});
@@ -1648,6 +1647,10 @@ void DrawTurnPanel(const struct Map *map)
         if (errorLabel[0] != '\0')
         {
             DrawUiText(errorLabel, panel.x + 16.0f, panel.y + panel.height - 40.0f, 13, (Color){146, 54, 46, 255});
+        }
+        else if (netplayConnectedAndReady && !gameHasWinner(map))
+        {
+            DrawUiText(turnHint, panel.x + 16.0f, panel.y + panel.height - 40.0f, 14, (Color){92, 70, 50, 255});
         }
     }
     if (gameHasWinner(map))
