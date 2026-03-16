@@ -40,7 +40,7 @@ jobs:
 
       - name: Build game (Windows)
         shell: msys2 {0}
-        run: make RAYLIB_INCLUDE=/mingw64/include RAYLIB_LIB=/mingw64/lib
+        run: mingw32-make RAYLIB_INCLUDE=/mingw64/include RAYLIB_LIB=/mingw64/lib
 
       - name: Package game (Windows)
         shell: pwsh
