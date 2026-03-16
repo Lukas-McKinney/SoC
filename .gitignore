@@ -53,4 +53,8 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+
+settlers
 .vscode/settings.json
+
