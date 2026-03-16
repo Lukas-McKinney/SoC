@@ -89,7 +89,8 @@ static const char *resource_label(enum ResourceType resource, bool abbreviated);
 static const char *player_label(enum PlayerType player);
 static enum PlayerType local_human_player(const struct Map *map);
 static void show_local_resource_feedback(const struct Map *map, enum PlayerType localPlayer,
-                                         const int positiveDeltas[5], const int negativeDeltas[5]);
+                                         const int positiveDeltas[5], const int negativeDeltas[5],
+                                         bool localTurnStarted, bool *showedStatus);
 static void format_resource_delta_list(const int deltas[5], char *buffer, size_t bufferSize);
 static void reset_ui_state(bool resetTheme);
 
@@ -1014,6 +1015,8 @@ static void update_player_delta_notifications(const struct Map *map)
     enum PlayerType localPlayer;
     int localPositive[5] = {0};
     int localNegative[5] = {0};
+    bool localTurnStarted = false;
+    bool showedStatus = false;
 
     if (map == NULL)
     {
@@ -1028,9 +1031,10 @@ static void update_player_delta_notifications(const struct Map *map)
         gTrackedCurrentPlayer = map->currentPlayer;
         memset(gCurrentTurnResourceGain, 0, sizeof(gCurrentTurnResourceGain));
         gPlayerDeltaTrackerInitialized = true;
-        if (localPlayer != PLAYER_NONE && map->currentPlayer == localPlayer)
+        localTurnStarted = localPlayer != PLAYER_NONE && map->currentPlayer == localPlayer;
+        if (localTurnStarted)
         {
-            uiShowCenteredStatus("It's your turn.", UI_NOTIFICATION_NEUTRAL);
+            uiShowCenteredStatus("Your turn.", UI_NOTIFICATION_NEUTRAL);
         }
         return;
     }
@@ -1042,10 +1046,7 @@ static void update_player_delta_notifications(const struct Map *map)
         memset(gCurrentTurnResourceGain, 0, sizeof(gCurrentTurnResourceGain));
         gRecentRollHighlightValue = 0;
         gRecentRollHighlightStartTime = -1.0;
-        if (localPlayer != PLAYER_NONE && map->currentPlayer == localPlayer)
-        {
-            uiShowCenteredStatus("It's your turn.", UI_NOTIFICATION_NEUTRAL);
-        }
+        localTurnStarted = localPlayer != PLAYER_NONE && map->currentPlayer == localPlayer;
     }
 
     for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
@@ -1107,7 +1108,12 @@ static void update_player_delta_notifications(const struct Map *map)
 
     if (localPlayer != PLAYER_NONE)
     {
-        show_local_resource_feedback(map, localPlayer, localPositive, localNegative);
+        show_local_resource_feedback(map, localPlayer, localPositive, localNegative, localTurnStarted, &showedStatus);
+    }
+
+    if (localTurnStarted && !showedStatus)
+    {
+        uiShowCenteredStatus("Your turn.", UI_NOTIFICATION_NEUTRAL);
     }
     snapshot_player_delta_state(map);
 }
@@ -1254,7 +1260,8 @@ static enum PlayerType local_human_player(const struct Map *map)
 }
 
 static void show_local_resource_feedback(const struct Map *map, enum PlayerType localPlayer,
-                                         const int positiveDeltas[5], const int negativeDeltas[5])
+                                         const int positiveDeltas[5], const int negativeDeltas[5],
+                                         bool localTurnStarted, bool *showedStatus)
 {
     int positiveTotal = 0;
     int negativeTotal = 0;
@@ -1262,6 +1269,11 @@ static void show_local_resource_feedback(const struct Map *map, enum PlayerType 
     int lastNegativeResource = -1;
     char resourceText[128];
     char message[192];
+
+    if (showedStatus != NULL)
+    {
+        *showedStatus = false;
+    }
 
     if (map == NULL || localPlayer == PLAYER_NONE)
     {
@@ -1282,8 +1294,14 @@ static void show_local_resource_feedback(const struct Map *map, enum PlayerType 
     if (positiveTotal > 0 && negativeTotal == 0)
     {
         format_resource_delta_list(positiveDeltas, resourceText, sizeof(resourceText));
-        snprintf(message, sizeof(message), "You got %s.", resourceText);
+        snprintf(message, sizeof(message),
+                 localTurnStarted ? "Your turn. You got %s." : "You got %s.",
+                 resourceText);
         uiShowCenteredStatus(message, UI_NOTIFICATION_POSITIVE);
+        if (showedStatus != NULL)
+        {
+            *showedStatus = true;
+        }
         return;
     }
 
@@ -1303,6 +1321,10 @@ static void show_local_resource_feedback(const struct Map *map, enum PlayerType 
             snprintf(message, sizeof(message), "Lost %s.", resourceText);
         }
         uiShowCenteredStatus(message, UI_NOTIFICATION_NEGATIVE);
+        if (showedStatus != NULL)
+        {
+            *showedStatus = true;
+        }
     }
 }
 

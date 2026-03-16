@@ -4,8 +4,9 @@
 #include "renderer.h"
 #include "renderer_internal.h"
 #include "renderer_ui.h"
+#include "settings_store.h"
 #include "ui_state.h"
-
+#include <stdlib.h>
 #include <math.h>
 #include <raylib.h>
 #include <stdio.h>
@@ -466,17 +467,24 @@ void HandleMapInput(struct Map *map)
         if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, aiSpeedSlider))
         {
             const float normalized = (mouse.x - aiSpeedSlider.x) / aiSpeedSlider.width;
-            uiSetAiSpeedSetting((int)roundf(normalized * 10.0f));
+            const int speed = (int)roundf(normalized * 10.0f);
+            if (speed != uiGetAiSpeedSetting())
+            {
+                uiSetAiSpeedSetting(speed);
+                settingsStoreSaveCurrent();
+            }
             return;
         }
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, lightButton))
         {
             uiSetTheme(UI_THEME_LIGHT);
+            settingsStoreSaveCurrent();
             return;
         }
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, darkButton))
         {
             uiSetTheme(UI_THEME_DARK);
+            settingsStoreSaveCurrent();
             return;
         }
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, restartButton))

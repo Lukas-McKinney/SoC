@@ -2,6 +2,7 @@
 
 #include "ai_controller.h"
 #include "renderer_ui.h"
+#include "settings_store.h"
 #include "ui_state.h"
 
 #include <raylib.h>
@@ -80,16 +81,19 @@ enum MainMenuAction HandleMainMenuInput(void)
             return MAIN_MENU_ACTION_NONE;
         }
 
-        if (CheckCollisionPointRec(mouse, GetStartPopupColorButtonBounds()))
+        if (gMainMenuPopupStartAction == MAIN_MENU_ACTION_START_AI_GAME &&
+            CheckCollisionPointRec(mouse, GetStartPopupColorButtonBounds()))
         {
-            gMainMenuHumanColor = (enum PlayerType)(((int)gMainMenuHumanColor + 1) % MAX_PLAYERS);
+            MainMenuSetHumanColor((enum PlayerType)(((int)gMainMenuHumanColor + 1) % MAX_PLAYERS));
+            settingsStoreSaveCurrent();
             return MAIN_MENU_ACTION_CYCLE_HUMAN_COLOR;
         }
 
         if (gMainMenuPopupStartAction == MAIN_MENU_ACTION_START_AI_GAME &&
             CheckCollisionPointRec(mouse, GetStartPopupDifficultyButtonBounds()))
         {
-            gMainMenuAiDifficulty = (enum AiDifficulty)(((int)gMainMenuAiDifficulty + 1) % 3);
+            MainMenuSetAiDifficulty((enum AiDifficulty)(((int)gMainMenuAiDifficulty + 1) % 3));
+            settingsStoreSaveCurrent();
             return MAIN_MENU_ACTION_CYCLE_AI_DIFFICULTY;
         }
 
@@ -163,7 +167,7 @@ static Rectangle GetQuitButtonBounds(void)
 static Rectangle GetStartPopupBounds(void)
 {
     const float panelWidth = 408.0f;
-    const float panelHeight = gMainMenuPopupStartAction == MAIN_MENU_ACTION_START_AI_GAME ? 286.0f : 232.0f;
+    const float panelHeight = gMainMenuPopupStartAction == MAIN_MENU_ACTION_START_AI_GAME ? 286.0f : 176.0f;
     return (Rectangle){
         (float)GetScreenWidth() * 0.5f - panelWidth * 0.5f,
         (float)GetScreenHeight() * 0.5f - panelHeight * 0.5f,
@@ -200,9 +204,29 @@ enum AiDifficulty MainMenuGetAiDifficulty(void)
     return gMainMenuAiDifficulty;
 }
 
+void MainMenuSetAiDifficulty(enum AiDifficulty difficulty)
+{
+    if (difficulty < AI_DIFFICULTY_EASY || difficulty > AI_DIFFICULTY_HARD)
+    {
+        difficulty = AI_DIFFICULTY_MEDIUM;
+    }
+
+    gMainMenuAiDifficulty = difficulty;
+}
+
 enum PlayerType MainMenuGetHumanColor(void)
 {
     return gMainMenuHumanColor;
+}
+
+void MainMenuSetHumanColor(enum PlayerType player)
+{
+    if (player < PLAYER_RED || player > PLAYER_BLACK)
+    {
+        player = PLAYER_RED;
+    }
+
+    gMainMenuHumanColor = player;
 }
 
 static void DrawStartPopup(void)
@@ -237,9 +261,9 @@ static void DrawStartPopup(void)
 
     DrawUiText(aiPopup ? "Start vs AI" : "Start Game", panel.x + 28.0f, panel.y + 24.0f, 30, textColor);
     DrawUiText("Setup order is random every match.", panel.x + 28.0f, panel.y + 62.0f, 18, bodyColor);
-    DrawMenuButton(colorButton, colorLabel, darkTheme ? (Color){63, 77, 95, 255} : (Color){233, 226, 207, 255}, borderColor, textColor, false);
     if (aiPopup)
     {
+        DrawMenuButton(colorButton, colorLabel, darkTheme ? (Color){63, 77, 95, 255} : (Color){233, 226, 207, 255}, borderColor, textColor, false);
         DrawMenuButton(difficultyButton, difficultyLabel, darkTheme ? (Color){63, 77, 95, 255} : (Color){233, 226, 207, 255}, borderColor, textColor, false);
     }
     DrawMenuButton(confirmButton, aiPopup ? "Start Match" : "Start Hotseat", accentColor, borderColor, aiPopup ? (darkTheme ? (Color){38, 32, 24, 255} : RAYWHITE) : RAYWHITE, true);

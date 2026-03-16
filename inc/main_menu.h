@@ -23,8 +23,10 @@ enum MainMenuAction HandleMainMenuInput(void);
 
 /* Returns the currently selected AI difficulty for AI matches. */
 enum AiDifficulty MainMenuGetAiDifficulty(void);
+void MainMenuSetAiDifficulty(enum AiDifficulty difficulty);
 
 /* Returns the currently selected human color for AI matches. */
 enum PlayerType MainMenuGetHumanColor(void);
+void MainMenuSetHumanColor(enum PlayerType player);
 
 #endif

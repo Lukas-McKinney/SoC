@@ -104,7 +104,7 @@ bool setupMap(struct Map *map)
     map->players[i].aiDifficulty = AI_DIFFICULTY_EASY;
     for (int resource = 0; resource < 5; resource++)
     {
-      map->players[i].resources[resource] = 10;
+      map->players[i].resources[resource] = 0;
     }
     for (int card = 0; card < DEVELOPMENT_CARD_COUNT; card++)
     {

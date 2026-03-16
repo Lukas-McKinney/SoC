@@ -79,7 +79,6 @@ Implemented already:
 
 These are intentional shortcuts or current prototype settings:
 
-- Players currently start with `10` of each resource by default
 - The board setup is randomized freely; it does not try to reproduce the official balanced spiral layout
 - The app is tuned for shared-screen play and prototype iteration, not hidden-information multiplayer polish
 
@@ -88,17 +87,13 @@ These are intentional shortcuts or current prototype settings:
 - Full hidden-hand hotseat support is still incomplete
   - some handoff screens exist
   - true private local multiplayer flow is not complete
-- Human-to-human player trading is still simplified
-  - there is no offer / accept / decline negotiation screen between two human players
-  - legal trades resolve immediately
 - Bank resource supply is not tracked or enforced
   - bank shortages are ignored for production, trades, and card effects
-- No save / load system
 - No networked multiplayer
-- AI is heuristic, not exhaustive
-  - it is playable, but still needs tuning and balancing
-- The `Start Game` popup now shows a color selector, but hotseat still remains a shared all-human mode rather than a true single-local-player perspective mode
-
+- AI now exhaustively searches bounded deterministic play lines
+  - robber sub-choices use fast post-resolution scoring so thief turns stay responsive
+  - long-horizon strategy is still guided by state evaluation rather than a full-game solve
+- Add Playtime for current match and length after the match, also maybe total playtime?
 ## Build
 
 ### Windows

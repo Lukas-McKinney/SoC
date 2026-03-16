@@ -6,6 +6,7 @@
 #include "main_menu.h"
 #include "map.h"
 #include "renderer.h"
+#include "settings_store.h"
 #include "ui_state.h"
 
 enum AppScreen
@@ -16,6 +17,7 @@ enum AppScreen
 
 static void DrawSceneBackground(void);
 static void ConfigureMatch(struct Map *map, bool aiOpponentsEnabled, enum AiDifficulty difficulty, enum PlayerType humanColor);
+static void LoadPersistedSettings(void);
 
 int main(void)
 {
@@ -27,6 +29,7 @@ int main(void)
 
     LoadRendererAssets();
     initUiState();
+    LoadPersistedSettings();
 
     struct Map map;
     setupMap(&map);
@@ -72,6 +75,7 @@ int main(void)
                 break;
             case MAIN_MENU_ACTION_TOGGLE_THEME:
                 uiSetTheme(uiGetTheme() == UI_THEME_DARK ? UI_THEME_LIGHT : UI_THEME_DARK);
+                settingsStoreSaveCurrent();
                 break;
             case MAIN_MENU_ACTION_QUIT:
                 shouldQuit = true;
@@ -175,6 +179,19 @@ static void ConfigureMatch(struct Map *map, bool aiOpponentsEnabled, enum AiDiff
     }
 
     aiConfigureHotseatMatch(map);
+}
+
+static void LoadPersistedSettings(void)
+{
+    struct PersistedSettings settings;
+
+    settingsStoreLoadDefaults(&settings);
+    settingsStoreLoad(&settings);
+
+    uiSetTheme(settings.theme);
+    uiSetAiSpeedSetting(settings.aiSpeed);
+    MainMenuSetAiDifficulty(settings.aiDifficulty);
+    MainMenuSetHumanColor(settings.humanColor);
 }
 
 static void DrawSceneBackground(void)
