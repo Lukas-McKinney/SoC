@@ -91,6 +91,7 @@ unsigned long long uiGetTotalWins(void);
 unsigned long long uiGetTotalLosses(void);
 
 void uiStartDiceRollAnimation(void);
+void uiStartObservedDiceRollAnimation(int total);
 bool uiIsDiceRolling(void);
 int uiGetDisplayedDieA(void);
 int uiGetDisplayedDieB(void);

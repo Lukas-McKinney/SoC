@@ -422,6 +422,11 @@ static void apply_client_authoritative_result(const struct GameAction *action, c
         return;
     }
 
+    if (action->type == GAME_ACTION_ROLL_DICE && result->diceRoll >= 2 && result->diceRoll <= 12)
+    {
+        uiStartObservedDiceRollAnimation(result->diceRoll);
+    }
+
     if (action->type == GAME_ACTION_BUY_DEVELOPMENT &&
         result->drawnCard >= DEVELOPMENT_CARD_KNIGHT &&
         result->drawnCard < DEVELOPMENT_CARD_COUNT)
@@ -579,6 +584,8 @@ bool matchSessionSubmitAction(struct MatchSession *session,
                               struct GameActionResult *result)
 {
     bool applied = false;
+    struct GameActionResult authoritativeResult;
+    struct GameActionResult *authoritativeResultPtr = result;
 
     if (session == NULL || action == NULL)
     {
@@ -632,7 +639,14 @@ bool matchSessionSubmitAction(struct MatchSession *session,
         return true;
     }
 
-    applied = gameApplyAction(&session->map, action, context, result);
+    if (authoritativeResultPtr == NULL)
+    {
+        memset(&authoritativeResult, 0, sizeof(authoritativeResult));
+        authoritativeResult.drawnCard = DEVELOPMENT_CARD_COUNT;
+        authoritativeResultPtr = &authoritativeResult;
+    }
+
+    applied = gameApplyAction(&session->map, action, context, authoritativeResultPtr);
     if (!applied)
     {
         return false;
@@ -641,10 +655,7 @@ bool matchSessionSubmitAction(struct MatchSession *session,
     matchSessionRefreshStateHash(session);
     if (session->netplay != NULL && netplayIsConnected(session->netplay))
     {
-        if (result != NULL)
-        {
-            netplayQueueActionResult(session->netplay, action, result, session->stateHash);
-        }
+        netplayQueueActionResult(session->netplay, action, authoritativeResultPtr, session->stateHash);
         broadcast_host_snapshot(session);
     }
     return true;

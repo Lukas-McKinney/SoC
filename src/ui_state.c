@@ -59,6 +59,7 @@ static double gLastStructurePlacementTime = -1.0;
 static int gLastStructureX = 0;
 static int gLastStructureY = 0;
 static bool gDiceRolling = false;
+static bool gDiceRollAnimationSubmitsAction = true;
 static double gDiceRollStartTime = 0.0;
 static double gLastDiceShuffleTime = 0.0;
 static int gPendingDieA = 1;
@@ -658,6 +659,7 @@ unsigned long long uiGetTotalLosses(void)
 void uiStartDiceRollAnimation(void)
 {
     gDiceRolling = true;
+    gDiceRollAnimationSubmitsAction = true;
     gDiceRollStartTime = GetTime();
     gLastDiceShuffleTime = 0.0;
     gPendingDieA = GetRandomValue(1, 6);
@@ -665,6 +667,41 @@ void uiStartDiceRollAnimation(void)
     gDisplayedDieA = GetRandomValue(1, 6);
     gDisplayedDieB = GetRandomValue(1, 6);
     debugLog("UI", "dice animation start pending=%d+%d total=%d",
+             gPendingDieA,
+             gPendingDieB,
+             gPendingDieA + gPendingDieB);
+}
+
+void uiStartObservedDiceRollAnimation(int total)
+{
+    int minDieA;
+    int maxDieA;
+
+    if (total < 2 || total > 12)
+    {
+        return;
+    }
+
+    minDieA = total - 6;
+    if (minDieA < 1)
+    {
+        minDieA = 1;
+    }
+    maxDieA = total - 1;
+    if (maxDieA > 6)
+    {
+        maxDieA = 6;
+    }
+
+    gDiceRolling = true;
+    gDiceRollAnimationSubmitsAction = false;
+    gDiceRollStartTime = GetTime();
+    gLastDiceShuffleTime = 0.0;
+    gPendingDieA = GetRandomValue(minDieA, maxDieA);
+    gPendingDieB = total - gPendingDieA;
+    gDisplayedDieA = GetRandomValue(1, 6);
+    gDisplayedDieB = GetRandomValue(1, 6);
+    debugLog("UI", "dice observed animation start pending=%d+%d total=%d",
              gPendingDieA,
              gPendingDieB,
              gPendingDieA + gPendingDieB);
@@ -1132,7 +1169,8 @@ static void update_dice_animation(struct Map *map)
         gRecentRollHighlightValue = resolvedRoll;
         gRecentRollHighlightStartTime = now;
         debugLog("UI", "dice animation resolve total=%d", resolvedRoll);
-        if (!(matchSessionGetActiveMutable() != NULL && &matchSessionGetActiveMutable()->map == map
+        if (gDiceRollAnimationSubmitsAction &&
+            !(matchSessionGetActiveMutable() != NULL && &matchSessionGetActiveMutable()->map == map
                   ? matchSessionSubmitAction(matchSessionGetActiveMutable(),
                                              &(struct GameAction){
                                                  .type = GAME_ACTION_ROLL_DICE,
@@ -1149,6 +1187,10 @@ static void update_dice_animation(struct Map *map)
             debugLog("UI", "dice animation apply failed total=%d sessionHash=%u",
                      resolvedRoll,
                      matchSessionGetActive() != NULL ? matchSessionGetStateHash(matchSessionGetActive()) : 0u);
+        }
+        else if (!gDiceRollAnimationSubmitsAction)
+        {
+            debugLog("UI", "dice observed animation resolved total=%d", resolvedRoll);
         }
         debugLog("UI", "dice animation resolved total=%d elapsed=%.3f pendingDiscards=%d thiefPlacement=%d thiefVictim=%d",
                  resolvedRoll,
