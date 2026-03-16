@@ -1640,9 +1640,14 @@ void DrawTurnPanel(const struct Map *map)
     if (matchSessionIsNetplay(session))
     {
         const char *statusLabel = NetplayStatusLabel(session);
+        const char *errorLabel = matchSessionGetConnectionError(session);
         if (statusLabel[0] != '\0')
         {
             DrawUiText(statusLabel, panel.x + 16.0f, panel.y + panel.height - 22.0f, 14, (Color){92, 70, 50, 255});
+        }
+        if (errorLabel[0] != '\0')
+        {
+            DrawUiText(errorLabel, panel.x + 16.0f, panel.y + panel.height - 40.0f, 13, (Color){146, 54, 46, 255});
         }
     }
     if (gameHasWinner(map))
