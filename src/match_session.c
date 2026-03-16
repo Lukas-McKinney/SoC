@@ -712,17 +712,37 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
 
         session->isHost = false;
         session->localPlayer = event->hello.assignedPlayer != PLAYER_NONE ? event->hello.assignedPlayer : session->localPlayer;
-        for (int player = 0; player < MAX_PLAYERS; player++)
+        if (session->localPlayer == PLAYER_NONE)
         {
-            session->seatAuthority[player] = (enum MatchSeatAuthority)event->hello.seatAuthority[player];
-            if (session->seatAuthority[player] == MATCH_SEAT_LOCAL)
+            for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
             {
-                inferredLocalPlayer = (enum PlayerType)player;
+                if (event->hello.seatAuthority[player] == MATCH_SEAT_REMOTE)
+                {
+                    inferredLocalPlayer = (enum PlayerType)player;
+                    break;
+                }
             }
         }
         if (session->localPlayer == PLAYER_NONE && inferredLocalPlayer != PLAYER_NONE)
         {
             session->localPlayer = inferredLocalPlayer;
+        }
+
+        for (int player = 0; player < MAX_PLAYERS; player++)
+        {
+            const enum MatchSeatAuthority hostPerspectiveAuthority = (enum MatchSeatAuthority)event->hello.seatAuthority[player];
+            if (hostPerspectiveAuthority == MATCH_SEAT_AI)
+            {
+                session->seatAuthority[player] = MATCH_SEAT_AI;
+            }
+            else if (session->localPlayer != PLAYER_NONE && player == (int)session->localPlayer)
+            {
+                session->seatAuthority[player] = MATCH_SEAT_LOCAL;
+            }
+            else
+            {
+                session->seatAuthority[player] = MATCH_SEAT_REMOTE;
+            }
         }
         session->connectionStatus = MATCH_CONNECTION_SYNCING;
         session->ready = false;
@@ -730,13 +750,13 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
         clear_connection_error(session);
         reset_client_transient_ui();
         debugLog("NET",
-                 "hello received; assigned local=%d host=%d authorities=[%d,%d,%d,%d]",
-                 (int)session->localPlayer,
-                 (int)event->hello.hostPlayer,
-                 event->hello.seatAuthority[0],
-                 event->hello.seatAuthority[1],
-                 event->hello.seatAuthority[2],
-                 event->hello.seatAuthority[3]);
+             "hello received; assigned local=%d host=%d client-authorities=[%d,%d,%d,%d]",
+             (int)session->localPlayer,
+             (int)event->hello.hostPlayer,
+             (int)session->seatAuthority[0],
+             (int)session->seatAuthority[1],
+             (int)session->seatAuthority[2],
+             (int)session->seatAuthority[3]);
         if (session->localPlayer == PLAYER_NONE)
         {
             debugLog("NET", "warning: host hello assigned PLAYER_NONE; awaiting snapshot but local actions will stay blocked");
