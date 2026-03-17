@@ -79,16 +79,39 @@ void createRandomizedDiceNumbers(int diceNumbers[MAX_TILES])
 
 bool setupMap(struct Map *map)
 {
-  if (map == NULL)
+  struct MapSetupConfig config;
+
+  if (!mapCreateRandomSetupConfig(&config))
+  {
+    return false;
+  }
+
+  return setupMapFromConfig(map, &config);
+}
+
+bool mapCreateRandomSetupConfig(struct MapSetupConfig *config)
+{
+  if (config == NULL)
+  {
+    return false;
+  }
+
+  createRandomizedTileTypes(config->tileTypes);
+  createRandomizedDiceNumbers(config->diceNumbers);
+  createRandomizedDevelopmentDeck(config->developmentDeck);
+  config->setupStartPlayer = (enum PlayerType)random_int(0, MAX_PLAYERS);
+  config->thiefTileId = centerIndex;
+  return true;
+}
+
+bool setupMapFromConfig(struct Map *map, const struct MapSetupConfig *config)
+{
+  if (map == NULL || config == NULL)
   {
     return false;
   }
 
   memset(map, 0, sizeof(*map));
-  // Create Array to be filled
-  enum TileType shuffledTypes[MAX_TILES];
-  // Shuffle Array
-  createRandomizedTileTypes(shuffledTypes);
 
   for (int i = 0; i < MAX_SIDES; i++)
   {
@@ -121,7 +144,7 @@ bool setupMap(struct Map *map)
     map->players[i].playedKnightCount = 0;
   }
 
-  map->setupStartPlayer = (enum PlayerType)random_int(0, MAX_PLAYERS);
+  map->setupStartPlayer = config->setupStartPlayer;
   map->currentPlayer = map->setupStartPlayer;
   map->winner = PLAYER_NONE;
   map->phase = GAME_PHASE_SETUP;
@@ -144,15 +167,12 @@ bool setupMap(struct Map *map)
   map->largestArmyOwner = PLAYER_NONE;
   map->longestRoadOwner = PLAYER_NONE;
   map->longestRoadLength = 0;
-
-  int diceNumbers[MAX_TILES];
-  createRandomizedDiceNumbers(diceNumbers);
-  // Create Tiles with the shuhffeled Tile types
+ 
   for (int i = 0; i < MAX_TILES; i++)
   {
     map->tiles[i].id = i;
-    map->tiles[i].diceNumber = diceNumbers[i];
-    map->tiles[i].type = shuffledTypes[i];
+    map->tiles[i].diceNumber = config->diceNumbers[i];
+    map->tiles[i].type = config->tileTypes[i];
 
     for (int j = 0; j < 6; j++)
     {
@@ -166,7 +186,12 @@ bool setupMap(struct Map *map)
     }
   }
 
-  map->thiefTileId = centerIndex;
+  for (int i = 0; i < DEVELOPMENT_DECK_SIZE; i++)
+  {
+    map->developmentDeck[i] = config->developmentDeck[i];
+  }
+
+  map->thiefTileId = config->thiefTileId;
 
   return true;
 }

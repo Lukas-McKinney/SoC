@@ -50,6 +50,8 @@ int gameComputeVictoryPoints(const struct Map *map, enum PlayerType player);
 int gameComputeVisibleVictoryPoints(const struct Map *map, enum PlayerType player);
 int gameGetDevelopmentDeckCount(const struct Map *map);
 int gameGetDevelopmentCardCount(const struct Map *map, enum PlayerType player, enum DevelopmentCardType type);
+int gameGetBankResourceCount(const struct Map *map, enum ResourceType resource);
+bool gameBankHasResources(const struct Map *map, enum ResourceType resource, int amount);
 int gameGetMaritimeTradeRate(const struct Map *map, enum ResourceType give);
 bool gameCanTradeMaritime(const struct Map *map, enum ResourceType give, int tradeCount, enum ResourceType receive);
 bool gameTryTradeMaritime(struct Map *map, enum ResourceType give, int tradeCount, enum ResourceType receive);

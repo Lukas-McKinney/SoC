@@ -17,6 +17,13 @@ enum MainMenuAction
     MAIN_MENU_ACTION_QUIT
 };
 
+struct MainMenuLobbyConfig
+{
+    enum PlayerControlMode seatControl[MAX_PLAYERS];
+    enum AiDifficulty aiDifficulty;
+    enum PlayerType primaryHumanColor;
+};
+
 /* Draws the application's main menu overlay. */
 void DrawMainMenu(void);
 
@@ -30,6 +37,7 @@ void MainMenuSetAiDifficulty(enum AiDifficulty difficulty);
 /* Returns the currently selected human color for AI matches. */
 enum PlayerType MainMenuGetHumanColor(void);
 void MainMenuSetHumanColor(enum PlayerType player);
+void MainMenuGetLobbyConfig(struct MainMenuLobbyConfig *config);
 
 enum PlayerType MainMenuGetMultiplayerLocalColor(void);
 enum PlayerType MainMenuGetMultiplayerRemoteColor(void);

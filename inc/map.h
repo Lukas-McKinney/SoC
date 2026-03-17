@@ -12,6 +12,14 @@ enum GamePhase {
     GAME_PHASE_GAME_OVER
 };
 
+struct MapSetupConfig {
+    enum TileType tileTypes[MAX_TILES];
+    int diceNumbers[MAX_TILES];
+    enum DevelopmentCardType developmentDeck[DEVELOPMENT_DECK_SIZE];
+    enum PlayerType setupStartPlayer;
+    int thiefTileId;
+};
+
 struct Map {
     struct Tile tiles[MAX_TILES];
     struct Side sides[MAX_SIDES];
@@ -41,6 +49,8 @@ struct Map {
 };
 
 bool setupMap(struct Map *map);
+bool mapCreateRandomSetupConfig(struct MapSetupConfig *config);
+bool setupMapFromConfig(struct Map *map, const struct MapSetupConfig *config);
 void createRandomizedTileTypes(enum TileType types[MAX_TILES]);
 void createRandomizedDiceNumbers(int diceNumbers[MAX_TILES]);
 

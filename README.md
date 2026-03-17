@@ -32,7 +32,7 @@ Implemented already:
   - starting resource gain from the second settlement
 - Core turn flow:
   - roll dice
-  - distribute resources
+  - distribute resources (with bank shortage enforcement)
   - end turn
   - win at 10 victory points
 - Robber / thief flow:
@@ -87,8 +87,6 @@ These are intentional shortcuts or current prototype settings:
 - Full hidden-hand hotseat support is still incomplete
   - some handoff screens exist
   - true private local multiplayer flow is not complete
-- Bank resource supply is not tracked or enforced
-  - bank shortages are ignored for production, trades, and card effects
 - No networked multiplayer
 - AI now exhaustively searches bounded deterministic play lines
   - robber sub-choices use fast post-resolution scoring so thief turns stay responsive
@@ -127,6 +125,40 @@ This produces:
 settlers.exe
 ```
 
+Build the headless console version (for rule-heavy testing without UI):
+
+```bash
+make console
+```
+
+This produces:
+
+```bash
+soc_console.exe
+```
+
+Run it:
+
+```powershell
+.\soc_console.exe
+```
+
+This console target is currently intended as an internal QA/testing harness.
+Friend-ready package scripts ship only the main game binary by default.
+
+Inside the console app, type `help` to list all commands. Core flow:
+
+- setup: `place settlement <tile> <corner>` then `place road <tile> <side>`
+- play: `roll`, `buy ...`, `place ...`, `play ...`, `maritime ...`, `trade ...`, `end`
+- robber/discard: `discard ...`, `move_thief ...`, `steal ...`
+
+Hidden-information testing helpers in console mode:
+
+- `private on|off` toggles whether non-active hands are redacted in `status`
+- `view <player|current>` selects which player hand/details are revealed while private mode is on
+- `hands` shows only the currently revealed player in private mode
+- `hands all` prints all hands (debug/testing override)
+
 If your Raylib install lives somewhere else, override the paths when invoking `make`:
 
 ```bash
@@ -159,6 +191,18 @@ This produces:
 ./settlers
 ```
 
+Build the headless console version:
+
+```bash
+make console
+```
+
+This produces:
+
+```bash
+./soc_console
+```
+
 The macOS build path uses `pkg-config` to discover Raylib automatically. If your Raylib install is not exposed through `pkg-config`, pass the flags explicitly:
 
 ```bash
@@ -189,11 +233,14 @@ The current suite covers:
 - Largest Army threshold / transfer
 - Longest Road threshold / tie retention / transfer / blocking
 - city upgrade validation
+- bank shortage enforcement for roll payout / maritime trade / Year of Plenty
+- turn-state legality for buy/trade actions (post-roll and no pending thief/discard)
+- robber steal weighting by card counts
 
 At the time of the latest update, the suite passes:
 
 ```text
-11/11 rule tests passed
+16/16 rule tests passed
 ```
 
 ## Share Build With Friends (Windows + macOS)

@@ -40,6 +40,16 @@ struct MultiplayerPopupLayout
     Rectangle closeButton;
 };
 
+struct LocalLobbyLayout
+{
+    Rectangle panel;
+    Rectangle seatButtons[MAX_PLAYERS];
+    Rectangle aiDifficultyButton;
+    Rectangle confirmButton;
+    Rectangle cancelButton;
+    Rectangle closeButton;
+};
+
 static Rectangle GetMainMenuPanelBounds(void);
 static Rectangle GetStartButtonBounds(void);
 static Rectangle GetAiStartButtonBounds(void);
@@ -47,11 +57,6 @@ static Rectangle GetMultiplayerButtonBounds(void);
 static Rectangle GetStatisticsButtonBounds(void);
 static Rectangle GetMainMenuSettingsButtonBounds(void);
 static Rectangle GetQuitButtonBounds(void);
-static Rectangle GetStartPopupBounds(void);
-static Rectangle GetStartPopupColorButtonBounds(void);
-static Rectangle GetStartPopupDifficultyButtonBounds(void);
-static Rectangle GetStartPopupConfirmButtonBounds(void);
-static Rectangle GetStartPopupCancelButtonBounds(void);
 static Rectangle GetStatisticsPopupBounds(void);
 static Rectangle GetStatisticsPopupCloseButtonBounds(void);
 static Rectangle GetSettingsPopupBounds(void);
@@ -60,17 +65,24 @@ static Rectangle GetSettingsPopupDisplayButtonBounds(void);
 static Rectangle GetSettingsPopupLanguageButtonBounds(void);
 static Rectangle GetSettingsPopupAiSpeedTrackBounds(void);
 static Rectangle GetSettingsPopupCloseButtonBounds(void);
+static struct LocalLobbyLayout BuildLocalLobbyLayout(void);
 static struct MultiplayerPopupLayout BuildMultiplayerPopupLayout(void);
 static void DrawMenuButton(Rectangle bounds, const char *label, Color fill, Color border, Color text, bool emphasized);
 static void DrawStatisticsRow(Rectangle bounds, float y, const char *label, const char *value, Color labelColor, Color valueColor);
 static void DrawTextField(Rectangle bounds, const char *label, const char *value, const char *placeholder,
                           bool active, Color fill, Color border, Color textColor, Color labelColor);
-static void DrawStartPopup(void);
+static void DrawLocalLobbyPopup(void);
 static void DrawStatisticsPopup(void);
 static void DrawSettingsPopup(void);
 static void DrawMultiplayerPopup(void);
 static void FormatElapsedDuration(unsigned long long totalSeconds, char *buffer, size_t bufferSize);
 static const char *PlayerName(enum PlayerType player);
+static void OpenLocalLobby(enum MainMenuAction action);
+static void NormalizeLocalLobbySelection(void);
+static enum PlayerType FirstLocalLobbyHumanColor(void);
+static void CycleLocalLobbySeat(enum PlayerType player);
+static int CountLocalLobbyHumanPlayers(void);
+static bool ValidateLocalLobbyConfig(char *message, size_t messageSize);
 static void NormalizeMultiplayerSelection(void);
 static enum PlayerType NextPlayerColor(enum PlayerType player, enum PlayerType excluded);
 static void CycleMultiplayerLocalColor(void);
@@ -84,6 +96,12 @@ static bool ValidateMultiplayerConfig(char *message, size_t messageSize);
 static enum AiDifficulty gMainMenuAiDifficulty = AI_DIFFICULTY_MEDIUM;
 static enum PlayerType gMainMenuHumanColor = PLAYER_RED;
 static enum MainMenuAction gMainMenuPopupStartAction = MAIN_MENU_ACTION_NONE;
+static enum PlayerControlMode gMainMenuLobbySeatControl[MAX_PLAYERS] = {
+    PLAYER_CONTROL_HUMAN,
+    PLAYER_CONTROL_HUMAN,
+    PLAYER_CONTROL_HUMAN,
+    PLAYER_CONTROL_HUMAN};
+static char gMainMenuLobbyError[96] = {0};
 static bool gMainMenuStatisticsOpen = false;
 static bool gMainMenuSettingsOpen = false;
 static bool gMainMenuMultiplayerOpen = false;
@@ -134,7 +152,7 @@ void DrawMainMenu(void)
     DrawMenuButton(statisticsButton, loc("Statistics"), darkTheme ? (Color){63, 77, 95, 255} : (Color){233, 226, 207, 255}, borderColor, titleColor, false);
     DrawMenuButton(settingsButton, loc("Settings"), darkTheme ? (Color){63, 77, 95, 255} : (Color){233, 226, 207, 255}, borderColor, titleColor, false);
     DrawMenuButton(quitButton, loc("Quit"), darkTheme ? (Color){82, 54, 54, 255} : (Color){231, 215, 204, 255}, borderColor, titleColor, false);
-    DrawStartPopup();
+    DrawLocalLobbyPopup();
     DrawStatisticsPopup();
     DrawSettingsPopup();
     DrawMultiplayerPopup();
@@ -302,43 +320,82 @@ enum MainMenuAction HandleMainMenuInput(void)
         return MAIN_MENU_ACTION_NONE;
     }
 
-    if (!leftPressed)
-    {
-        return MAIN_MENU_ACTION_NONE;
-    }
-
     if (gMainMenuPopupStartAction != MAIN_MENU_ACTION_NONE)
     {
-        if (!CheckCollisionPointRec(mouse, GetStartPopupBounds()) ||
-            CheckCollisionPointRec(mouse, GetStartPopupCancelButtonBounds()))
+        struct LocalLobbyLayout layout = BuildLocalLobbyLayout();
+        char validationError[96];
+
+        if (IsKeyPressed(KEY_ESCAPE))
         {
             gMainMenuPopupStartAction = MAIN_MENU_ACTION_NONE;
+            gMainMenuLobbyError[0] = '\0';
             return MAIN_MENU_ACTION_NONE;
         }
 
-        if (gMainMenuPopupStartAction == MAIN_MENU_ACTION_START_AI_GAME &&
-            CheckCollisionPointRec(mouse, GetStartPopupColorButtonBounds()))
+        if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER))
         {
-            MainMenuSetHumanColor((enum PlayerType)(((int)gMainMenuHumanColor + 1) % MAX_PLAYERS));
-            settingsStoreSaveCurrent();
-            return MAIN_MENU_ACTION_CYCLE_HUMAN_COLOR;
+            if (ValidateLocalLobbyConfig(validationError, sizeof(validationError)))
+            {
+                const enum MainMenuAction action = gMainMenuPopupStartAction;
+                gMainMenuPopupStartAction = MAIN_MENU_ACTION_NONE;
+                gMainMenuLobbyError[0] = '\0';
+                return action;
+            }
+
+            snprintf(gMainMenuLobbyError, sizeof(gMainMenuLobbyError), "%s", validationError);
+            return MAIN_MENU_ACTION_NONE;
         }
 
-        if (gMainMenuPopupStartAction == MAIN_MENU_ACTION_START_AI_GAME &&
-            CheckCollisionPointRec(mouse, GetStartPopupDifficultyButtonBounds()))
+        if (!leftPressed)
+        {
+            return MAIN_MENU_ACTION_NONE;
+        }
+
+        if (!CheckCollisionPointRec(mouse, layout.panel) ||
+            CheckCollisionPointRec(mouse, layout.cancelButton) ||
+            CheckCollisionPointRec(mouse, layout.closeButton))
+        {
+            gMainMenuPopupStartAction = MAIN_MENU_ACTION_NONE;
+            gMainMenuLobbyError[0] = '\0';
+            return MAIN_MENU_ACTION_NONE;
+        }
+
+        for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+        {
+            if (CheckCollisionPointRec(mouse, layout.seatButtons[player]))
+            {
+                CycleLocalLobbySeat((enum PlayerType)player);
+                settingsStoreSaveCurrent();
+                return MAIN_MENU_ACTION_NONE;
+            }
+        }
+
+        if (CheckCollisionPointRec(mouse, layout.aiDifficultyButton))
         {
             MainMenuSetAiDifficulty((enum AiDifficulty)(((int)gMainMenuAiDifficulty + 1) % 3));
+            gMainMenuLobbyError[0] = '\0';
             settingsStoreSaveCurrent();
-            return MAIN_MENU_ACTION_CYCLE_AI_DIFFICULTY;
+            return MAIN_MENU_ACTION_NONE;
         }
 
-        if (CheckCollisionPointRec(mouse, GetStartPopupConfirmButtonBounds()))
+        if (CheckCollisionPointRec(mouse, layout.confirmButton))
         {
-            const enum MainMenuAction action = gMainMenuPopupStartAction;
-            gMainMenuPopupStartAction = MAIN_MENU_ACTION_NONE;
-            return action;
+            if (ValidateLocalLobbyConfig(validationError, sizeof(validationError)))
+            {
+                const enum MainMenuAction action = gMainMenuPopupStartAction;
+                gMainMenuPopupStartAction = MAIN_MENU_ACTION_NONE;
+                gMainMenuLobbyError[0] = '\0';
+                return action;
+            }
+
+            snprintf(gMainMenuLobbyError, sizeof(gMainMenuLobbyError), "%s", validationError);
         }
 
+        return MAIN_MENU_ACTION_NONE;
+    }
+
+    if (!leftPressed)
+    {
         return MAIN_MENU_ACTION_NONE;
     }
 
@@ -354,18 +411,12 @@ enum MainMenuAction HandleMainMenuInput(void)
 
     if (CheckCollisionPointRec(mouse, GetStartButtonBounds()))
     {
-        gMainMenuPopupStartAction = MAIN_MENU_ACTION_START_GAME;
-        gMainMenuStatisticsOpen = false;
-        gMainMenuSettingsOpen = false;
-        gMainMenuMultiplayerOpen = false;
+        OpenLocalLobby(MAIN_MENU_ACTION_START_GAME);
         return MAIN_MENU_ACTION_NONE;
     }
     if (CheckCollisionPointRec(mouse, GetAiStartButtonBounds()))
     {
-        gMainMenuPopupStartAction = MAIN_MENU_ACTION_START_AI_GAME;
-        gMainMenuStatisticsOpen = false;
-        gMainMenuSettingsOpen = false;
-        gMainMenuMultiplayerOpen = false;
+        OpenLocalLobby(MAIN_MENU_ACTION_START_AI_GAME);
         return MAIN_MENU_ACTION_NONE;
     }
     if (CheckCollisionPointRec(mouse, GetMultiplayerButtonBounds()))
@@ -447,39 +498,159 @@ static Rectangle GetQuitButtonBounds(void)
     return (Rectangle){panel.x + 34.0f, panel.y + 520.0f, panel.width - 68.0f, 40.0f};
 }
 
-static Rectangle GetStartPopupBounds(void)
+static void OpenLocalLobby(enum MainMenuAction action)
 {
-    const float panelWidth = 408.0f;
-    const float panelHeight = gMainMenuPopupStartAction == MAIN_MENU_ACTION_START_AI_GAME ? 286.0f : 176.0f;
-    return (Rectangle){
+    gMainMenuPopupStartAction = action;
+    gMainMenuStatisticsOpen = false;
+    gMainMenuSettingsOpen = false;
+    gMainMenuMultiplayerOpen = false;
+    gMainMenuLobbyError[0] = '\0';
+
+    if (action == MAIN_MENU_ACTION_START_AI_GAME)
+    {
+        for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+        {
+            gMainMenuLobbySeatControl[player] = PLAYER_CONTROL_AI;
+        }
+        gMainMenuLobbySeatControl[gMainMenuHumanColor] = PLAYER_CONTROL_HUMAN;
+    }
+    else
+    {
+        for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+        {
+            gMainMenuLobbySeatControl[player] = PLAYER_CONTROL_HUMAN;
+        }
+    }
+
+    NormalizeLocalLobbySelection();
+}
+
+static void NormalizeLocalLobbySelection(void)
+{
+    const enum PlayerType firstHuman = FirstLocalLobbyHumanColor();
+
+    if (gMainMenuAiDifficulty < AI_DIFFICULTY_EASY || gMainMenuAiDifficulty > AI_DIFFICULTY_HARD)
+    {
+        gMainMenuAiDifficulty = AI_DIFFICULTY_MEDIUM;
+    }
+
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        if (gMainMenuLobbySeatControl[player] != PLAYER_CONTROL_HUMAN &&
+            gMainMenuLobbySeatControl[player] != PLAYER_CONTROL_AI)
+        {
+            gMainMenuLobbySeatControl[player] = PLAYER_CONTROL_HUMAN;
+        }
+    }
+
+    if (firstHuman != PLAYER_NONE &&
+        (gMainMenuHumanColor < PLAYER_RED ||
+         gMainMenuHumanColor > PLAYER_BLACK ||
+         gMainMenuLobbySeatControl[gMainMenuHumanColor] != PLAYER_CONTROL_HUMAN))
+    {
+        gMainMenuHumanColor = firstHuman;
+    }
+    else if (gMainMenuHumanColor < PLAYER_RED || gMainMenuHumanColor > PLAYER_BLACK)
+    {
+        gMainMenuHumanColor = PLAYER_RED;
+    }
+}
+
+static enum PlayerType FirstLocalLobbyHumanColor(void)
+{
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        if (gMainMenuLobbySeatControl[player] == PLAYER_CONTROL_HUMAN)
+        {
+            return (enum PlayerType)player;
+        }
+    }
+
+    return PLAYER_NONE;
+}
+
+static void CycleLocalLobbySeat(enum PlayerType player)
+{
+    if (player < PLAYER_RED || player > PLAYER_BLACK)
+    {
+        return;
+    }
+
+    gMainMenuLobbySeatControl[player] = gMainMenuLobbySeatControl[player] == PLAYER_CONTROL_HUMAN
+                                            ? PLAYER_CONTROL_AI
+                                            : PLAYER_CONTROL_HUMAN;
+    if (gMainMenuLobbySeatControl[player] == PLAYER_CONTROL_HUMAN)
+    {
+        gMainMenuHumanColor = player;
+    }
+
+    NormalizeLocalLobbySelection();
+    gMainMenuLobbyError[0] = '\0';
+}
+
+static int CountLocalLobbyHumanPlayers(void)
+{
+    int humans = 0;
+
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        if (gMainMenuLobbySeatControl[player] == PLAYER_CONTROL_HUMAN)
+        {
+            humans++;
+        }
+    }
+
+    return humans;
+}
+
+static bool ValidateLocalLobbyConfig(char *message, size_t messageSize)
+{
+    NormalizeLocalLobbySelection();
+
+    if (CountLocalLobbyHumanPlayers() <= 0)
+    {
+        snprintf(message, messageSize, "%s", loc("At least one human player is required."));
+        return false;
+    }
+
+    if (message != NULL && messageSize > 0u)
+    {
+        message[0] = '\0';
+    }
+    return true;
+}
+
+static struct LocalLobbyLayout BuildLocalLobbyLayout(void)
+{
+    struct LocalLobbyLayout layout;
+    const float panelWidth = 720.0f;
+    const float panelHeight = 560.0f;
+    const float gutter = 18.0f;
+    const float cardWidth = (panelWidth - 52.0f - gutter) * 0.5f;
+    const float cardHeight = 94.0f;
+    const float startX = (float)GetScreenWidth() * 0.5f - panelWidth * 0.5f + 26.0f;
+    const float startY = (float)GetScreenHeight() * 0.5f - panelHeight * 0.5f + 118.0f;
+
+    layout.panel = (Rectangle){
         (float)GetScreenWidth() * 0.5f - panelWidth * 0.5f,
         (float)GetScreenHeight() * 0.5f - panelHeight * 0.5f,
         panelWidth,
         panelHeight};
-}
-
-static Rectangle GetStartPopupColorButtonBounds(void)
-{
-    const Rectangle panel = GetStartPopupBounds();
-    return (Rectangle){panel.x + 28.0f, panel.y + 102.0f, panel.width - 56.0f, 44.0f};
-}
-
-static Rectangle GetStartPopupDifficultyButtonBounds(void)
-{
-    const Rectangle panel = GetStartPopupBounds();
-    return (Rectangle){panel.x + 28.0f, panel.y + 156.0f, panel.width - 56.0f, 44.0f};
-}
-
-static Rectangle GetStartPopupConfirmButtonBounds(void)
-{
-    const Rectangle panel = GetStartPopupBounds();
-    return (Rectangle){panel.x + 28.0f, panel.y + panel.height - 56.0f, panel.width - 168.0f, 38.0f};
-}
-
-static Rectangle GetStartPopupCancelButtonBounds(void)
-{
-    const Rectangle panel = GetStartPopupBounds();
-    return (Rectangle){panel.x + panel.width - 122.0f, panel.y + panel.height - 56.0f, 94.0f, 38.0f};
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        const int column = player % 2;
+        const int row = player / 2;
+        layout.seatButtons[player] = (Rectangle){
+            startX + column * (cardWidth + gutter),
+            startY + row * (cardHeight + 18.0f),
+            cardWidth,
+            cardHeight};
+    }
+    layout.aiDifficultyButton = (Rectangle){layout.panel.x + 26.0f, layout.panel.y + 346.0f, layout.panel.width - 52.0f, 42.0f};
+    layout.confirmButton = (Rectangle){layout.panel.x + 26.0f, layout.panel.y + layout.panel.height - 58.0f, layout.panel.width - 168.0f, 38.0f};
+    layout.cancelButton = (Rectangle){layout.panel.x + layout.panel.width - 122.0f, layout.panel.y + layout.panel.height - 58.0f, 94.0f, 38.0f};
+    layout.closeButton = (Rectangle){layout.panel.x + layout.panel.width - 42.0f, layout.panel.y + 14.0f, 24.0f, 24.0f};
+    return layout;
 }
 
 static Rectangle GetStatisticsPopupBounds(void)
@@ -602,6 +773,22 @@ void MainMenuSetHumanColor(enum PlayerType player)
     gMainMenuHumanColor = player;
 }
 
+void MainMenuGetLobbyConfig(struct MainMenuLobbyConfig *config)
+{
+    if (config == NULL)
+    {
+        return;
+    }
+
+    NormalizeLocalLobbySelection();
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        config->seatControl[player] = gMainMenuLobbySeatControl[player];
+    }
+    config->aiDifficulty = gMainMenuAiDifficulty;
+    config->primaryHumanColor = gMainMenuHumanColor;
+}
+
 enum PlayerType MainMenuGetMultiplayerLocalColor(void)
 {
     NormalizeMultiplayerSelection();
@@ -672,45 +859,100 @@ void MainMenuSetMultiplayerError(const char *message)
     snprintf(gMainMenuMultiplayerError, sizeof(gMainMenuMultiplayerError), "%s", message == NULL ? "" : message);
 }
 
-static void DrawStartPopup(void)
+static void DrawLocalLobbyPopup(void)
 {
-    char colorLabel[32];
     char difficultyLabel[40];
+    char seatLabel[48];
+    struct LocalLobbyLayout layout;
+    const Vector2 mouse = GetMousePosition();
     const bool darkTheme = uiGetTheme() == UI_THEME_DARK;
-    const Rectangle panel = GetStartPopupBounds();
-    const Rectangle colorButton = GetStartPopupColorButtonBounds();
-    const Rectangle difficultyButton = GetStartPopupDifficultyButtonBounds();
-    const Rectangle confirmButton = GetStartPopupConfirmButtonBounds();
-    const Rectangle cancelButton = GetStartPopupCancelButtonBounds();
-    const bool aiPopup = gMainMenuPopupStartAction == MAIN_MENU_ACTION_START_AI_GAME;
     const Color panelColor = darkTheme ? (Color){35, 43, 55, 252} : (Color){245, 237, 217, 252};
     const Color borderColor = darkTheme ? (Color){132, 151, 176, 255} : (Color){118, 88, 56, 255};
     const Color textColor = darkTheme ? (Color){236, 241, 246, 255} : (Color){54, 39, 29, 255};
     const Color bodyColor = darkTheme ? (Color){194, 205, 216, 255} : (Color){92, 70, 50, 255};
-    const Color accentColor = aiPopup ? (darkTheme ? (Color){219, 184, 106, 255} : (Color){191, 145, 61, 255}) : (darkTheme ? (Color){188, 135, 83, 255} : (Color){171, 82, 54, 255});
+    const Color accentColor = darkTheme ? (Color){188, 135, 83, 255} : (Color){171, 82, 54, 255};
+    const Color sectionFill = darkTheme ? (Color){63, 77, 95, 255} : (Color){233, 226, 207, 255};
 
     if (gMainMenuPopupStartAction == MAIN_MENU_ACTION_NONE)
     {
         return;
     }
 
-    snprintf(colorLabel, sizeof(colorLabel), loc("Your Color: %s"), PlayerName(gMainMenuHumanColor));
+    NormalizeLocalLobbySelection();
+    const int humanCount = CountLocalLobbyHumanPlayers();
+    const int aiCount = MAX_PLAYERS - humanCount;
+    layout = BuildLocalLobbyLayout();
     snprintf(difficultyLabel, sizeof(difficultyLabel), loc("AI Difficulty: %s"), aiDifficultyLabel(gMainMenuAiDifficulty));
 
     DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, darkTheme ? 0.46f : 0.28f));
-    DrawRectangleRounded((Rectangle){panel.x + 8.0f, panel.y + 10.0f, panel.width, panel.height}, 0.08f, 8, Fade(BLACK, 0.16f));
-    DrawRectangleRounded(panel, 0.08f, 8, panelColor);
-    DrawRectangleLinesEx(panel, 2.0f, borderColor);
+    DrawRectangleRounded((Rectangle){layout.panel.x + 8.0f, layout.panel.y + 10.0f, layout.panel.width, layout.panel.height}, 0.08f, 8, Fade(BLACK, 0.16f));
+    DrawRectangleRounded(layout.panel, 0.08f, 8, panelColor);
+    DrawRectangleLinesEx(layout.panel, 2.0f, borderColor);
 
-    DrawUiText(aiPopup ? loc("Start vs AI") : loc("Start Game"), panel.x + 28.0f, panel.y + 24.0f, 30, textColor);
-    DrawUiText(loc("Setup order is random every match."), panel.x + 28.0f, panel.y + 62.0f, 18, bodyColor);
-    if (aiPopup)
+    DrawUiText(loc("Lobby"), layout.panel.x + 26.0f, layout.panel.y + 24.0f, 30, textColor);
+    DrawUiText(loc("See all four seats before the match starts."), layout.panel.x + 26.0f, layout.panel.y + 60.0f, 18, bodyColor);
+    DrawUiText(loc("Click a seat to toggle Human or AI."), layout.panel.x + 26.0f, layout.panel.y + 86.0f, 16, bodyColor);
+
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
     {
-        DrawMenuButton(colorButton, colorLabel, darkTheme ? (Color){63, 77, 95, 255} : (Color){233, 226, 207, 255}, borderColor, textColor, false);
-        DrawMenuButton(difficultyButton, difficultyLabel, darkTheme ? (Color){63, 77, 95, 255} : (Color){233, 226, 207, 255}, borderColor, textColor, false);
+        const bool humanSeat = gMainMenuLobbySeatControl[player] == PLAYER_CONTROL_HUMAN;
+        const bool hovered = CheckCollisionPointRec(mouse, layout.seatButtons[player]);
+        const bool pressed = hovered && IsMouseButtonDown(MOUSE_BUTTON_LEFT);
+        const float yOffset = pressed ? 2.0f : (hovered ? -2.0f : 0.0f);
+        const Rectangle card = {
+            layout.seatButtons[player].x,
+            layout.seatButtons[player].y + yOffset,
+            layout.seatButtons[player].width,
+            layout.seatButtons[player].height};
+        const Rectangle badge = {card.x + card.width - 100.0f, card.y + 14.0f, 80.0f, 24.0f};
+        const Color playerColor = PlayerColor((enum PlayerType)player);
+        const Color cardFill = humanSeat
+                                   ? Fade(playerColor, darkTheme ? 0.18f : 0.14f)
+                                   : (darkTheme ? (Color){48, 60, 75, 255} : (Color){236, 228, 208, 255});
+        const Color cardBorder = humanSeat ? Fade(playerColor, 0.95f) : Fade(borderColor, 0.95f);
+
+        snprintf(seatLabel,
+                 sizeof(seatLabel),
+                 "%s%s%s",
+                 humanSeat ? loc("Human") : loc("AI"),
+                 humanSeat ? "" : " / ",
+                 humanSeat ? "" : aiDifficultyLabel(gMainMenuAiDifficulty));
+
+        DrawRectangleRounded((Rectangle){card.x + 4.0f, card.y + 6.0f, card.width, card.height}, 0.18f, 8, Fade(BLACK, 0.12f));
+        DrawRectangleRounded(card, 0.18f, 8, hovered ? ColorBrightness(cardFill, 0.08f) : cardFill);
+        DrawRectangleLinesEx(card, humanSeat ? 2.2f : 1.8f, hovered ? ColorBrightness(cardBorder, 0.08f) : cardBorder);
+        DrawCircleV((Vector2){card.x + 22.0f, card.y + 24.0f}, 7.0f, playerColor);
+        DrawUiText(PlayerName((enum PlayerType)player), card.x + 38.0f, card.y + 12.0f, 24, playerColor);
+        DrawUiText(seatLabel, card.x + 18.0f, card.y + 52.0f, 18, textColor);
+        DrawRectangleRounded(badge, 0.40f, 8, humanSeat ? Fade(playerColor, 0.92f) : sectionFill);
+        DrawRectangleLinesEx(badge, 1.4f, humanSeat ? Fade(playerColor, 0.98f) : Fade(borderColor, 0.95f));
+        DrawUiText(humanSeat ? loc("Human") : loc("AI"),
+                   badge.x + badge.width * 0.5f - MeasureUiText(humanSeat ? loc("Human") : loc("AI"), 16) * 0.5f,
+                   badge.y + 4.0f,
+                   16,
+                   humanSeat ? RAYWHITE : textColor);
     }
-    DrawMenuButton(confirmButton, aiPopup ? loc("Start Match") : loc("Start Hotseat"), accentColor, borderColor, aiPopup ? (darkTheme ? (Color){38, 32, 24, 255} : RAYWHITE) : RAYWHITE, true);
-    DrawMenuButton(cancelButton, loc("Cancel"), darkTheme ? (Color){63, 77, 95, 255} : (Color){233, 226, 207, 255}, borderColor, textColor, false);
+
+    DrawMenuButton(layout.aiDifficultyButton,
+                   difficultyLabel,
+                   aiCount > 0 ? sectionFill : Fade(sectionFill, 0.65f),
+                   borderColor,
+                   aiCount > 0 ? textColor : Fade(textColor, 0.65f),
+                   false);
+    DrawUiText(loc("Setup order is random every match."), layout.panel.x + 26.0f, layout.confirmButton.y - 56.0f, 16, bodyColor);
+    if (gMainMenuLobbyError[0] != '\0')
+    {
+        DrawUiText(gMainMenuLobbyError, layout.panel.x + 26.0f, layout.confirmButton.y - 32.0f, 16, (Color){171, 82, 54, 255});
+    }
+
+    DrawMenuButton(layout.confirmButton,
+                   humanCount == MAX_PLAYERS ? loc("Start Hotseat") : loc("Start Match"),
+                   accentColor,
+                   borderColor,
+                   RAYWHITE,
+                   true);
+    DrawMenuButton(layout.cancelButton, loc("Cancel"), sectionFill, borderColor, textColor, false);
+    DrawUiText("x", layout.closeButton.x + 6.0f, layout.closeButton.y + 1.0f, 22, bodyColor);
 }
 
 static void DrawStatisticsPopup(void)

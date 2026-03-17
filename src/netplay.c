@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef _WIN32
 typedef SOCKET NetSocket;
@@ -46,16 +47,31 @@ typedef socklen_t NetSockLen;
 #define NETPLAY_SEND_QUEUE_CAPACITY 16
 #define NETPLAY_EVENT_QUEUE_CAPACITY 16
 #define NETPLAY_RECV_BUFFER_SIZE (NETPLAY_MAX_PAYLOAD_SIZE * 2u)
+#define NETPLAY_CONNECT_TIMEOUT_MS 8000u
+#define NETPLAY_HEARTBEAT_INTERVAL_MS 2000u
+#define NETPLAY_STALE_TIMEOUT_MS 10000u
 
 enum NetplayPacketType
 {
     NETPLAY_PACKET_HELLO = 1,
-    NETPLAY_PACKET_SNAPSHOT = 2,
-    NETPLAY_PACKET_ACTION_REQUEST = 3,
-    NETPLAY_PACKET_ACTION_RESULT = 4,
-    NETPLAY_PACKET_ACTION_REJECT = 5,
-    NETPLAY_PACKET_TRADE_OFFER = 6,
-    NETPLAY_PACKET_TRADE_RESPONSE = 7
+    NETPLAY_PACKET_LOBBY_STATE = 2,
+    NETPLAY_PACKET_MATCH_INIT = 3,
+    NETPLAY_PACKET_SNAPSHOT = 4,
+    NETPLAY_PACKET_ACTION_REQUEST = 5,
+    NETPLAY_PACKET_ACTION_RESULT = 6,
+    NETPLAY_PACKET_ACTION_REJECT = 7,
+    NETPLAY_PACKET_TRADE_OFFER = 8,
+    NETPLAY_PACKET_TRADE_RESPONSE = 9,
+    NETPLAY_PACKET_CAPABILITIES = 10,
+    NETPLAY_PACKET_HEARTBEAT = 11,
+    NETPLAY_PACKET_RESYNC_REQUEST = 12
+};
+
+struct NetplayCapabilitiesWire
+{
+    uint32_t capabilityFlags;
+    uint32_t protocolMinVersion;
+    uint32_t protocolMaxVersion;
 };
 
 struct NetplayPacketHeader
@@ -71,6 +87,23 @@ struct NetplayHelloWire
     uint32_t assignedPlayer;
     uint32_t hostPlayer;
     uint32_t seatAuthority[MAX_PLAYERS];
+};
+
+struct NetplayLobbyStateWire
+{
+    uint32_t controlMode[MAX_PLAYERS];
+    uint32_t aiDifficulty[MAX_PLAYERS];
+};
+
+struct NetplayMatchInitWire
+{
+    uint32_t tileTypes[MAX_TILES];
+    uint32_t diceNumbers[MAX_TILES];
+    uint32_t developmentDeck[DEVELOPMENT_DECK_SIZE];
+    uint32_t setupStartPlayer;
+    uint32_t thiefTileId;
+    uint32_t controlMode[MAX_PLAYERS];
+    uint32_t aiDifficulty[MAX_PLAYERS];
 };
 
 struct NetplayActionWire
@@ -116,6 +149,12 @@ struct NetplayTradeResponseWire
     uint32_t stateHash;
 };
 
+struct NetplayResyncRequestWire
+{
+    uint32_t stateHash;
+    char reason[NETPLAY_MAX_STATUS_TEXT];
+};
+
 struct NetplayQueuedPacket
 {
     size_t length;
@@ -141,6 +180,10 @@ struct NetplayState
     struct NetplayEvent eventQueue[NETPLAY_EVENT_QUEUE_CAPACITY];
     int eventHead;
     int eventCount;
+    uint64_t connectStartedMs;
+    uint64_t lastSendMs;
+    uint64_t lastReceiveMs;
+    uint64_t lastHeartbeatSentMs;
 };
 
 #ifdef _WIN32
@@ -148,6 +191,7 @@ static bool gSocketLayerReady = false;
 #endif
 
 static bool net_socket_layer_init(void);
+static uint64_t netplay_now_ms(void);
 static bool is_loopback_host(const char *hostAddress);
 static void detect_local_ipv4_address(char *buffer, size_t bufferSize);
 static void clear_last_error(struct NetplayState *state);
@@ -164,12 +208,19 @@ static void accept_pending_client(struct NetplayState *state);
 static void advance_pending_connect(struct NetplayState *state);
 static void read_from_peer(struct NetplayState *state);
 static void parse_incoming_packets(struct NetplayState *state);
+static void process_connection_health(struct NetplayState *state);
 static void disconnect_peer(struct NetplayState *state, bool keepListening, const char *message);
 static bool decode_packet(struct NetplayState *state, enum NetplayPacketType type, const unsigned char *payload, size_t payloadSize);
+static void encode_lobby_state(const struct NetplayLobbyStateInfo *info, struct NetplayLobbyStateWire *wireInfo);
+static void decode_lobby_state(struct NetplayLobbyStateInfo *info, const struct NetplayLobbyStateWire *wireInfo);
+static void encode_match_init(const struct NetplayMatchInitInfo *info, struct NetplayMatchInitWire *wireInfo);
+static void decode_match_init(struct NetplayMatchInitInfo *info, const struct NetplayMatchInitWire *wireInfo);
 static void encode_action(const struct GameAction *action, struct NetplayActionWire *wireAction);
 static void decode_action(struct GameAction *action, const struct NetplayActionWire *wireAction);
 static void encode_action_result(const struct GameActionResult *result, struct NetplayActionResultWire *wireResult);
 static void decode_action_result(struct GameActionResult *result, const struct NetplayActionResultWire *wireResult);
+static bool action_is_sane(const struct GameAction *action);
+static bool action_result_is_sane(const struct GameActionResult *result);
 static uint32_t encode_u32(uint32_t value);
 static uint32_t encode_i32(int value);
 static uint32_t encode_bool(bool value);
@@ -205,6 +256,92 @@ static int decode_i32(uint32_t value)
 static bool decode_bool(uint32_t value)
 {
     return ntohl(value) != 0u;
+}
+
+static uint64_t netplay_now_ms(void)
+{
+    return (uint64_t)time(NULL) * 1000u;
+}
+
+static void encode_lobby_state(const struct NetplayLobbyStateInfo *info, struct NetplayLobbyStateWire *wireInfo)
+{
+    if (info == NULL || wireInfo == NULL)
+    {
+        return;
+    }
+
+    for (int player = 0; player < MAX_PLAYERS; player++)
+    {
+        wireInfo->controlMode[player] = encode_i32(info->controlMode[player]);
+        wireInfo->aiDifficulty[player] = encode_i32(info->aiDifficulty[player]);
+    }
+}
+
+static void decode_lobby_state(struct NetplayLobbyStateInfo *info, const struct NetplayLobbyStateWire *wireInfo)
+{
+    if (info == NULL || wireInfo == NULL)
+    {
+        return;
+    }
+
+    memset(info, 0, sizeof(*info));
+    for (int player = 0; player < MAX_PLAYERS; player++)
+    {
+        info->controlMode[player] = (enum PlayerControlMode)decode_i32(wireInfo->controlMode[player]);
+        info->aiDifficulty[player] = (enum AiDifficulty)decode_i32(wireInfo->aiDifficulty[player]);
+    }
+}
+
+static void encode_match_init(const struct NetplayMatchInitInfo *info, struct NetplayMatchInitWire *wireInfo)
+{
+    if (info == NULL || wireInfo == NULL)
+    {
+        return;
+    }
+
+    memset(wireInfo, 0, sizeof(*wireInfo));
+    for (int tile = 0; tile < MAX_TILES; tile++)
+    {
+        wireInfo->tileTypes[tile] = encode_i32(info->setup.tileTypes[tile]);
+        wireInfo->diceNumbers[tile] = encode_i32(info->setup.diceNumbers[tile]);
+    }
+    for (int card = 0; card < DEVELOPMENT_DECK_SIZE; card++)
+    {
+        wireInfo->developmentDeck[card] = encode_i32(info->setup.developmentDeck[card]);
+    }
+    wireInfo->setupStartPlayer = encode_i32(info->setup.setupStartPlayer);
+    wireInfo->thiefTileId = encode_i32(info->setup.thiefTileId);
+    for (int player = 0; player < MAX_PLAYERS; player++)
+    {
+        wireInfo->controlMode[player] = encode_i32(info->controlMode[player]);
+        wireInfo->aiDifficulty[player] = encode_i32(info->aiDifficulty[player]);
+    }
+}
+
+static void decode_match_init(struct NetplayMatchInitInfo *info, const struct NetplayMatchInitWire *wireInfo)
+{
+    if (info == NULL || wireInfo == NULL)
+    {
+        return;
+    }
+
+    memset(info, 0, sizeof(*info));
+    for (int tile = 0; tile < MAX_TILES; tile++)
+    {
+        info->setup.tileTypes[tile] = (enum TileType)decode_i32(wireInfo->tileTypes[tile]);
+        info->setup.diceNumbers[tile] = decode_i32(wireInfo->diceNumbers[tile]);
+    }
+    for (int card = 0; card < DEVELOPMENT_DECK_SIZE; card++)
+    {
+        info->setup.developmentDeck[card] = (enum DevelopmentCardType)decode_i32(wireInfo->developmentDeck[card]);
+    }
+    info->setup.setupStartPlayer = (enum PlayerType)decode_i32(wireInfo->setupStartPlayer);
+    info->setup.thiefTileId = decode_i32(wireInfo->thiefTileId);
+    for (int player = 0; player < MAX_PLAYERS; player++)
+    {
+        info->controlMode[player] = (enum PlayerControlMode)decode_i32(wireInfo->controlMode[player]);
+        info->aiDifficulty[player] = (enum AiDifficulty)decode_i32(wireInfo->aiDifficulty[player]);
+    }
 }
 
 static bool net_socket_layer_init(void)
@@ -362,6 +499,9 @@ static void reset_connection_buffers(struct NetplayState *state)
     state->recvLength = 0u;
     state->sendHead = 0;
     state->sendCount = 0;
+    state->lastSendMs = 0u;
+    state->lastReceiveMs = 0u;
+    state->lastHeartbeatSentMs = 0u;
 }
 
 static bool push_event(struct NetplayState *state, const struct NetplayEvent *event)
@@ -385,8 +525,20 @@ static bool queue_packet(struct NetplayState *state, enum NetplayPacketType type
     struct NetplayQueuedPacket *packet = NULL;
     struct NetplayPacketHeader header;
 
-    if (state == NULL || payloadSize > NETPLAY_MAX_PAYLOAD_SIZE || state->sendCount >= NETPLAY_SEND_QUEUE_CAPACITY)
+    if (state == NULL || payloadSize > NETPLAY_MAX_PAYLOAD_SIZE)
     {
+        return false;
+    }
+
+    if (state->connectionState != NETPLAY_CONNECTION_CONNECTED || state->peerSocket == NET_INVALID_SOCKET)
+    {
+        set_last_error(state, "queue failed: not connected");
+        return false;
+    }
+
+    if (state->sendCount >= NETPLAY_SEND_QUEUE_CAPACITY)
+    {
+        set_last_error(state, "queue failed: send queue full");
         return false;
     }
 
@@ -424,6 +576,7 @@ static void disconnect_peer(struct NetplayState *state, bool keepListening, cons
 
     close_socket_if_open(&state->peerSocket);
     reset_connection_buffers(state);
+    state->connectStartedMs = 0u;
     state->peerAddress[0] = '\0';
     if (keepListening && state->mode == NETPLAY_MODE_HOST && state->listenSocket != NET_INVALID_SOCKET)
     {
@@ -472,6 +625,7 @@ static void flush_send_queue(struct NetplayState *state)
         }
 
         packet->offset += (size_t)sent;
+        state->lastSendMs = netplay_now_ms();
         if (packet->offset >= packet->length)
         {
             state->sendHead = (state->sendHead + 1) % NETPLAY_SEND_QUEUE_CAPACITY;
@@ -517,6 +671,7 @@ static void accept_pending_client(struct NetplayState *state)
     set_socket_nodelay(accepted);
     state->peerSocket = accepted;
     state->connectionState = NETPLAY_CONNECTION_CONNECTED;
+    state->connectStartedMs = 0u;
     snprintf(state->peerAddress, sizeof(state->peerAddress), "%s", inet_ntoa(address.sin_addr));
     clear_last_error(state);
 
@@ -542,6 +697,23 @@ static void advance_pending_connect(struct NetplayState *state)
         return;
     }
 
+    if (state->connectStartedMs > 0u &&
+        netplay_now_ms() - state->connectStartedMs >= NETPLAY_CONNECT_TIMEOUT_MS)
+    {
+        if (is_loopback_host(state->peerAddress))
+        {
+            set_last_error(state, "connect timed out (use host LAN IP)");
+        }
+        else
+        {
+            set_last_error(state, "connect timed out (check host IP, port, firewall)");
+        }
+        close_socket_if_open(&state->peerSocket);
+        state->connectStartedMs = 0u;
+        state->connectionState = NETPLAY_CONNECTION_ERROR;
+        return;
+    }
+
     if (!socket_is_writable(state->peerSocket))
     {
         return;
@@ -560,11 +732,13 @@ static void advance_pending_connect(struct NetplayState *state)
         }
         set_last_error(state, errorText);
         close_socket_if_open(&state->peerSocket);
+        state->connectStartedMs = 0u;
         state->connectionState = NETPLAY_CONNECTION_ERROR;
         return;
     }
 
     state->connectionState = NETPLAY_CONNECTION_CONNECTED;
+    state->connectStartedMs = 0u;
     clear_last_error(state);
     {
         struct NetplayEvent event;
@@ -607,6 +781,7 @@ static void read_from_peer(struct NetplayState *state)
         }
 
         state->recvLength += (size_t)received;
+        state->lastReceiveMs = netplay_now_ms();
         if (state->recvLength >= sizeof(state->recvBuffer))
         {
             disconnect_peer(state, state->mode == NETPLAY_MODE_HOST, "receive buffer overflow");
@@ -689,6 +864,57 @@ static void decode_action_result(struct GameActionResult *result, const struct N
     result->stolenResource = (enum ResourceType)decode_i32(wireResult->stolenResource);
 }
 
+static bool action_is_sane(const struct GameAction *action)
+{
+    if (action == NULL)
+    {
+        return false;
+    }
+
+    if (action->type < GAME_ACTION_NONE || action->type > GAME_ACTION_TRADE_WITH_PLAYER)
+    {
+        return false;
+    }
+
+    if (action->tileId < -1 || action->tileId >= MAX_TILES ||
+        action->cornerIndex < -1 || action->cornerIndex >= 6 ||
+        action->sideIndex < -1 || action->sideIndex >= 6 ||
+        action->diceRoll < 0 || action->diceRoll > 12 ||
+        action->player < PLAYER_NONE || action->player > PLAYER_BLACK ||
+        action->resourceA < RESOURCE_WOOD || action->resourceA > RESOURCE_STONE ||
+        action->resourceB < RESOURCE_WOOD || action->resourceB > RESOURCE_STONE ||
+        action->amountA < 0 || action->amountA > 64 ||
+        action->amountB < 0 || action->amountB > 64)
+    {
+        return false;
+    }
+
+    for (int resource = 0; resource < 5; resource++)
+    {
+        if (action->resources[resource] < 0 || action->resources[resource] > 64)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool action_result_is_sane(const struct GameActionResult *result)
+{
+    if (result == NULL)
+    {
+        return false;
+    }
+
+    return result->diceRoll >= 0 &&
+           result->diceRoll <= 12 &&
+           result->drawnCard >= DEVELOPMENT_CARD_KNIGHT &&
+           result->drawnCard <= DEVELOPMENT_CARD_COUNT &&
+           result->stolenResource >= RESOURCE_WOOD &&
+           result->stolenResource <= RESOURCE_STONE;
+}
+
 static bool decode_packet(struct NetplayState *state, enum NetplayPacketType type, const unsigned char *payload, size_t payloadSize)
 {
     struct NetplayEvent event;
@@ -719,6 +945,24 @@ static bool decode_packet(struct NetplayState *state, enum NetplayPacketType typ
         }
         break;
 
+    case NETPLAY_PACKET_LOBBY_STATE:
+        if (payloadSize != sizeof(struct NetplayLobbyStateWire))
+        {
+            return false;
+        }
+        event.type = NETPLAY_EVENT_LOBBY_STATE;
+        decode_lobby_state(&event.lobbyState, (const struct NetplayLobbyStateWire *)payload);
+        break;
+
+    case NETPLAY_PACKET_MATCH_INIT:
+        if (payloadSize != sizeof(struct NetplayMatchInitWire))
+        {
+            return false;
+        }
+        event.type = NETPLAY_EVENT_MATCH_INIT;
+        decode_match_init(&event.matchInit, (const struct NetplayMatchInitWire *)payload);
+        break;
+
     case NETPLAY_PACKET_SNAPSHOT:
         event.type = NETPLAY_EVENT_SNAPSHOT;
         event.payloadSize = payloadSize;
@@ -732,6 +976,10 @@ static bool decode_packet(struct NetplayState *state, enum NetplayPacketType typ
         }
         event.type = NETPLAY_EVENT_ACTION_REQUEST;
         decode_action(&event.action, (const struct NetplayActionWire *)payload);
+        if (!action_is_sane(&event.action))
+        {
+            return false;
+        }
         break;
 
     case NETPLAY_PACKET_ACTION_RESULT:
@@ -745,6 +993,10 @@ static bool decode_packet(struct NetplayState *state, enum NetplayPacketType typ
             event.type = NETPLAY_EVENT_ACTION_RESULT;
             decode_action(&event.action, &wireOutcome.action);
             decode_action_result(&event.result, &wireOutcome.result);
+            if (!action_is_sane(&event.action) || !action_result_is_sane(&event.result))
+            {
+                return false;
+            }
             event.stateHash = decode_u32(wireOutcome.stateHash);
         }
         break;
@@ -770,6 +1022,10 @@ static bool decode_packet(struct NetplayState *state, enum NetplayPacketType typ
         }
         event.type = NETPLAY_EVENT_TRADE_OFFER;
         decode_action(&event.action, (const struct NetplayActionWire *)payload);
+        if (!action_is_sane(&event.action))
+        {
+            return false;
+        }
         break;
 
     case NETPLAY_PACKET_TRADE_RESPONSE:
@@ -782,8 +1038,48 @@ static bool decode_packet(struct NetplayState *state, enum NetplayPacketType typ
             memcpy(&wireResponse, payload, sizeof(wireResponse));
             event.type = NETPLAY_EVENT_TRADE_RESPONSE;
             decode_action(&event.action, &wireResponse.action);
+            if (!action_is_sane(&event.action))
+            {
+                return false;
+            }
             event.accepted = decode_bool(wireResponse.accepted);
             event.stateHash = decode_u32(wireResponse.stateHash);
+        }
+        break;
+
+    case NETPLAY_PACKET_CAPABILITIES:
+        if (payloadSize != sizeof(struct NetplayCapabilitiesWire))
+        {
+            return false;
+        }
+        {
+            struct NetplayCapabilitiesWire wireCaps;
+            memcpy(&wireCaps, payload, sizeof(wireCaps));
+            event.type = NETPLAY_EVENT_CAPABILITIES;
+            event.capabilityFlags = decode_u32(wireCaps.capabilityFlags);
+            event.protocolMinVersion = decode_u32(wireCaps.protocolMinVersion);
+            event.protocolMaxVersion = decode_u32(wireCaps.protocolMaxVersion);
+        }
+        break;
+
+    case NETPLAY_PACKET_HEARTBEAT:
+        if (payloadSize != 0u)
+        {
+            return false;
+        }
+        return true;
+
+    case NETPLAY_PACKET_RESYNC_REQUEST:
+        if (payloadSize != sizeof(struct NetplayResyncRequestWire))
+        {
+            return false;
+        }
+        {
+            struct NetplayResyncRequestWire wireResync;
+            memcpy(&wireResync, payload, sizeof(wireResync));
+            event.type = NETPLAY_EVENT_RESYNC_REQUEST;
+            event.stateHash = decode_u32(wireResync.stateHash);
+            snprintf(event.message, sizeof(event.message), "%s", wireResync.reason);
         }
         break;
 
@@ -796,6 +1092,14 @@ static bool decode_packet(struct NetplayState *state, enum NetplayPacketType typ
 
 static void parse_incoming_packets(struct NetplayState *state)
 {
+    if (state != NULL &&
+        state->eventCount >= NETPLAY_EVENT_QUEUE_CAPACITY &&
+        state->recvLength >= sizeof(struct NetplayPacketHeader))
+    {
+        disconnect_peer(state, state->mode == NETPLAY_MODE_HOST, "event queue overflow");
+        return;
+    }
+
     while (state != NULL &&
            state->recvLength >= sizeof(struct NetplayPacketHeader) &&
            state->eventCount < NETPLAY_EVENT_QUEUE_CAPACITY)
@@ -808,10 +1112,15 @@ static void parse_incoming_packets(struct NetplayState *state)
         payloadSize = (size_t)decode_u32(header.payloadSize);
         type = (enum NetplayPacketType)decode_u32(header.type);
         if (memcmp(header.magic, NETPLAY_PACKET_MAGIC, sizeof(header.magic)) != 0 ||
-            decode_u32(header.version) != NETPLAY_PROTOCOL_VERSION ||
             payloadSize > NETPLAY_MAX_PAYLOAD_SIZE)
         {
             disconnect_peer(state, state->mode == NETPLAY_MODE_HOST, "invalid packet");
+            return;
+        }
+
+        if (decode_u32(header.version) != NETPLAY_PROTOCOL_VERSION)
+        {
+            disconnect_peer(state, state->mode == NETPLAY_MODE_HOST, "protocol mismatch");
             return;
         }
 
@@ -836,6 +1145,31 @@ static void parse_incoming_packets(struct NetplayState *state)
     }
 }
 
+static void process_connection_health(struct NetplayState *state)
+{
+    const uint64_t nowMs = netplay_now_ms();
+
+    if (state == NULL || state->connectionState != NETPLAY_CONNECTION_CONNECTED)
+    {
+        return;
+    }
+
+    if (state->lastReceiveMs > 0u && nowMs - state->lastReceiveMs > NETPLAY_STALE_TIMEOUT_MS)
+    {
+        disconnect_peer(state, state->mode == NETPLAY_MODE_HOST, "connection timed out");
+        return;
+    }
+
+    if ((state->lastHeartbeatSentMs == 0u || nowMs - state->lastHeartbeatSentMs >= NETPLAY_HEARTBEAT_INTERVAL_MS) &&
+        state->sendCount < NETPLAY_SEND_QUEUE_CAPACITY)
+    {
+        if (queue_packet(state, NETPLAY_PACKET_HEARTBEAT, NULL, 0u))
+        {
+            state->lastHeartbeatSentMs = nowMs;
+        }
+    }
+}
+
 struct NetplayState *netplayCreate(void)
 {
     struct NetplayState *state = NULL;
@@ -854,6 +1188,7 @@ struct NetplayState *netplayCreate(void)
     state->listenSocket = NET_INVALID_SOCKET;
     state->peerSocket = NET_INVALID_SOCKET;
     state->connectionState = NETPLAY_CONNECTION_IDLE;
+    state->connectStartedMs = 0u;
     return state;
 }
 
@@ -884,6 +1219,7 @@ bool netplayStartHost(struct NetplayState *state, unsigned short port)
     reset_connection_buffers(state);
     state->eventHead = 0;
     state->eventCount = 0;
+    state->connectStartedMs = 0u;
     state->mode = NETPLAY_MODE_HOST;
     state->port = port;
     detect_local_ipv4_address(state->localAddress, sizeof(state->localAddress));
@@ -939,6 +1275,7 @@ bool netplayStartClient(struct NetplayState *state, const char *hostAddress, uns
     reset_connection_buffers(state);
     state->eventHead = 0;
     state->eventCount = 0;
+    state->connectStartedMs = 0u;
     state->mode = NETPLAY_MODE_CLIENT;
     state->port = port;
     detect_local_ipv4_address(state->localAddress, sizeof(state->localAddress));
@@ -982,6 +1319,7 @@ bool netplayStartClient(struct NetplayState *state, const char *hostAddress, uns
         if (connectResult == 0)
         {
             state->connectionState = NETPLAY_CONNECTION_CONNECTED;
+            state->connectStartedMs = 0u;
             clear_last_error(state);
             {
                 struct NetplayEvent event;
@@ -998,6 +1336,7 @@ bool netplayStartClient(struct NetplayState *state, const char *hostAddress, uns
             if (NET_CONNECT_IN_PROGRESS(errorCode))
             {
                 state->connectionState = NETPLAY_CONNECTION_CONNECTING;
+                state->connectStartedMs = netplay_now_ms();
                 clear_last_error(state);
                 freeaddrinfo(results);
                 return true;
@@ -1017,6 +1356,7 @@ bool netplayStartClient(struct NetplayState *state, const char *hostAddress, uns
         set_last_error(state, "connect failed");
     }
     state->connectionState = NETPLAY_CONNECTION_ERROR;
+    state->connectStartedMs = 0u;
     return false;
 }
 
@@ -1032,6 +1372,7 @@ void netplayUpdate(struct NetplayState *state)
     flush_send_queue(state);
     read_from_peer(state);
     parse_incoming_packets(state);
+    process_connection_health(state);
 }
 
 bool netplayPollEvent(struct NetplayState *state, struct NetplayEvent *event)
@@ -1067,6 +1408,33 @@ bool netplayQueueHello(struct NetplayState *state,
     }
 
     return queue_packet(state, NETPLAY_PACKET_HELLO, &wireHello, sizeof(wireHello));
+}
+
+bool netplayQueueLobbyState(struct NetplayState *state, const struct NetplayLobbyStateInfo *info)
+{
+    struct NetplayLobbyStateWire wireInfo;
+
+    if (state == NULL || info == NULL)
+    {
+        return false;
+    }
+
+    memset(&wireInfo, 0, sizeof(wireInfo));
+    encode_lobby_state(info, &wireInfo);
+    return queue_packet(state, NETPLAY_PACKET_LOBBY_STATE, &wireInfo, sizeof(wireInfo));
+}
+
+bool netplayQueueMatchInit(struct NetplayState *state, const struct NetplayMatchInitInfo *info)
+{
+    struct NetplayMatchInitWire wireInfo;
+
+    if (state == NULL || info == NULL)
+    {
+        return false;
+    }
+
+    encode_match_init(info, &wireInfo);
+    return queue_packet(state, NETPLAY_PACKET_MATCH_INIT, &wireInfo, sizeof(wireInfo));
 }
 
 bool netplayQueueSnapshot(struct NetplayState *state, const unsigned char *payload, size_t payloadSize)
@@ -1158,6 +1526,40 @@ bool netplayQueueTradeResponse(struct NetplayState *state,
     wireResponse.accepted = encode_bool(accepted);
     wireResponse.stateHash = encode_u32(stateHash);
     return queue_packet(state, NETPLAY_PACKET_TRADE_RESPONSE, &wireResponse, sizeof(wireResponse));
+}
+
+bool netplayQueueCapabilities(struct NetplayState *state,
+                             uint32_t capabilityFlags,
+                             uint32_t protocolMinVersion,
+                             uint32_t protocolMaxVersion)
+{
+    struct NetplayCapabilitiesWire wireCapabilities;
+
+    if (state == NULL)
+    {
+        return false;
+    }
+
+    memset(&wireCapabilities, 0, sizeof(wireCapabilities));
+    wireCapabilities.capabilityFlags = encode_u32(capabilityFlags);
+    wireCapabilities.protocolMinVersion = encode_u32(protocolMinVersion);
+    wireCapabilities.protocolMaxVersion = encode_u32(protocolMaxVersion);
+    return queue_packet(state, NETPLAY_PACKET_CAPABILITIES, &wireCapabilities, sizeof(wireCapabilities));
+}
+
+bool netplayQueueResyncRequest(struct NetplayState *state, uint32_t stateHash, const char *reason)
+{
+    struct NetplayResyncRequestWire wireResync;
+
+    if (state == NULL)
+    {
+        return false;
+    }
+
+    memset(&wireResync, 0, sizeof(wireResync));
+    wireResync.stateHash = encode_u32(stateHash);
+    snprintf(wireResync.reason, sizeof(wireResync.reason), "%s", reason == NULL ? "" : reason);
+    return queue_packet(state, NETPLAY_PACKET_RESYNC_REQUEST, &wireResync, sizeof(wireResync));
 }
 
 enum NetplayMode netplayGetMode(const struct NetplayState *state)

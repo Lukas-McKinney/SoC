@@ -22,13 +22,23 @@ static void set_connection_error(struct MatchSession *session, const char *messa
 static bool configure_default_private_host_seats(struct MatchSession *session);
 static bool is_authoritative_only_action(enum GameActionType type);
 static bool active_decision_is_remote(const struct MatchSession *session);
+static void build_lobby_state_info(const struct MatchSession *session, struct NetplayLobbyStateInfo *info);
+static void apply_lobby_state_info(struct MatchSession *session, const struct NetplayLobbyStateInfo *info);
+static bool build_match_init_info(const struct MatchSession *session, struct NetplayMatchInitInfo *info);
+static bool apply_match_init_info(struct MatchSession *session, const struct NetplayMatchInitInfo *info);
+static bool send_lobby_state(struct MatchSession *session);
+static bool send_match_init(struct MatchSession *session);
 static bool submit_client_action(struct MatchSession *session,
                                  const struct GameAction *action,
                                  const struct GameActionContext *context,
                                  struct GameActionResult *result);
-static void apply_client_authoritative_result(const struct MatchSession *session,
+static bool apply_authoritative_action_to_client_map(struct MatchSession *session,
+                                                     const struct GameAction *action,
+                                                     const struct GameActionResult *result);
+static void apply_client_authoritative_result(struct MatchSession *session,
                                               const struct GameAction *action,
-                                              const struct GameActionResult *result);
+                                              const struct GameActionResult *result,
+                                              uint32_t authoritativeStateHash);
 static void init_action_result(struct GameActionResult *result);
 static enum DevelopmentCardType development_card_for_action(enum GameActionType type);
 static bool action_actor_is_local_viewer(const struct MatchSession *session, enum PlayerType actor);
@@ -41,6 +51,18 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
 static void reset_client_transient_ui(void);
 static void clear_pending_trade_offer(struct MatchSession *session);
 static bool actions_match(const struct GameAction *a, const struct GameAction *b);
+static void reset_reconnect_state(struct MatchSession *session);
+static void schedule_client_reconnect(struct MatchSession *session, double delaySeconds);
+static void attempt_client_reconnect(struct MatchSession *session);
+static bool queue_local_capabilities(struct MatchSession *session);
+static void request_snapshot_resync(struct MatchSession *session, const char *reason);
+
+#define CLIENT_RECONNECT_DELAY_SECONDS 2.5
+#define CLIENT_RECONNECT_MAX_ATTEMPTS 20
+#define CLIENT_RESYNC_REQUEST_COOLDOWN_SECONDS 1.0
+#define MATCH_PROTOCOL_MIN_VERSION NETPLAY_PROTOCOL_VERSION
+#define MATCH_PROTOCOL_MAX_VERSION NETPLAY_PROTOCOL_VERSION
+#define MATCH_CAPABILITY_FLAGS (NETPLAY_CAPABILITY_HEARTBEAT | NETPLAY_CAPABILITY_SNAPSHOT_RESYNC | NETPLAY_CAPABILITY_ACTION_HASH_SYNC)
 
 static void clear_pending_trade_offer(struct MatchSession *session)
 {
@@ -53,6 +75,136 @@ static void clear_pending_trade_offer(struct MatchSession *session)
     session->pendingTradeAwaitingLocalResponse = false;
     session->pendingTradeRequestedByRemote = false;
     memset(&session->pendingTradeOffer, 0, sizeof(session->pendingTradeOffer));
+}
+
+static bool queue_local_capabilities(struct MatchSession *session)
+{
+    if (session == NULL || session->netplay == NULL || !netplayIsConnected(session->netplay))
+    {
+        return false;
+    }
+
+    return netplayQueueCapabilities(session->netplay,
+                                    MATCH_CAPABILITY_FLAGS,
+                                    MATCH_PROTOCOL_MIN_VERSION,
+                                    MATCH_PROTOCOL_MAX_VERSION);
+}
+
+static void request_snapshot_resync(struct MatchSession *session, const char *reason)
+{
+    const double nowSeconds = GetTime();
+
+    if (session == NULL ||
+        session->isHost ||
+        session->netplay == NULL ||
+        !netplayIsConnected(session->netplay) ||
+        !session->peerCapabilitiesReceived ||
+        (session->peerCapabilityFlags & NETPLAY_CAPABILITY_SNAPSHOT_RESYNC) == 0u)
+    {
+        return;
+    }
+
+    if (session->nextResyncRequestAtSeconds > 0.0 && nowSeconds < session->nextResyncRequestAtSeconds)
+    {
+        return;
+    }
+
+    session->nextResyncRequestAtSeconds = nowSeconds + CLIENT_RESYNC_REQUEST_COOLDOWN_SECONDS;
+    if (netplayQueueResyncRequest(session->netplay, session->stateHash, reason))
+    {
+        debugLog("NET", "requested snapshot resync: %s (localHash=%u)", reason == NULL ? "" : reason, session->stateHash);
+    }
+}
+
+static void reset_reconnect_state(struct MatchSession *session)
+{
+    if (session == NULL)
+    {
+        return;
+    }
+
+    session->reconnectAttempts = 0;
+    session->reconnectAttemptAtSeconds = -1.0;
+    session->nextResyncRequestAtSeconds = -1.0;
+    session->reconnectNotified = false;
+}
+
+static void schedule_client_reconnect(struct MatchSession *session, double delaySeconds)
+{
+    if (session == NULL ||
+        session->networkMode != MATCH_NETWORK_PRIVATE_CLIENT ||
+        !session->reconnectEnabled ||
+        session->reconnectHost[0] == '\0' ||
+        session->reconnectPort == 0u)
+    {
+        return;
+    }
+
+    if (session->reconnectAttempts >= CLIENT_RECONNECT_MAX_ATTEMPTS)
+    {
+        set_connection_error(session, "reconnect attempts exhausted");
+        session->connectionStatus = MATCH_CONNECTION_ERROR;
+        return;
+    }
+
+    session->reconnectAttemptAtSeconds = GetTime() + (delaySeconds < 0.0 ? 0.0 : delaySeconds);
+}
+
+static void attempt_client_reconnect(struct MatchSession *session)
+{
+    if (session == NULL ||
+        session->networkMode != MATCH_NETWORK_PRIVATE_CLIENT ||
+        !session->reconnectEnabled ||
+        session->netplay == NULL ||
+        session->reconnectHost[0] == '\0' ||
+        session->reconnectPort == 0u)
+    {
+        return;
+    }
+
+    if (session->connectionStatus != MATCH_CONNECTION_DISCONNECTED &&
+        session->connectionStatus != MATCH_CONNECTION_ERROR &&
+        session->connectionStatus != MATCH_CONNECTION_CONNECTING)
+    {
+        return;
+    }
+
+    if (session->reconnectAttemptAtSeconds < 0.0 || GetTime() < session->reconnectAttemptAtSeconds)
+    {
+        return;
+    }
+
+    if (session->reconnectAttempts >= CLIENT_RECONNECT_MAX_ATTEMPTS)
+    {
+        return;
+    }
+
+    session->reconnectAttempts++;
+    session->connectionStatus = MATCH_CONNECTION_CONNECTING;
+    debugLog("NET", "client reconnect attempt %d to %s:%u",
+             session->reconnectAttempts,
+             session->reconnectHost,
+             (unsigned int)session->reconnectPort);
+
+    if (netplayStartClient(session->netplay, session->reconnectHost, session->reconnectPort))
+    {
+        session->connectionStatus = netplayGetConnectionState(session->netplay) == NETPLAY_CONNECTION_CONNECTED
+                                        ? MATCH_CONNECTION_SYNCING
+                                        : MATCH_CONNECTION_CONNECTING;
+        clear_connection_error(session);
+        session->reconnectAttemptAtSeconds = -1.0;
+        if (!session->reconnectNotified)
+        {
+            uiShowCenteredStatus(loc("Reconnecting to host..."), UI_NOTIFICATION_NEUTRAL);
+            session->reconnectNotified = true;
+        }
+    }
+    else
+    {
+        set_connection_error(session, netplayGetLastError(session->netplay));
+        session->connectionStatus = MATCH_CONNECTION_DISCONNECTED;
+        schedule_client_reconnect(session, CLIENT_RECONNECT_DELAY_SECONDS);
+    }
 }
 
 static bool actions_match(const struct GameAction *a, const struct GameAction *b)
@@ -72,6 +224,118 @@ static bool actions_match(const struct GameAction *a, const struct GameAction *b
            a->resourceB == b->resourceB &&
            a->amountA == b->amountA &&
            a->amountB == b->amountB;
+}
+
+static void build_lobby_state_info(const struct MatchSession *session, struct NetplayLobbyStateInfo *info)
+{
+    if (session == NULL || info == NULL)
+    {
+        return;
+    }
+
+    memset(info, 0, sizeof(*info));
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        info->controlMode[player] = session->map.players[player].controlMode;
+        info->aiDifficulty[player] = session->map.players[player].aiDifficulty;
+    }
+}
+
+static void apply_lobby_state_info(struct MatchSession *session, const struct NetplayLobbyStateInfo *info)
+{
+    if (session == NULL || info == NULL)
+    {
+        return;
+    }
+
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        session->map.players[player].controlMode = info->controlMode[player];
+        session->map.players[player].aiDifficulty = info->aiDifficulty[player];
+    }
+}
+
+static bool build_match_init_info(const struct MatchSession *session, struct NetplayMatchInitInfo *info)
+{
+    if (session == NULL || info == NULL)
+    {
+        return false;
+    }
+
+    memset(info, 0, sizeof(*info));
+    if (!mapCreateRandomSetupConfig(&info->setup))
+    {
+        return false;
+    }
+
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        info->controlMode[player] = session->map.players[player].controlMode;
+        info->aiDifficulty[player] = session->map.players[player].aiDifficulty;
+    }
+    return true;
+}
+
+static bool apply_match_init_info(struct MatchSession *session, const struct NetplayMatchInitInfo *info)
+{
+    if (session == NULL || info == NULL || !setupMapFromConfig(&session->map, &info->setup))
+    {
+        return false;
+    }
+
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        session->map.players[player].controlMode = info->controlMode[player];
+        session->map.players[player].aiDifficulty = info->aiDifficulty[player];
+    }
+
+    matchSessionRefreshStateHash(session);
+    return true;
+}
+
+static bool send_lobby_state(struct MatchSession *session)
+{
+    struct NetplayLobbyStateInfo info;
+
+    if (session == NULL || session->netplay == NULL || !netplayIsConnected(session->netplay))
+    {
+        return false;
+    }
+
+    build_lobby_state_info(session, &info);
+    return netplayQueueLobbyState(session->netplay, &info);
+}
+
+static bool send_match_init(struct MatchSession *session)
+{
+    struct NetplayMatchInitInfo info;
+
+    if (session == NULL || session->netplay == NULL || !netplayIsConnected(session->netplay))
+    {
+        return false;
+    }
+
+    if (!build_match_init_info(session, &info))
+    {
+        return false;
+    }
+
+    if (!netplayQueueMatchInit(session->netplay, &info))
+    {
+        return false;
+    }
+
+    if (!apply_match_init_info(session, &info))
+    {
+        return false;
+    }
+
+    session->matchStarted = true;
+    session->ready = true;
+    session->pendingUiResetForMatchInit = false;
+    session->awaitingAuthoritativeUpdate = false;
+    clear_pending_trade_offer(session);
+    return true;
 }
 
 static void init_action_result(struct GameActionResult *result)
@@ -377,11 +641,21 @@ void matchSessionInit(struct MatchSession *session)
     session->networkMode = MATCH_NETWORK_NONE;
     session->connectionStatus = MATCH_CONNECTION_LOCAL;
     session->ready = true;
+    session->matchStarted = true;
+    session->pendingUiResetForMatchInit = false;
     session->awaitingAuthoritativeUpdate = false;
     session->initialSnapshotReceived = false;
     clear_pending_trade_offer(session);
     session->netplay = NULL;
     clear_connection_error(session);
+    session->reconnectHost[0] = '\0';
+    session->reconnectPort = 0u;
+    session->reconnectEnabled = false;
+    session->peerCapabilityFlags = 0u;
+    session->peerProtocolMinVersion = 0u;
+    session->peerProtocolMaxVersion = 0u;
+    session->peerCapabilitiesReceived = false;
+    reset_reconnect_state(session);
     matchSessionConfigureHotseat(session);
 }
 
@@ -401,10 +675,17 @@ void matchSessionShutdown(struct MatchSession *session)
     session->networkMode = MATCH_NETWORK_NONE;
     session->connectionStatus = MATCH_CONNECTION_LOCAL;
     session->ready = true;
+    session->matchStarted = false;
+    session->pendingUiResetForMatchInit = false;
     session->awaitingAuthoritativeUpdate = false;
     session->initialSnapshotReceived = false;
     clear_pending_trade_offer(session);
     clear_connection_error(session);
+    session->peerCapabilityFlags = 0u;
+    session->peerProtocolMinVersion = 0u;
+    session->peerProtocolMaxVersion = 0u;
+    session->peerCapabilitiesReceived = false;
+    reset_reconnect_state(session);
 }
 
 void matchSessionConfigureHotseat(struct MatchSession *session)
@@ -417,10 +698,15 @@ void matchSessionConfigureHotseat(struct MatchSession *session)
     matchSessionShutdown(session);
     session->isHost = true;
     session->localPlayer = PLAYER_NONE;
+    session->reconnectHost[0] = '\0';
+    session->reconnectPort = 0u;
+    session->reconnectEnabled = false;
+    reset_reconnect_state(session);
     for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
     {
         session->seatAuthority[player] = MATCH_SEAT_LOCAL;
     }
+    session->matchStarted = true;
 }
 
 void matchSessionConfigureSinglePlayer(struct MatchSession *session, enum PlayerType localPlayer)
@@ -433,10 +719,15 @@ void matchSessionConfigureSinglePlayer(struct MatchSession *session, enum Player
     matchSessionShutdown(session);
     session->isHost = true;
     session->localPlayer = localPlayer;
+    session->reconnectHost[0] = '\0';
+    session->reconnectPort = 0u;
+    session->reconnectEnabled = false;
+    reset_reconnect_state(session);
     for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
     {
         session->seatAuthority[player] = player == localPlayer ? MATCH_SEAT_LOCAL : MATCH_SEAT_AI;
     }
+    session->matchStarted = true;
 }
 
 void matchSessionConfigurePrivateHost(struct MatchSession *session, enum PlayerType localPlayer)
@@ -449,9 +740,14 @@ void matchSessionConfigurePrivateHost(struct MatchSession *session, enum PlayerT
     matchSessionShutdown(session);
     session->isHost = true;
     session->localPlayer = localPlayer;
+    session->reconnectHost[0] = '\0';
+    session->reconnectPort = 0u;
+    session->reconnectEnabled = false;
+    reset_reconnect_state(session);
     session->networkMode = MATCH_NETWORK_PRIVATE_HOST;
     session->connectionStatus = MATCH_CONNECTION_WAITING_FOR_PLAYER;
     session->ready = false;
+    session->matchStarted = false;
     for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
     {
         session->seatAuthority[player] = player == localPlayer ? MATCH_SEAT_LOCAL : MATCH_SEAT_REMOTE;
@@ -468,9 +764,14 @@ void matchSessionConfigurePrivateClient(struct MatchSession *session, enum Playe
     matchSessionShutdown(session);
     session->isHost = false;
     session->localPlayer = localPlayer;
+    session->reconnectHost[0] = '\0';
+    session->reconnectPort = 0u;
+    session->reconnectEnabled = true;
+    reset_reconnect_state(session);
     session->networkMode = MATCH_NETWORK_PRIVATE_CLIENT;
     session->connectionStatus = MATCH_CONNECTION_CONNECTING;
     session->ready = false;
+    session->matchStarted = false;
     for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
     {
         session->seatAuthority[player] = player == localPlayer ? MATCH_SEAT_LOCAL : MATCH_SEAT_REMOTE;
@@ -499,8 +800,13 @@ bool matchSessionOpenPrivateHost(struct MatchSession *session, unsigned short po
 
     session->connectionStatus = MATCH_CONNECTION_WAITING_FOR_PLAYER;
     session->ready = false;
+    session->matchStarted = false;
     session->awaitingAuthoritativeUpdate = false;
     clear_pending_trade_offer(session);
+    session->peerCapabilityFlags = 0u;
+    session->peerProtocolMinVersion = 0u;
+    session->peerProtocolMaxVersion = 0u;
+    session->peerCapabilitiesReceived = false;
     clear_connection_error(session);
     return true;
 }
@@ -525,12 +831,22 @@ bool matchSessionOpenPrivateClient(struct MatchSession *session, const char *hos
         return false;
     }
 
+    snprintf(session->reconnectHost, sizeof(session->reconnectHost), "%s", hostAddress);
+    session->reconnectPort = port;
+    session->reconnectEnabled = true;
+    reset_reconnect_state(session);
+
     session->connectionStatus = netplayGetConnectionState(session->netplay) == NETPLAY_CONNECTION_CONNECTED
                                     ? MATCH_CONNECTION_SYNCING
                                     : MATCH_CONNECTION_CONNECTING;
     session->ready = false;
+    session->matchStarted = false;
     session->awaitingAuthoritativeUpdate = false;
     clear_pending_trade_offer(session);
+    session->peerCapabilityFlags = 0u;
+    session->peerProtocolMinVersion = 0u;
+    session->peerProtocolMaxVersion = 0u;
+    session->peerCapabilitiesReceived = false;
     clear_connection_error(session);
     return true;
 }
@@ -575,9 +891,67 @@ bool matchSessionIsReady(const struct MatchSession *session)
     return session == NULL || session->ready;
 }
 
+bool matchSessionHasStarted(const struct MatchSession *session)
+{
+    if (session == NULL)
+    {
+        return false;
+    }
+
+    return !matchSessionIsNetplay(session) || session->matchStarted;
+}
+
+bool matchSessionCanStartNetplayMatch(const struct MatchSession *session)
+{
+    return session != NULL &&
+           matchSessionIsNetplay(session) &&
+           session->isHost &&
+           session->ready &&
+           !session->matchStarted &&
+           session->connectionStatus == MATCH_CONNECTION_CONNECTED &&
+           session->netplay != NULL &&
+           netplayIsConnected(session->netplay);
+}
+
+bool matchSessionStartNetplayMatch(struct MatchSession *session)
+{
+    if (!matchSessionCanStartNetplayMatch(session))
+    {
+        return false;
+    }
+
+    return send_match_init(session);
+}
+
+bool matchSessionRestartNetplayMatch(struct MatchSession *session)
+{
+    if (session == NULL ||
+        !matchSessionIsNetplay(session) ||
+        !session->isHost ||
+        session->connectionStatus != MATCH_CONNECTION_CONNECTED ||
+        session->netplay == NULL ||
+        !netplayIsConnected(session->netplay))
+    {
+        return false;
+    }
+
+    return send_match_init(session);
+}
+
 bool matchSessionShouldAnimateLocalRoll(const struct MatchSession *session)
 {
     return session == NULL || !matchSessionIsNetplay(session) || session->isHost;
+}
+
+bool matchSessionConsumePendingMatchInitUiReset(struct MatchSession *session)
+{
+    if (session == NULL || !session->pendingUiResetForMatchInit)
+    {
+        return false;
+    }
+
+    session->pendingUiResetForMatchInit = false;
+    return true;
 }
 
 bool matchSessionShouldRunAi(const struct MatchSession *session)
@@ -587,7 +961,7 @@ bool matchSessionShouldRunAi(const struct MatchSession *session)
         return true;
     }
 
-    return session->isHost && session->ready;
+    return session->isHost && session->ready && matchSessionHasStarted(session);
 }
 
 bool matchSessionIsHost(const struct MatchSession *session)
@@ -607,7 +981,12 @@ const char *matchSessionGetConnectionError(const struct MatchSession *session)
 
 bool matchSessionLocalControlsPlayer(const struct MatchSession *session, enum PlayerType player)
 {
-    if (session == NULL || player < PLAYER_RED || player > PLAYER_BLACK || !session->ready || session->awaitingAuthoritativeUpdate)
+    if (session == NULL ||
+        player < PLAYER_RED ||
+        player > PLAYER_BLACK ||
+        !session->ready ||
+        !matchSessionHasStarted(session) ||
+        session->awaitingAuthoritativeUpdate)
     {
         return false;
     }
@@ -625,18 +1004,76 @@ bool matchSessionLocalCanActOnCurrentDecision(const struct MatchSession *session
     return matchSessionLocalControlsPlayer(session, active_decision_player(session));
 }
 
-static void apply_client_authoritative_result(const struct MatchSession *session,
-                                              const struct GameAction *action,
-                                              const struct GameActionResult *result)
+static bool apply_authoritative_action_to_client_map(struct MatchSession *session,
+                                                     const struct GameAction *action,
+                                                     const struct GameActionResult *result)
 {
+    if (session == NULL || action == NULL || result == NULL)
+    {
+        return false;
+    }
+
+    if (action->type == GAME_ACTION_STEAL_RANDOM_RESOURCE)
+    {
+        if (!gameCanStealFromPlayer(&session->map, action->player) ||
+            result->stolenResource < RESOURCE_WOOD ||
+            result->stolenResource > RESOURCE_STONE ||
+            session->map.players[action->player].resources[result->stolenResource] <= 0)
+        {
+            return false;
+        }
+
+        session->map.players[action->player].resources[result->stolenResource]--;
+        session->map.players[session->map.currentPlayer].resources[result->stolenResource]++;
+        session->map.awaitingThiefVictimSelection = false;
+        return true;
+    }
+
+    return gameApplyAction(&session->map, action, NULL, NULL);
+}
+
+static void apply_client_authoritative_result(struct MatchSession *session,
+                                              const struct GameAction *action,
+                                              const struct GameActionResult *result,
+                                              uint32_t authoritativeStateHash)
+{
+    bool needsApply = false;
     const enum PlayerType actor = active_decision_player(session);
 
-    if (action == NULL || result == NULL)
+    if (session == NULL || action == NULL || result == NULL)
     {
         return;
     }
 
-    if (!action_actor_is_local_viewer(session, actor) || is_authoritative_only_action(action->type))
+    needsApply = !action_actor_is_local_viewer(session, actor) || is_authoritative_only_action(action->type);
+    if (needsApply)
+    {
+        if (!apply_authoritative_action_to_client_map(session, action, result))
+        {
+            debugLog("NET", "client apply failed action=%d hash=%u", (int)action->type, authoritativeStateHash);
+            request_snapshot_resync(session, "client apply failed");
+            return;
+        }
+        matchSessionRefreshStateHash(session);
+        if (authoritativeStateHash != 0u && session->stateHash != authoritativeStateHash)
+        {
+            debugLog("NET", "client hash mismatch local=%u authoritative=%u action=%d",
+                     session->stateHash,
+                     authoritativeStateHash,
+                     (int)action->type);
+            request_snapshot_resync(session, "action result hash mismatch");
+        }
+    }
+    else if (authoritativeStateHash != 0u && session->stateHash != authoritativeStateHash)
+    {
+        debugLog("NET", "client predicted hash mismatch local=%u authoritative=%u action=%d",
+                 session->stateHash,
+                 authoritativeStateHash,
+                 (int)action->type);
+        request_snapshot_resync(session, "predicted hash mismatch");
+    }
+
+    if (needsApply)
     {
         show_action_feedback(session, actor, action, result);
     }
@@ -794,10 +1231,6 @@ bool matchSessionRespondToPendingTradeOffer(struct MatchSession *session, bool a
     if (session->pendingTradeRequestedByRemote)
     {
         netplayQueueTradeResponse(session->netplay, &session->pendingTradeOffer, applied, session->stateHash);
-        if (applied)
-        {
-            broadcast_host_snapshot(session);
-        }
     }
 
     clear_pending_trade_offer(session);
@@ -837,7 +1270,7 @@ bool matchSessionSubmitAction(struct MatchSession *session,
         return applied;
     }
 
-    if (!session->ready)
+    if (!session->ready || !matchSessionHasStarted(session))
     {
         return false;
     }
@@ -890,7 +1323,6 @@ bool matchSessionSubmitAction(struct MatchSession *session,
     if (session->netplay != NULL && netplayIsConnected(session->netplay))
     {
         netplayQueueActionResult(session->netplay, action, authoritativeResultPtr, session->stateHash);
-        broadcast_host_snapshot(session);
     }
     return true;
 }
@@ -920,28 +1352,38 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
 
             session->connectionStatus = MATCH_CONNECTION_CONNECTED;
             session->ready = true;
+            session->matchStarted = false;
             clear_connection_error(session);
             debugLog("NET", "remote client connected (local=%d remote=%d)", (int)session->localPlayer, (int)remotePlayer);
             uiShowCenteredStatus(loc("Remote player connected."), UI_NOTIFICATION_POSITIVE);
             if (session->netplay != NULL)
             {
                 netplayQueueHello(session->netplay, remotePlayer, session->localPlayer, authorities);
-                broadcast_host_snapshot(session);
+                queue_local_capabilities(session);
+                send_lobby_state(session);
             }
         }
         break;
 
     case NETPLAY_EVENT_CONNECTED:
         session->connectionStatus = MATCH_CONNECTION_SYNCING;
+        reset_reconnect_state(session);
         clear_connection_error(session);
-        debugLog("NET", "client connected to host; waiting for hello/snapshot");
+        debugLog("NET", "client connected to host; waiting for hello/lobby");
         uiShowCenteredStatus(loc("Connected to host."), UI_NOTIFICATION_NEUTRAL);
+        queue_local_capabilities(session);
         break;
 
     case NETPLAY_EVENT_DISCONNECTED:
         session->ready = false;
+        session->matchStarted = false;
+        session->pendingUiResetForMatchInit = false;
         session->awaitingAuthoritativeUpdate = false;
         clear_pending_trade_offer(session);
+        session->peerCapabilityFlags = 0u;
+        session->peerProtocolMinVersion = 0u;
+        session->peerProtocolMaxVersion = 0u;
+        session->peerCapabilitiesReceived = false;
         session->connectionStatus = session->networkMode == MATCH_NETWORK_PRIVATE_HOST
                                         ? MATCH_CONNECTION_WAITING_FOR_PLAYER
                                         : MATCH_CONNECTION_DISCONNECTED;
@@ -949,6 +1391,10 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
         reset_client_transient_ui();
         debugLog("NET", "disconnected event: %s", event->message);
         uiShowCenteredWarning(loc("Remote player disconnected."));
+        if (session->networkMode == MATCH_NETWORK_PRIVATE_CLIENT)
+        {
+            schedule_client_reconnect(session, CLIENT_RECONNECT_DELAY_SECONDS);
+        }
         break;
 
     case NETPLAY_EVENT_HELLO:
@@ -990,7 +1436,9 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
             }
         }
         session->connectionStatus = MATCH_CONNECTION_SYNCING;
+        reset_reconnect_state(session);
         session->ready = false;
+        session->matchStarted = false;
         session->awaitingAuthoritativeUpdate = false;
         clear_connection_error(session);
         reset_client_transient_ui();
@@ -1004,8 +1452,39 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
              (int)session->seatAuthority[3]);
         if (session->localPlayer == PLAYER_NONE)
         {
-            debugLog("NET", "warning: host hello assigned PLAYER_NONE; awaiting snapshot but local actions will stay blocked");
+            debugLog("NET", "warning: host hello assigned PLAYER_NONE; awaiting lobby state but local actions will stay blocked");
         }
+        }
+        break;
+
+    case NETPLAY_EVENT_LOBBY_STATE:
+        apply_lobby_state_info(session, &event->lobbyState);
+        session->ready = true;
+        session->matchStarted = false;
+        session->pendingUiResetForMatchInit = false;
+        session->awaitingAuthoritativeUpdate = false;
+        session->connectionStatus = MATCH_CONNECTION_CONNECTED;
+        reset_reconnect_state(session);
+        clear_connection_error(session);
+        break;
+
+    case NETPLAY_EVENT_MATCH_INIT:
+        if (apply_match_init_info(session, &event->matchInit))
+        {
+            session->ready = true;
+            session->matchStarted = true;
+            session->pendingUiResetForMatchInit = true;
+            session->awaitingAuthoritativeUpdate = false;
+            session->initialSnapshotReceived = false;
+            session->connectionStatus = MATCH_CONNECTION_CONNECTED;
+            reset_reconnect_state(session);
+            clear_connection_error(session);
+            reset_client_transient_ui();
+            debugLog("NET", "match init applied hash=%u", session->stateHash);
+        }
+        else
+        {
+            debugLog("NET", "match init rejected");
         }
         break;
 
@@ -1016,6 +1495,7 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
             session->awaitingAuthoritativeUpdate = false;
             session->initialSnapshotReceived = true;
             session->connectionStatus = MATCH_CONNECTION_CONNECTED;
+            reset_reconnect_state(session);
             clear_connection_error(session);
             matchSessionRefreshStateHash(session);
             reset_client_transient_ui();
@@ -1058,7 +1538,6 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
                 }
 
                 netplayQueueActionReject(session->netplay, "trade target unsupported", session->stateHash);
-                broadcast_host_snapshot(session);
                 break;
             }
 
@@ -1070,7 +1549,6 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
                 if (session->netplay != NULL)
                 {
                     netplayQueueActionResult(session->netplay, &authoritativeAction, &actionResult, session->stateHash);
-                    broadcast_host_snapshot(session);
                 }
             }
             else if (session->netplay != NULL)
@@ -1088,12 +1566,27 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
 
     case NETPLAY_EVENT_ACTION_RESULT:
         session->awaitingAuthoritativeUpdate = false;
-        apply_client_authoritative_result(session, &event->action, &event->result);
+        apply_client_authoritative_result(session, &event->action, &event->result, event->stateHash);
         break;
 
     case NETPLAY_EVENT_ACTION_REJECT:
         session->awaitingAuthoritativeUpdate = false;
-        uiShowCenteredWarning(loc("Action rejected by host."));
+        if (event->message[0] != '\0')
+        {
+            char warning[160];
+            snprintf(warning, sizeof(warning), loc("Action rejected by host: %s"), event->message);
+            uiShowCenteredWarning(warning);
+        }
+        else
+        {
+            uiShowCenteredWarning(loc("Action rejected by host."));
+        }
+        if (event->stateHash != 0u && event->stateHash != session->stateHash)
+        {
+            debugLog("NET", "action reject hash mismatch local=%u host=%u", session->stateHash, event->stateHash);
+            uiShowCenteredWarning(loc("State mismatch detected; waiting for resync snapshot."));
+            request_snapshot_resync(session, "action reject hash mismatch");
+        }
         break;
 
     case NETPLAY_EVENT_TRADE_OFFER:
@@ -1124,7 +1617,6 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
                     if (gameApplyAction(&session->map, &session->pendingTradeOffer, NULL, &actionResult))
                     {
                         matchSessionRefreshStateHash(session);
-                        broadcast_host_snapshot(session);
                         uiShowCenteredStatus(loc("Remote player accepted your trade."), UI_NOTIFICATION_POSITIVE);
                     }
                     else
@@ -1148,6 +1640,16 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
                 session->awaitingAuthoritativeUpdate = false;
                 if (event->accepted)
                 {
+                    if (gameApplyAction(&session->map, &event->action, NULL, NULL))
+                    {
+                        matchSessionRefreshStateHash(session);
+                        if (event->stateHash != 0u && event->stateHash != session->stateHash)
+                        {
+                            debugLog("NET", "trade response hash mismatch local=%u host=%u", session->stateHash, event->stateHash);
+                            uiShowCenteredWarning(loc("Trade applied with state mismatch; waiting for resync snapshot."));
+                            request_snapshot_resync(session, "trade response hash mismatch");
+                        }
+                    }
                     uiShowCenteredStatus(loc("Host accepted your trade."), UI_NOTIFICATION_POSITIVE);
                 }
                 else
@@ -1156,6 +1658,36 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
                 }
                 clear_pending_trade_offer(session);
             }
+        }
+        break;
+
+    case NETPLAY_EVENT_CAPABILITIES:
+        session->peerCapabilityFlags = event->capabilityFlags;
+        session->peerProtocolMinVersion = event->protocolMinVersion;
+        session->peerProtocolMaxVersion = event->protocolMaxVersion;
+        session->peerCapabilitiesReceived = true;
+
+        if (event->protocolMinVersion > event->protocolMaxVersion ||
+            MATCH_PROTOCOL_MIN_VERSION > event->protocolMaxVersion ||
+            MATCH_PROTOCOL_MAX_VERSION < event->protocolMinVersion)
+        {
+            debugLog("NET",
+                     "incompatible protocol range peer=[%u,%u] local=[%u,%u]",
+                     event->protocolMinVersion,
+                     event->protocolMaxVersion,
+                     (unsigned int)MATCH_PROTOCOL_MIN_VERSION,
+                     (unsigned int)MATCH_PROTOCOL_MAX_VERSION);
+            set_connection_error(session, "incompatible protocol version");
+            session->connectionStatus = MATCH_CONNECTION_ERROR;
+            uiShowCenteredWarning(loc("Version mismatch with peer."));
+        }
+        break;
+
+    case NETPLAY_EVENT_RESYNC_REQUEST:
+        if (session->isHost)
+        {
+            debugLog("NET", "peer requested resync hash=%u reason=%s", event->stateHash, event->message);
+            broadcast_host_snapshot(session);
         }
         break;
 
@@ -1177,14 +1709,22 @@ void matchSessionUpdate(struct MatchSession *session)
     netplayUpdate(session->netplay);
     if (netplayGetConnectionState(session->netplay) == NETPLAY_CONNECTION_ERROR)
     {
-        session->connectionStatus = MATCH_CONNECTION_ERROR;
+        session->connectionStatus = session->networkMode == MATCH_NETWORK_PRIVATE_CLIENT
+                                        ? MATCH_CONNECTION_DISCONNECTED
+                                        : MATCH_CONNECTION_ERROR;
         set_connection_error(session, netplayGetLastError(session->netplay));
+        if (session->networkMode == MATCH_NETWORK_PRIVATE_CLIENT)
+        {
+            schedule_client_reconnect(session, CLIENT_RECONNECT_DELAY_SECONDS);
+        }
     }
 
     while (netplayPollEvent(session->netplay, &event))
     {
         handle_netplay_event(session, &event);
     }
+
+    attempt_client_reconnect(session);
 }
 
 void matchSessionRefreshStateHash(struct MatchSession *session)

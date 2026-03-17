@@ -8,6 +8,7 @@
 
 #define LAND_TILE_COUNT 19
 #define HEX_CORNERS 6
+#define BANK_RESOURCE_CAPACITY 19
 
 struct AxialCoord
 {
@@ -41,6 +42,8 @@ static int setup_player_for_step(enum PlayerType startPlayer, int step);
 static enum ResourceType resource_for_tile_type(enum TileType type);
 static int resource_yield_for_structure(enum StructureType structure);
 static void distribute_resources_for_roll(struct Map *map, int roll);
+static int bank_resource_count(const struct Map *map, enum ResourceType resource);
+static bool bank_has_resources(const struct Map *map, enum ResourceType resource, int amount);
 static bool can_afford_cost(const struct Map *map, int wood, int wheat, int clay, int sheep, int stone);
 static bool try_pay_cost(struct Map *map, int wood, int wheat, int clay, int sheep, int stone);
 static int find_land_tile_id(struct AxialCoord coord);
@@ -57,6 +60,7 @@ static bool any_pending_discards(const struct Map *map);
 static void begin_discard_phase(struct Map *map);
 static bool player_touches_tile(const struct Map *map, enum PlayerType player, int tileId);
 static bool player_has_any_resources(const struct Map *map, enum PlayerType player);
+static bool can_execute_main_turn_action(const struct Map *map);
 static void grant_setup_settlement_resources(struct Map *map, int tileId, int cornerIndex);
 static int playable_development_card_count(const struct Map *map, enum PlayerType player, enum DevelopmentCardType type);
 static bool can_play_development_card_type(const struct Map *map, enum DevelopmentCardType type);
@@ -320,39 +324,47 @@ void gameMoveThief(struct Map *map, int tileId)
 
 bool gameStealRandomResourceDetailed(struct Map *map, enum PlayerType victim, enum ResourceType *stolenResourceOut)
 {
+  int totalCards = 0;
+
   if (!gameCanStealFromPlayer(map, victim))
   {
     return false;
   }
 
-  int available[5];
-  int availableCount = 0;
   for (int resource = 0; resource < 5; resource++)
   {
-    if (map->players[victim].resources[resource] > 0)
-    {
-      available[availableCount++] = resource;
-    }
+    totalCards += map->players[victim].resources[resource];
   }
 
-  if (availableCount <= 0)
+  if (totalCards <= 0)
   {
     return false;
   }
 
-  const int stolenResource = available[rand() % availableCount];
-  map->players[victim].resources[stolenResource]--;
-  map->players[map->currentPlayer].resources[stolenResource]++;
-  map->awaitingThiefVictimSelection = false;
-  debugLog("GAME", "steal resource player=%d victim=%d resource=%d",
-           map->currentPlayer,
-           victim,
-           stolenResource);
-  if (stolenResourceOut != NULL)
   {
-    *stolenResourceOut = (enum ResourceType)stolenResource;
+    int pick = rand() % totalCards;
+    for (int resource = RESOURCE_WOOD; resource <= RESOURCE_STONE; resource++)
+    {
+      pick -= map->players[victim].resources[resource];
+      if (pick < 0)
+      {
+        map->players[victim].resources[resource]--;
+        map->players[map->currentPlayer].resources[resource]++;
+        map->awaitingThiefVictimSelection = false;
+        debugLog("GAME", "steal resource player=%d victim=%d resource=%d",
+                 map->currentPlayer,
+                 victim,
+                 resource);
+        if (stolenResourceOut != NULL)
+        {
+          *stolenResourceOut = (enum ResourceType)resource;
+        }
+        return true;
+      }
+    }
   }
-  return true;
+
+  return false;
 }
 
 bool gameStealRandomResource(struct Map *map, enum PlayerType victim)
@@ -450,8 +462,7 @@ bool gameCanAffordDevelopment(const struct Map *map)
 bool gameCanBuyDevelopment(const struct Map *map)
 {
   return map != NULL &&
-         map->phase == GAME_PHASE_PLAY &&
-         !gameHasWinner(map) &&
+         can_execute_main_turn_action(map) &&
          map->developmentDeckCount > 0 &&
          gameCanAffordDevelopment(map);
 }
@@ -463,17 +474,20 @@ bool gameCanPlayDevelopmentCard(const struct Map *map, enum DevelopmentCardType 
 
 bool gameTryBuyRoad(struct Map *map)
 {
-  return try_pay_cost(map, 1, 0, 1, 0, 0);
+  return can_execute_main_turn_action(map) &&
+         try_pay_cost(map, 1, 0, 1, 0, 0);
 }
 
 bool gameTryBuySettlement(struct Map *map)
 {
-  return try_pay_cost(map, 1, 1, 1, 1, 0);
+  return can_execute_main_turn_action(map) &&
+         try_pay_cost(map, 1, 1, 1, 1, 0);
 }
 
 bool gameTryBuyCity(struct Map *map)
 {
-  return try_pay_cost(map, 0, 2, 0, 0, 3);
+  return can_execute_main_turn_action(map) &&
+         try_pay_cost(map, 0, 2, 0, 0, 3);
 }
 
 bool gameTryBuyDevelopment(struct Map *map, enum DevelopmentCardType *drawnCard)
@@ -527,7 +541,9 @@ bool gameTryPlayYearOfPlenty(struct Map *map, enum ResourceType first, enum Reso
 {
   if (!can_play_development_card_type(map, DEVELOPMENT_CARD_YEAR_OF_PLENTY) ||
       first < RESOURCE_WOOD || first > RESOURCE_STONE ||
-      second < RESOURCE_WOOD || second > RESOURCE_STONE)
+      second < RESOURCE_WOOD || second > RESOURCE_STONE ||
+      !bank_has_resources(map, first, 1) ||
+      !bank_has_resources(map, second, first == second ? 2 : 1))
   {
     return false;
   }
@@ -673,6 +689,16 @@ int gameGetDevelopmentCardCount(const struct Map *map, enum PlayerType player, e
   return map->players[player].developmentCards[type];
 }
 
+int gameGetBankResourceCount(const struct Map *map, enum ResourceType resource)
+{
+  return bank_resource_count(map, resource);
+}
+
+bool gameBankHasResources(const struct Map *map, enum ResourceType resource, int amount)
+{
+  return bank_has_resources(map, resource, amount);
+}
+
 int gameGetMaritimeTradeRate(const struct Map *map, enum ResourceType give)
 {
   if (map == NULL || map->currentPlayer < PLAYER_RED || map->currentPlayer > PLAYER_BLACK)
@@ -697,13 +723,16 @@ int gameGetMaritimeTradeRate(const struct Map *map, enum ResourceType give)
 bool gameCanTradeMaritime(const struct Map *map, enum ResourceType give, int tradeCount, enum ResourceType receive)
 {
   if (map == NULL || give == receive || tradeCount <= 0 ||
-      map->currentPlayer < PLAYER_RED || map->currentPlayer > PLAYER_BLACK)
+      give < RESOURCE_WOOD || give > RESOURCE_STONE ||
+      receive < RESOURCE_WOOD || receive > RESOURCE_STONE ||
+      !can_execute_main_turn_action(map))
   {
     return false;
   }
 
   const int rate = gameGetMaritimeTradeRate(map, give);
-  return map->players[map->currentPlayer].resources[give] >= rate * tradeCount;
+  return map->players[map->currentPlayer].resources[give] >= rate * tradeCount &&
+         bank_has_resources(map, receive, tradeCount);
 }
 
 bool gameTryTradeMaritime(struct Map *map, enum ResourceType give, int tradeCount, enum ResourceType receive)
@@ -723,7 +752,9 @@ bool gameTryTradeMaritime(struct Map *map, enum ResourceType give, int tradeCoun
 bool gameCanTradeWithPlayer(const struct Map *map, enum PlayerType otherPlayer, enum ResourceType give, int giveAmount, enum ResourceType receive, int receiveAmount)
 {
   if (map == NULL || give == receive || giveAmount <= 0 || receiveAmount <= 0 ||
-      map->currentPlayer < PLAYER_RED || map->currentPlayer > PLAYER_BLACK ||
+      give < RESOURCE_WOOD || give > RESOURCE_STONE ||
+      receive < RESOURCE_WOOD || receive > RESOURCE_STONE ||
+      !can_execute_main_turn_action(map) ||
       otherPlayer < PLAYER_RED || otherPlayer > PLAYER_BLACK ||
       otherPlayer == map->currentPlayer)
   {
@@ -781,6 +812,19 @@ static bool can_play_development_card_type(const struct Map *map, enum Developme
          !map->awaitingThiefPlacement &&
          !map->awaitingThiefVictimSelection &&
          playable_development_card_count(map, map->currentPlayer, type) > 0;
+}
+
+static bool can_execute_main_turn_action(const struct Map *map)
+{
+  return map != NULL &&
+         map->phase == GAME_PHASE_PLAY &&
+         !gameHasWinner(map) &&
+         map->currentPlayer >= PLAYER_RED &&
+         map->currentPlayer <= PLAYER_BLACK &&
+         map->rolledThisTurn &&
+         !any_pending_discards(map) &&
+         !map->awaitingThiefPlacement &&
+         !map->awaitingThiefVictimSelection;
 }
 
 static void consume_development_card(struct Map *map, enum DevelopmentCardType type)
@@ -1315,7 +1359,10 @@ static void grant_setup_settlement_resources(struct Map *map, int tileId, int co
       }
 
       const enum ResourceType resource = resource_for_tile_type(map->tiles[otherTile].type);
-      map->players[map->currentPlayer].resources[resource]++;
+      if (bank_has_resources(map, resource, 1))
+      {
+        map->players[map->currentPlayer].resources[resource]++;
+      }
       break;
     }
   }
@@ -1358,6 +1405,9 @@ static int resource_yield_for_structure(enum StructureType structure)
 
 static void distribute_resources_for_roll(struct Map *map, int roll)
 {
+  int demand[MAX_PLAYERS][5] = {0};
+  int totalDemand[5] = {0};
+
   if (map == NULL || roll <= 0)
   {
     return;
@@ -1384,10 +1434,56 @@ static void distribute_resources_for_roll(struct Map *map, int roll)
       const int yield = resource_yield_for_structure(corner->structure);
       if (yield > 0)
       {
-        map->players[corner->owner].resources[resource] += yield;
+        demand[corner->owner][resource] += yield;
+        totalDemand[resource] += yield;
       }
     }
   }
+
+  for (int resource = RESOURCE_WOOD; resource <= RESOURCE_STONE; resource++)
+  {
+    if (!bank_has_resources(map, (enum ResourceType)resource, totalDemand[resource]))
+    {
+      continue;
+    }
+
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+      map->players[player].resources[resource] += demand[player][resource];
+    }
+  }
+}
+
+static int bank_resource_count(const struct Map *map, enum ResourceType resource)
+{
+  int inHands = 0;
+
+  if (map == NULL || resource < RESOURCE_WOOD || resource > RESOURCE_STONE)
+  {
+    return 0;
+  }
+
+  for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+  {
+    inHands += map->players[player].resources[resource];
+  }
+
+  if (inHands >= BANK_RESOURCE_CAPACITY)
+  {
+    return 0;
+  }
+
+  return BANK_RESOURCE_CAPACITY - inHands;
+}
+
+static bool bank_has_resources(const struct Map *map, enum ResourceType resource, int amount)
+{
+  if (amount <= 0)
+  {
+    return true;
+  }
+
+  return bank_resource_count(map, resource) >= amount;
 }
 
 static bool can_afford_cost(const struct Map *map, int wood, int wheat, int clay, int sheep, int stone)

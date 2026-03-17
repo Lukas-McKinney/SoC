@@ -46,6 +46,8 @@ struct MatchSession
     enum MatchNetworkMode networkMode;
     enum MatchConnectionStatus connectionStatus;
     bool ready;
+    bool matchStarted;
+    bool pendingUiResetForMatchInit;
     bool awaitingAuthoritativeUpdate;
     bool initialSnapshotReceived;
     bool pendingTradeOfferActive;
@@ -54,6 +56,17 @@ struct MatchSession
     struct GameAction pendingTradeOffer;
     struct NetplayState *netplay;
     char connectionError[96];
+    char reconnectHost[64];
+    unsigned short reconnectPort;
+    double reconnectAttemptAtSeconds;
+    double nextResyncRequestAtSeconds;
+    int reconnectAttempts;
+    bool reconnectEnabled;
+    bool reconnectNotified;
+    uint32_t peerCapabilityFlags;
+    uint32_t peerProtocolMinVersion;
+    uint32_t peerProtocolMaxVersion;
+    bool peerCapabilitiesReceived;
 };
 
 void matchSessionInit(struct MatchSession *session);
@@ -80,6 +93,11 @@ bool matchSessionGetPendingTradeOffer(const struct MatchSession *session, struct
 bool matchSessionRespondToPendingTradeOffer(struct MatchSession *session, bool accept);
 bool matchSessionIsNetplay(const struct MatchSession *session);
 bool matchSessionIsReady(const struct MatchSession *session);
+bool matchSessionHasStarted(const struct MatchSession *session);
+bool matchSessionCanStartNetplayMatch(const struct MatchSession *session);
+bool matchSessionStartNetplayMatch(struct MatchSession *session);
+bool matchSessionRestartNetplayMatch(struct MatchSession *session);
+bool matchSessionConsumePendingMatchInitUiReset(struct MatchSession *session);
 bool matchSessionShouldAnimateLocalRoll(const struct MatchSession *session);
 bool matchSessionShouldRunAi(const struct MatchSession *session);
 bool matchSessionIsHost(const struct MatchSession *session);

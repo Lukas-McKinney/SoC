@@ -101,6 +101,11 @@ static bool test_longest_road_requires_five_and_current_owner_keeps_tied_length(
 static bool test_longest_road_transfers_to_a_longer_network(void);
 static bool test_longest_road_breaks_when_an_opponent_settlement_blocks_the_path(void);
 static bool test_city_upgrade_requires_an_owned_town(void);
+static bool test_roll_skips_resource_when_bank_cannot_fulfill_all_claims(void);
+static bool test_year_of_plenty_requires_bank_supply(void);
+static bool test_maritime_trade_requires_bank_supply_for_receive(void);
+static bool test_buy_and_trade_require_post_roll_open_turn_state(void);
+static bool test_steal_random_resource_weights_by_card_count(void);
 
 #define ASSERT_TRUE(expr)                                                                                              \
     do                                                                                                                 \
@@ -146,6 +151,11 @@ int main(void)
         {"longest road transfers to longer network", test_longest_road_transfers_to_a_longer_network},
         {"longest road blocked by opponent settlement", test_longest_road_breaks_when_an_opponent_settlement_blocks_the_path},
         {"city upgrade requires owned town", test_city_upgrade_requires_an_owned_town},
+        {"roll skips payout when bank is short", test_roll_skips_resource_when_bank_cannot_fulfill_all_claims},
+        {"year of plenty requires bank supply", test_year_of_plenty_requires_bank_supply},
+        {"maritime trade requires bank supply", test_maritime_trade_requires_bank_supply_for_receive},
+        {"buy and trade require post-roll open state", test_buy_and_trade_require_post_roll_open_turn_state},
+        {"steal weighting follows card counts", test_steal_random_resource_weights_by_card_count},
     };
 
     for (int i = 0; i < (int)(sizeof(tests) / sizeof(tests[0])); i++)
@@ -319,6 +329,7 @@ static bool test_development_cards_are_locked_until_next_turn_and_limited_to_one
 
     map.phase = GAME_PHASE_PLAY;
     map.currentPlayer = PLAYER_RED;
+    map.rolledThisTurn = true;
     map.developmentDeckCount = 1;
     map.developmentDeck[0] = DEVELOPMENT_CARD_KNIGHT;
     map.players[PLAYER_RED].resources[RESOURCE_WHEAT] = 1;
@@ -489,6 +500,156 @@ static bool test_city_upgrade_requires_an_owned_town(void)
 
     place_structure_on_node(&map, &topology, 0, PLAYER_RED, STRUCTURE_CITY);
     ASSERT_FALSE(boardIsValidCityPlacement(&map, topology.nodes[0].tileId, topology.nodes[0].cornerIndex, PLAYER_RED));
+    return true;
+}
+
+static bool test_roll_skips_resource_when_bank_cannot_fulfill_all_claims(void)
+{
+    struct Map map;
+    initialize_test_map(&map);
+    zero_all_resources(&map);
+
+    map.phase = GAME_PHASE_PLAY;
+    map.thiefTileId = 9;
+    map.tiles[0].type = TILE_FOREST;
+    map.tiles[0].diceNumber = 6;
+    map.tiles[0].corners[0].owner = PLAYER_RED;
+    map.tiles[0].corners[0].structure = STRUCTURE_CITY;
+    map.tiles[0].corners[2].owner = PLAYER_BLUE;
+    map.tiles[0].corners[2].structure = STRUCTURE_TOWN;
+
+    map.players[PLAYER_GREEN].resources[RESOURCE_WOOD] = 17;
+    ASSERT_EQ_INT(2, gameGetBankResourceCount(&map, RESOURCE_WOOD));
+
+    gameRollDice(&map, 6);
+    ASSERT_EQ_INT(0, map.players[PLAYER_RED].resources[RESOURCE_WOOD]);
+    ASSERT_EQ_INT(0, map.players[PLAYER_BLUE].resources[RESOURCE_WOOD]);
+    ASSERT_EQ_INT(17, map.players[PLAYER_GREEN].resources[RESOURCE_WOOD]);
+    return true;
+}
+
+static bool test_year_of_plenty_requires_bank_supply(void)
+{
+    struct Map map;
+    initialize_test_map(&map);
+    zero_all_resources(&map);
+
+    map.phase = GAME_PHASE_PLAY;
+    map.currentPlayer = PLAYER_RED;
+    map.players[PLAYER_RED].developmentCards[DEVELOPMENT_CARD_YEAR_OF_PLENTY] = 1;
+    map.players[PLAYER_BLUE].resources[RESOURCE_WOOD] = 19;
+
+    ASSERT_EQ_INT(0, gameGetBankResourceCount(&map, RESOURCE_WOOD));
+    ASSERT_FALSE(gameTryPlayYearOfPlenty(&map, RESOURCE_WOOD, RESOURCE_WOOD));
+    ASSERT_EQ_INT(1, map.players[PLAYER_RED].developmentCards[DEVELOPMENT_CARD_YEAR_OF_PLENTY]);
+    ASSERT_EQ_INT(0, map.players[PLAYER_RED].resources[RESOURCE_WOOD]);
+    ASSERT_FALSE(map.playedDevelopmentCardThisTurn);
+    return true;
+}
+
+static bool test_maritime_trade_requires_bank_supply_for_receive(void)
+{
+    struct Map map;
+    initialize_test_map(&map);
+    zero_all_resources(&map);
+
+    map.phase = GAME_PHASE_PLAY;
+    map.currentPlayer = PLAYER_RED;
+    map.players[PLAYER_RED].resources[RESOURCE_WHEAT] = 4;
+    map.players[PLAYER_BLUE].resources[RESOURCE_STONE] = 19;
+
+    ASSERT_EQ_INT(0, gameGetBankResourceCount(&map, RESOURCE_STONE));
+    ASSERT_FALSE(gameCanTradeMaritime(&map, RESOURCE_WHEAT, 1, RESOURCE_STONE));
+    ASSERT_FALSE(gameTryTradeMaritime(&map, RESOURCE_WHEAT, 1, RESOURCE_STONE));
+    ASSERT_EQ_INT(4, map.players[PLAYER_RED].resources[RESOURCE_WHEAT]);
+    ASSERT_EQ_INT(0, map.players[PLAYER_RED].resources[RESOURCE_STONE]);
+    return true;
+}
+
+static bool test_buy_and_trade_require_post_roll_open_turn_state(void)
+{
+    struct Map map;
+    initialize_test_map(&map);
+    zero_all_resources(&map);
+
+    map.phase = GAME_PHASE_PLAY;
+    map.currentPlayer = PLAYER_RED;
+    map.players[PLAYER_RED].resources[RESOURCE_WOOD] = 8;
+    map.players[PLAYER_RED].resources[RESOURCE_CLAY] = 2;
+    map.players[PLAYER_RED].resources[RESOURCE_WHEAT] = 4;
+    map.players[PLAYER_RED].resources[RESOURCE_STONE] = 1;
+    map.players[PLAYER_BLUE].resources[RESOURCE_STONE] = 1;
+    map.players[PLAYER_BLUE].resources[RESOURCE_WHEAT] = 1;
+
+    ASSERT_FALSE(gameTryBuyRoad(&map));
+    ASSERT_FALSE(gameCanTradeMaritime(&map, RESOURCE_WOOD, 1, RESOURCE_STONE));
+    ASSERT_FALSE(gameTryTradeWithPlayer(&map, PLAYER_BLUE, RESOURCE_CLAY, 1, RESOURCE_STONE, 1));
+
+    map.rolledThisTurn = true;
+    ASSERT_TRUE(gameTryBuyRoad(&map));
+    ASSERT_EQ_INT(7, map.players[PLAYER_RED].resources[RESOURCE_WOOD]);
+    ASSERT_EQ_INT(1, map.players[PLAYER_RED].resources[RESOURCE_CLAY]);
+
+    ASSERT_TRUE(gameTryTradeMaritime(&map, RESOURCE_WOOD, 1, RESOURCE_STONE));
+    ASSERT_EQ_INT(3, map.players[PLAYER_RED].resources[RESOURCE_WOOD]);
+    ASSERT_EQ_INT(2, map.players[PLAYER_RED].resources[RESOURCE_STONE]);
+
+    map.players[PLAYER_RED].resources[RESOURCE_CLAY] = 1;
+    ASSERT_TRUE(gameTryTradeWithPlayer(&map, PLAYER_BLUE, RESOURCE_CLAY, 1, RESOURCE_WHEAT, 1));
+    ASSERT_EQ_INT(0, map.players[PLAYER_RED].resources[RESOURCE_CLAY]);
+    ASSERT_EQ_INT(5, map.players[PLAYER_RED].resources[RESOURCE_WHEAT]);
+
+    map.awaitingThiefPlacement = true;
+    ASSERT_FALSE(gameTryBuyRoad(&map));
+    ASSERT_FALSE(gameCanTradeMaritime(&map, RESOURCE_WHEAT, 1, RESOURCE_CLAY));
+    ASSERT_FALSE(gameTryTradeWithPlayer(&map, PLAYER_BLUE, RESOURCE_WHEAT, 1, RESOURCE_STONE, 1));
+    return true;
+}
+
+static bool test_steal_random_resource_weights_by_card_count(void)
+{
+    struct Map map;
+    int woodCount = 0;
+    int wheatCount = 0;
+    initialize_test_map(&map);
+    zero_all_resources(&map);
+
+    map.phase = GAME_PHASE_PLAY;
+    map.currentPlayer = PLAYER_RED;
+    map.thiefTileId = 0;
+    map.awaitingThiefVictimSelection = true;
+    map.tiles[0].corners[0].owner = PLAYER_BLUE;
+    map.tiles[0].corners[0].structure = STRUCTURE_TOWN;
+
+    srand(12345);
+    for (int sample = 0; sample < 200; sample++)
+    {
+        enum ResourceType stolen = RESOURCE_WOOD;
+        map.players[PLAYER_RED].resources[RESOURCE_WOOD] = 0;
+        map.players[PLAYER_RED].resources[RESOURCE_WHEAT] = 0;
+        map.players[PLAYER_BLUE].resources[RESOURCE_WOOD] = 5;
+        map.players[PLAYER_BLUE].resources[RESOURCE_WHEAT] = 1;
+        map.players[PLAYER_BLUE].resources[RESOURCE_CLAY] = 0;
+        map.players[PLAYER_BLUE].resources[RESOURCE_SHEEP] = 0;
+        map.players[PLAYER_BLUE].resources[RESOURCE_STONE] = 0;
+        map.awaitingThiefVictimSelection = true;
+
+        ASSERT_TRUE(gameStealRandomResourceDetailed(&map, PLAYER_BLUE, &stolen));
+        if (stolen == RESOURCE_WOOD)
+        {
+            woodCount++;
+        }
+        else if (stolen == RESOURCE_WHEAT)
+        {
+            wheatCount++;
+        }
+        else
+        {
+            ASSERT_TRUE(false);
+        }
+    }
+
+    ASSERT_TRUE(woodCount > wheatCount * 2);
     return true;
 }
 

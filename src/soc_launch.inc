@@ -1,19 +1,65 @@
-static void ConfigureMatch(struct MatchSession *session, bool aiOpponentsEnabled, enum AiDifficulty difficulty, enum PlayerType humanColor)
+static void ConfigureLocalMatch(struct MatchSession *session, const struct MainMenuLobbyConfig *config)
 {
+    enum PlayerType primaryHuman = PLAYER_NONE;
+    int humanCount = 0;
+
     if (session == NULL)
     {
         return;
     }
 
-    if (aiOpponentsEnabled)
+    if (config == NULL)
     {
-        aiConfigureAIMatch(&session->map, humanColor, difficulty);
-        matchSessionConfigureSinglePlayer(session, humanColor);
         return;
     }
 
     aiConfigureHotseatMatch(&session->map);
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        const enum PlayerControlMode controlMode = config->seatControl[player] == PLAYER_CONTROL_AI
+                                                       ? PLAYER_CONTROL_AI
+                                                       : PLAYER_CONTROL_HUMAN;
+
+        session->map.players[player].controlMode = controlMode;
+        session->map.players[player].aiDifficulty = controlMode == PLAYER_CONTROL_AI
+                                                       ? config->aiDifficulty
+                                                       : AI_DIFFICULTY_EASY;
+        if (controlMode == PLAYER_CONTROL_HUMAN)
+        {
+            humanCount++;
+            if (primaryHuman == PLAYER_NONE)
+            {
+                primaryHuman = (enum PlayerType)player;
+            }
+        }
+    }
+
+    if (config->primaryHumanColor >= PLAYER_RED &&
+        config->primaryHumanColor <= PLAYER_BLACK &&
+        session->map.players[config->primaryHumanColor].controlMode == PLAYER_CONTROL_HUMAN)
+    {
+        primaryHuman = config->primaryHumanColor;
+    }
+
+    if (humanCount <= 1)
+    {
+        if (primaryHuman == PLAYER_NONE)
+        {
+            primaryHuman = PLAYER_RED;
+        }
+
+        matchSessionConfigureSinglePlayer(session, primaryHuman);
+        return;
+    }
+
     matchSessionConfigureHotseat(session);
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        if (session->map.players[player].controlMode == PLAYER_CONTROL_AI)
+        {
+            matchSessionSetSeatAuthority(session, (enum PlayerType)player, MATCH_SEAT_AI);
+        }
+    }
 }
 
 static void ConfigurePrivateMatch(struct MatchSession *session,
