@@ -28,240 +28,8 @@ const struct PortVisual kPorts[PORT_VISUAL_COUNT] = {
     {{-3, 0}, {-2, 0}, false, RESOURCE_SHEEP},
     {{-1, -2}, {-1, -1}, false, RESOURCE_WOOD}};
 
-int gHoveredTileId = -1;
-int gHoveredSideIndex = -1;
-int gHoveredCornerTileId = -1;
-int gHoveredCornerIndex = -1;
-enum BuildMode gBuildMode = BUILD_MODE_NONE;
-int gTradeGiveResource = RESOURCE_WOOD;
-int gTradeReceiveResource = RESOURCE_WHEAT;
-int gTradeAmount = 1;
-int gPlayerTradeGiveResource = RESOURCE_WOOD;
-int gPlayerTradeReceiveResource = RESOURCE_WHEAT;
-enum PlayerType gPlayerTradeTarget = PLAYER_BLUE;
-int gPlayerTradeGiveAmount = 1;
-int gPlayerTradeReceiveAmount = 1;
-int gDiscardSelection[5] = {0};
-enum PlayerType gDiscardSelectionPlayer = PLAYER_NONE;
-enum PlayerType gDiscardRevealPlayer = PLAYER_NONE;
-enum PlayerType gThiefVictimRevealPlayer = PLAYER_NONE;
-enum ResourceType gDevelopmentPlayPrimaryResource = RESOURCE_WOOD;
-enum ResourceType gDevelopmentPlaySecondaryResource = RESOURCE_WHEAT;
-
-#define UI_FONT_SPACING(fontSize) ((float)(fontSize) * 0.04f)
-
-static bool IsMouseNearTile(Vector2 mouse, Vector2 center, float radius);
-static float DistancePointToSegment(Vector2 p, Vector2 a, Vector2 b);
-static void DrawBeachWedge(Vector2 center, float radius, int sideIndex);
-static void DrawHarborMarker(const struct PortVisual *port, Vector2 center, float radius, int sideIndex);
-static int FindPortSideIndex(const struct PortVisual *port);
-static const char *PortLabel(const struct PortVisual *port);
-static void DrawPipRow(Vector2 center, int pipCount, float spacing, float dotRadius, Color color);
-Color PlayerColor(enum PlayerType player);
-static bool EdgeKeysMatch(int ax1, int ay1, int bx1, int by1, int ax2, int ay2, int bx2, int by2);
-static void CanonicalizeHoveredEdge(void);
-static bool CornerKeysMatch(int x1, int y1, int x2, int y2);
-static void CanonicalizeHoveredCorner(void);
-static void NormalizeMaritimeTradeSelection(const struct Map *map);
-static void NormalizePlayerTradeSelection(const struct Map *map);
-static enum PlayerType LocalHumanPlayer(const struct Map *map);
-static const char *PlayerNameLabel(enum PlayerType player);
-static bool HasAnyValidRoadPlacement(const struct Map *map, Vector2 origin, float radius);
-static bool CanOpenDevelopmentPlayOverlay(const struct Map *map, enum DevelopmentCardType type, Vector2 origin, float radius);
-
-static void NormalizeMaritimeTradeSelection(const struct Map *map)
-{
-    int firstValidGiveResource = -1;
-    int maxTradeAmount;
-
-    if (map == NULL || map->currentPlayer < PLAYER_RED || map->currentPlayer > PLAYER_BLACK)
-    {
-        return;
-    }
-
-    for (int resource = 0; resource < 5; resource++)
-    {
-        if (map->players[map->currentPlayer].resources[resource] >= gameGetMaritimeTradeRate(map, (enum ResourceType)resource))
-        {
-            firstValidGiveResource = resource;
-            break;
-        }
-    }
-
-    if (firstValidGiveResource >= 0 &&
-        map->players[map->currentPlayer].resources[gTradeGiveResource] < gameGetMaritimeTradeRate(map, (enum ResourceType)gTradeGiveResource))
-    {
-        gTradeGiveResource = firstValidGiveResource;
-    }
-
-    if (gTradeReceiveResource == gTradeGiveResource)
-    {
-        for (int resource = 0; resource < 5; resource++)
-        {
-            if (resource != gTradeGiveResource)
-            {
-                gTradeReceiveResource = resource;
-                break;
-            }
-        }
-    }
-
-    maxTradeAmount = map->players[map->currentPlayer].resources[gTradeGiveResource] /
-                     gameGetMaritimeTradeRate(map, (enum ResourceType)gTradeGiveResource);
-    if (gTradeAmount > maxTradeAmount)
-    {
-        gTradeAmount = maxTradeAmount > 0 ? maxTradeAmount : 1;
-    }
-    if (gTradeAmount < 1)
-    {
-        gTradeAmount = 1;
-    }
-}
-
-static void NormalizePlayerTradeSelection(const struct Map *map)
-{
-    if (map == NULL || map->currentPlayer < PLAYER_RED || map->currentPlayer > PLAYER_BLACK)
-    {
-        return;
-    }
-
-    if (gPlayerTradeTarget < PLAYER_RED || gPlayerTradeTarget > PLAYER_BLACK || gPlayerTradeTarget == map->currentPlayer)
-    {
-        for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
-        {
-            if (player != map->currentPlayer)
-            {
-                gPlayerTradeTarget = (enum PlayerType)player;
-                break;
-            }
-        }
-    }
-
-    int firstGiveResource = -1;
-    for (int resource = 0; resource < 5; resource++)
-    {
-        if (map->players[map->currentPlayer].resources[resource] > 0)
-        {
-            firstGiveResource = resource;
-            break;
-        }
-    }
-
-    if (firstGiveResource >= 0 && map->players[map->currentPlayer].resources[gPlayerTradeGiveResource] <= 0)
-    {
-        gPlayerTradeGiveResource = firstGiveResource;
-    }
-
-    if (gPlayerTradeReceiveResource == gPlayerTradeGiveResource)
-    {
-        for (int resource = 0; resource < 5; resource++)
-        {
-            if (resource != gPlayerTradeGiveResource)
-            {
-                gPlayerTradeReceiveResource = resource;
-                break;
-            }
-        }
-    }
-
-    if (map->players[map->currentPlayer].resources[gPlayerTradeGiveResource] > 0 &&
-        gPlayerTradeGiveAmount > map->players[map->currentPlayer].resources[gPlayerTradeGiveResource])
-    {
-        gPlayerTradeGiveAmount = map->players[map->currentPlayer].resources[gPlayerTradeGiveResource];
-    }
-    if (gPlayerTradeReceiveAmount > 9)
-    {
-        gPlayerTradeReceiveAmount = 9;
-    }
-    if (gPlayerTradeGiveAmount < 1)
-    {
-        gPlayerTradeGiveAmount = 1;
-    }
-    if (gPlayerTradeReceiveAmount < 1)
-    {
-        gPlayerTradeReceiveAmount = 1;
-    }
-}
-
-static enum PlayerType LocalHumanPlayer(const struct Map *map)
-{
-    const struct MatchSession *session = matchSessionGetActive();
-    enum PlayerType humanPlayer = PLAYER_NONE;
-    int humanCount = 0;
-    int aiCount = 0;
-
-    if (map == NULL)
-    {
-        return PLAYER_NONE;
-    }
-
-    if (session != NULL && session->localPlayer >= PLAYER_RED && session->localPlayer <= PLAYER_BLACK)
-    {
-        return session->localPlayer;
-    }
-
-    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
-    {
-        if (map->players[player].controlMode == PLAYER_CONTROL_AI)
-        {
-            aiCount++;
-        }
-        else
-        {
-            humanPlayer = (enum PlayerType)player;
-            humanCount++;
-        }
-    }
-
-    return aiCount > 0 && humanCount == 1 ? humanPlayer : PLAYER_NONE;
-}
-
-static const char *PlayerNameLabel(enum PlayerType player)
-{
-    return locPlayerName(player);
-}
-
-static bool HasAnyValidRoadPlacement(const struct Map *map, Vector2 origin, float radius)
-{
-    if (map == NULL || map->currentPlayer < PLAYER_RED || map->currentPlayer > PLAYER_BLACK)
-    {
-        return false;
-    }
-
-    for (int tileId = 0; tileId < LAND_TILE_COUNT; tileId++)
-    {
-        for (int sideIndex = 0; sideIndex < HEX_CORNERS; sideIndex++)
-        {
-            if (!IsCanonicalSharedEdge(tileId, sideIndex) ||
-                IsSharedEdgeOccupied(map, tileId, sideIndex))
-            {
-                continue;
-            }
-
-            if (boardIsValidRoadPlacement(map, tileId, sideIndex, map->currentPlayer, origin, radius))
-            {
-                return true;
-            }
-        }
-    }
-
-    return false;
-}
-
-static bool CanOpenDevelopmentPlayOverlay(const struct Map *map, enum DevelopmentCardType type, Vector2 origin, float radius)
-{
-    if (!gameCanPlayDevelopmentCard(map, type))
-    {
-        return false;
-    }
-
-    if (type == DEVELOPMENT_CARD_ROAD_BUILDING)
-    {
-        return HasAnyValidRoadPlacement(map, origin, radius);
-    }
-
-    return true;
-}
+/* Input state and small normalization helpers stay renderer-private here. */
+#include "renderer_input_state.inc"
 
 void HandleMapInput(struct MatchSession *session)
 {
@@ -525,23 +293,39 @@ void HandleMapInput(struct MatchSession *session)
             settingsModalTarget.y + settingsModalTarget.height * (1.0f - scale) * 0.5f,
             settingsModalTarget.width * scale,
             settingsModalTarget.height * scale};
+        const Rectangle settingsSubmenuTarget = GetSettingsSubmenuBounds();
+        const Rectangle settingsSubmenu = {
+            settingsSubmenuTarget.x + settingsSubmenuTarget.width * (1.0f - scale) * 0.5f,
+            settingsSubmenuTarget.y + settingsSubmenuTarget.height * (1.0f - scale) * 0.5f,
+            settingsSubmenuTarget.width * scale,
+            settingsSubmenuTarget.height * scale};
+        const Rectangle multiplayerPanelTarget = GetSettingsMultiplayerPanelBounds();
+        const Rectangle multiplayerPanel = {
+            multiplayerPanelTarget.x + multiplayerPanelTarget.width * (1.0f - scale) * 0.5f,
+            multiplayerPanelTarget.y + multiplayerPanelTarget.height * (1.0f - scale) * 0.5f,
+            multiplayerPanelTarget.width * scale,
+            multiplayerPanelTarget.height * scale};
         const enum UiSettingsConfirmAction confirmAction = uiGetSettingsConfirmAction();
-        const bool showMultiplayerInfo = uiIsSettingsMultiplayerInfoExpanded();
-        Rectangle lightButton = {settingsModal.x + 24.0f, settingsModal.y + 82.0f, settingsModal.width - 48.0f, 42.0f};
-        Rectangle darkButton = {settingsModal.x + 24.0f, settingsModal.y + 136.0f, settingsModal.width - 48.0f, 42.0f};
-        Rectangle languageButton = {settingsModal.x + 24.0f, settingsModal.y + 222.0f, settingsModal.width - 48.0f, 42.0f};
-        Rectangle aiSpeedSlider = {settingsModal.x + 28.0f, settingsModal.y + 306.0f, settingsModal.width - 56.0f, 36.0f};
-        Rectangle multiplayerInfoButton = {settingsModal.x + 24.0f, settingsModal.y + 376.0f, settingsModal.width - 48.0f, 42.0f};
-        const float multiplayerInfoExtra = showMultiplayerInfo ? 62.0f : 0.0f;
-        const float gameSectionY = settingsModal.y + 422.0f + multiplayerInfoExtra;
-        Rectangle restartButton = {settingsModal.x + 24.0f, gameSectionY + 24.0f, settingsModal.width - 48.0f, 42.0f};
-        Rectangle backToMenuButton = {settingsModal.x + 24.0f, gameSectionY + 78.0f, settingsModal.width - 48.0f, 42.0f};
-        Rectangle quitButton = {settingsModal.x + 24.0f, gameSectionY + 132.0f, settingsModal.width - 48.0f, 42.0f};
-        Rectangle confirmPanel = {settingsModal.x + 26.0f, restartButton.y - 18.0f, settingsModal.width - 52.0f, 140.0f};
+        const bool showNetplaySection = matchSessionIsNetplay(session);
+        const bool submenuOpen = uiIsSettingsSubmenuOpen();
+        Rectangle closeButton = {settingsModal.x + settingsModal.width - 42.0f, settingsModal.y + 12.0f, 28.0f, 28.0f};
+        Rectangle settingsButton = {settingsModal.x + 24.0f, settingsModal.y + 82.0f, settingsModal.width - 48.0f, 42.0f};
+        Rectangle restartButton = {settingsModal.x + 24.0f, settingsModal.y + 136.0f, settingsModal.width - 48.0f, 42.0f};
+        Rectangle backToMenuButton = {settingsModal.x + 24.0f, settingsModal.y + 190.0f, settingsModal.width - 48.0f, 42.0f};
+        Rectangle quitButton = {settingsModal.x + 24.0f, settingsModal.y + 244.0f, settingsModal.width - 48.0f, 42.0f};
+        Rectangle confirmPanel = {settingsModal.x + 18.0f, settingsModal.y + settingsModal.height - 156.0f, settingsModal.width - 36.0f, 140.0f};
         Rectangle confirmButton = {confirmPanel.x + 18.0f, confirmPanel.y + confirmPanel.height - 46.0f, 132.0f, 30.0f};
         Rectangle cancelButton = {confirmPanel.x + confirmPanel.width - 110.0f, confirmPanel.y + confirmPanel.height - 46.0f, 92.0f, 30.0f};
-        Rectangle closeButton = {settingsModal.x + settingsModal.width - 42.0f, settingsModal.y + 12.0f, 28.0f, 28.0f};
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !CheckCollisionPointRec(mouse, settingsModal))
+        Rectangle submenuCloseButton = {settingsSubmenu.x + settingsSubmenu.width - 42.0f, settingsSubmenu.y + 12.0f, 28.0f, 28.0f};
+        Rectangle lightButton = {settingsSubmenu.x + 24.0f, settingsSubmenu.y + 82.0f, settingsSubmenu.width - 48.0f, 42.0f};
+        Rectangle darkButton = {settingsSubmenu.x + 24.0f, settingsSubmenu.y + 136.0f, settingsSubmenu.width - 48.0f, 42.0f};
+        Rectangle windowModeButton = {settingsSubmenu.x + 24.0f, settingsSubmenu.y + 190.0f, settingsSubmenu.width - 48.0f, 42.0f};
+        Rectangle languageButton = {settingsSubmenu.x + 24.0f, settingsSubmenu.y + 244.0f, settingsSubmenu.width - 48.0f, 42.0f};
+        Rectangle aiSpeedSlider = {settingsSubmenu.x + 28.0f, settingsSubmenu.y + 324.0f, settingsSubmenu.width - 56.0f, 36.0f};
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+            !CheckCollisionPointRec(mouse, settingsModal) &&
+            (!submenuOpen || !CheckCollisionPointRec(mouse, settingsSubmenu)) &&
+            (!showNetplaySection || !CheckCollisionPointRec(mouse, multiplayerPanel)))
         {
             uiSetSettingsMenuOpen(false);
             return;
@@ -579,10 +363,10 @@ void HandleMapInput(struct MatchSession *session)
             }
             return;
         }
-        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, aiSpeedSlider))
+        if (submenuOpen && IsMouseButtonDown(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, aiSpeedSlider))
         {
             const float normalized = (mouse.x - aiSpeedSlider.x) / aiSpeedSlider.width;
-            const int speed = (int)roundf(normalized * 10.0f);
+            const int speed = (int)(normalized * 10.0f + 0.5f);
             if (speed != uiGetAiSpeedSetting())
             {
                 uiSetAiSpeedSetting(speed);
@@ -590,27 +374,38 @@ void HandleMapInput(struct MatchSession *session)
             }
             return;
         }
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, lightButton))
+        if (submenuOpen && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, submenuCloseButton))
+        {
+            uiSetSettingsSubmenuOpen(false);
+            return;
+        }
+        if (submenuOpen && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, lightButton))
         {
             uiSetTheme(UI_THEME_LIGHT);
             settingsStoreSaveCurrent();
             return;
         }
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, darkButton))
+        if (submenuOpen && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, darkButton))
         {
             uiSetTheme(UI_THEME_DARK);
             settingsStoreSaveCurrent();
             return;
         }
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, languageButton))
+        if (submenuOpen && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, languageButton))
         {
             locSetLanguage((enum UiLanguage)((locGetLanguage() + 1) % UI_LANGUAGE_COUNT));
             settingsStoreSaveCurrent();
             return;
         }
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, multiplayerInfoButton))
+        if (submenuOpen && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, windowModeButton))
         {
-            uiToggleSettingsMultiplayerInfoExpanded();
+            uiSetWindowMode(uiGetWindowMode() == UI_WINDOW_MODE_FULLSCREEN ? UI_WINDOW_MODE_WINDOWED : UI_WINDOW_MODE_FULLSCREEN);
+            settingsStoreSaveCurrent();
+            return;
+        }
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, settingsButton))
+        {
+            uiSetSettingsSubmenuOpen(!submenuOpen);
             return;
         }
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, restartButton))
@@ -1441,12 +1236,34 @@ void DrawRoad(Vector2 center, float radius, int sideIndex, enum PlayerType playe
 void DrawStructure(Vector2 center, float radius, int cornerIndex, enum PlayerType player, enum StructureType structure, bool available, bool hovered, float popAmount)
 {
     const Vector2 corner = PointOnHex(center, radius * 0.98f, cornerIndex);
-    const float popScale = 1.0f + popAmount * 0.20f;
+    const bool placementAnimating = !available && popAmount > 0.0f;
+    const float placementProgress = placementAnimating ? (1.0f - popAmount) : 1.0f;
+    const float clampedProgress = placementProgress < 0.0f ? 0.0f : (placementProgress > 1.0f ? 1.0f : placementProgress);
+    const float overshoot = 1.70158f;
+    const float overshootScale = overshoot + 1.0f;
+    const float overshootX = clampedProgress - 1.0f;
+    const float backOvershoot = 1.0f + overshootScale * overshootX * overshootX * overshootX + overshoot * overshootX * overshootX;
+    const float landingLift = placementAnimating ? radius * 0.30f * popAmount * popAmount : 0.0f;
+    const float popScale = placementAnimating
+                               ? 0.78f + 0.22f * backOvershoot + 0.10f * popAmount
+                               : (1.0f + popAmount * 0.20f);
+    const Vector2 animatedCorner = {corner.x, corner.y - landingLift};
     const Color previewFill = hovered ? (Color){235, 199, 67, 235} : Fade((Color){248, 227, 161, 255}, 0.84f);
     const Color fill = available ? previewFill : (hovered ? Fade(PlayerColor(player), 0.60f) : PlayerColor(player));
     const Color outline = available ? (hovered ? (Color){120, 84, 22, 255} : (Color){143, 116, 47, 255}) : (hovered ? Fade((Color){236, 220, 187, 255}, 0.75f) : (Color){80, 50, 28, 255});
     const Color roof = hovered ? Fade(ColorBrightness(fill, -0.18f), 0.72f) : ColorBrightness(fill, -0.20f);
     const Color shadow = Fade(BLACK, available ? (hovered ? 0.14f : 0.10f) : (hovered ? 0.10f : 0.14f));
+
+    if (placementAnimating)
+    {
+        const float pulseOuter = radius * (0.08f + 0.22f * clampedProgress);
+        const float pulseInner = pulseOuter - radius * (0.035f + 0.045f * popAmount);
+        const float pulseAlpha = 0.22f * popAmount;
+        const float shadowRadius = radius * (0.08f + 0.10f * clampedProgress);
+
+        DrawRing(corner, pulseInner, pulseOuter, 0.0f, 360.0f, 32, Fade(fill, pulseAlpha));
+        DrawCircleV((Vector2){corner.x, corner.y + radius * 0.02f}, shadowRadius, Fade(BLACK, 0.10f * popAmount));
+    }
 
     if (structure == STRUCTURE_CITY)
     {
@@ -1454,12 +1271,12 @@ void DrawStructure(Vector2 center, float radius, int cornerIndex, enum PlayerTyp
         const float height = radius * 0.18f * popScale;
         const float roofHeight = radius * 0.12f * popScale;
         const Rectangle base = {
-            corner.x - width * 0.5f,
-            corner.y - height * 0.06f,
+            animatedCorner.x - width * 0.5f,
+            animatedCorner.y - height * 0.06f,
             width,
             height};
         const Rectangle keep = {
-            corner.x - width * 0.18f,
+            animatedCorner.x - width * 0.18f,
             base.y - height * 0.58f,
             width * 0.36f,
             height * 0.72f};
@@ -1491,12 +1308,12 @@ void DrawStructure(Vector2 center, float radius, int cornerIndex, enum PlayerTyp
         DrawRectangleLinesEx(rightTower, 1.5f, outline);
 
         DrawTriangle(
-            (Vector2){corner.x, keep.y - roofHeight},
+            (Vector2){animatedCorner.x, keep.y - roofHeight},
             (Vector2){keep.x - radius * 0.01f, keep.y + radius * 0.02f},
             (Vector2){keep.x + keep.width + radius * 0.01f, keep.y + radius * 0.02f},
             roof);
         DrawTriangleLines(
-            (Vector2){corner.x, keep.y - roofHeight},
+            (Vector2){animatedCorner.x, keep.y - roofHeight},
             (Vector2){keep.x - radius * 0.01f, keep.y + radius * 0.02f},
             (Vector2){keep.x + keep.width + radius * 0.01f, keep.y + radius * 0.02f},
             outline);
@@ -1529,8 +1346,8 @@ void DrawStructure(Vector2 center, float radius, int cornerIndex, enum PlayerTyp
     const float height = radius * 0.18f * popScale;
     const float roofHeight = radius * 0.14f * popScale;
     const Rectangle body = {
-        corner.x - width * 0.5f,
-        corner.y - height * 0.10f,
+        animatedCorner.x - width * 0.5f,
+        animatedCorner.y - height * 0.10f,
         width,
         height};
 
@@ -1538,12 +1355,12 @@ void DrawStructure(Vector2 center, float radius, int cornerIndex, enum PlayerTyp
     DrawRectangleRounded(body, 0.12f, 6, fill);
     DrawRectangleLinesEx(body, 1.8f, outline);
     DrawTriangle(
-        (Vector2){corner.x, body.y - roofHeight},
+        (Vector2){animatedCorner.x, body.y - roofHeight},
         (Vector2){body.x - radius * 0.01f, body.y + radius * 0.02f},
         (Vector2){body.x + body.width + radius * 0.01f, body.y + radius * 0.02f},
         roof);
     DrawTriangleLines(
-        (Vector2){corner.x, body.y - roofHeight},
+        (Vector2){animatedCorner.x, body.y - roofHeight},
         (Vector2){body.x - radius * 0.01f, body.y + radius * 0.02f},
         (Vector2){body.x + body.width + radius * 0.01f, body.y + radius * 0.02f},
         outline);

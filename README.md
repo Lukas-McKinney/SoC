@@ -93,6 +93,19 @@ These are intentional shortcuts or current prototype settings:
 - AI now exhaustively searches bounded deterministic play lines
   - robber sub-choices use fast post-resolution scoring so thief turns stay responsive
   - long-horizon strategy is still guided by state evaluation rather than a full-game solve
+
+## Source Layout
+
+For a quick map of the codebase, see [docs/source-layout.md](docs/source-layout.md).
+
+Notable entrypoints:
+
+- `src/soc.c` drives the app loop
+- `src/renderer.c` owns board interaction and render primitives
+- `src/renderer_ui.c` owns HUD/modal rendering entrypoints
+- `src/game_logic.c` owns core rule execution
+- `src/match_session.c` owns authority and multiplayer/session flow
+
 ## Build
 
 ### Windows

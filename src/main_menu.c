@@ -45,8 +45,7 @@ static Rectangle GetStartButtonBounds(void);
 static Rectangle GetAiStartButtonBounds(void);
 static Rectangle GetMultiplayerButtonBounds(void);
 static Rectangle GetStatisticsButtonBounds(void);
-static Rectangle GetLanguageButtonBounds(void);
-static Rectangle GetThemeButtonBounds(void);
+static Rectangle GetMainMenuSettingsButtonBounds(void);
 static Rectangle GetQuitButtonBounds(void);
 static Rectangle GetStartPopupBounds(void);
 static Rectangle GetStartPopupColorButtonBounds(void);
@@ -55,6 +54,12 @@ static Rectangle GetStartPopupConfirmButtonBounds(void);
 static Rectangle GetStartPopupCancelButtonBounds(void);
 static Rectangle GetStatisticsPopupBounds(void);
 static Rectangle GetStatisticsPopupCloseButtonBounds(void);
+static Rectangle GetSettingsPopupBounds(void);
+static Rectangle GetSettingsPopupThemeButtonBounds(void);
+static Rectangle GetSettingsPopupDisplayButtonBounds(void);
+static Rectangle GetSettingsPopupLanguageButtonBounds(void);
+static Rectangle GetSettingsPopupAiSpeedTrackBounds(void);
+static Rectangle GetSettingsPopupCloseButtonBounds(void);
 static struct MultiplayerPopupLayout BuildMultiplayerPopupLayout(void);
 static void DrawMenuButton(Rectangle bounds, const char *label, Color fill, Color border, Color text, bool emphasized);
 static void DrawStatisticsRow(Rectangle bounds, float y, const char *label, const char *value, Color labelColor, Color valueColor);
@@ -62,6 +67,7 @@ static void DrawTextField(Rectangle bounds, const char *label, const char *value
                           bool active, Color fill, Color border, Color textColor, Color labelColor);
 static void DrawStartPopup(void);
 static void DrawStatisticsPopup(void);
+static void DrawSettingsPopup(void);
 static void DrawMultiplayerPopup(void);
 static void FormatElapsedDuration(unsigned long long totalSeconds, char *buffer, size_t bufferSize);
 static const char *PlayerName(enum PlayerType player);
@@ -79,6 +85,7 @@ static enum AiDifficulty gMainMenuAiDifficulty = AI_DIFFICULTY_MEDIUM;
 static enum PlayerType gMainMenuHumanColor = PLAYER_RED;
 static enum MainMenuAction gMainMenuPopupStartAction = MAIN_MENU_ACTION_NONE;
 static bool gMainMenuStatisticsOpen = false;
+static bool gMainMenuSettingsOpen = false;
 static bool gMainMenuMultiplayerOpen = false;
 static enum MainMenuMultiplayerMode gMainMenuMultiplayerMode = MAIN_MENU_MULTIPLAYER_HOST;
 static enum MainMenuMultiplayerField gMainMenuMultiplayerField = MAIN_MENU_MULTIPLAYER_FIELD_NONE;
@@ -96,8 +103,7 @@ void DrawMainMenu(void)
     const Rectangle aiStartButton = GetAiStartButtonBounds();
     const Rectangle multiplayerButton = GetMultiplayerButtonBounds();
     const Rectangle statisticsButton = GetStatisticsButtonBounds();
-    const Rectangle languageButton = GetLanguageButtonBounds();
-    const Rectangle themeButton = GetThemeButtonBounds();
+    const Rectangle settingsButton = GetMainMenuSettingsButtonBounds();
     const Rectangle quitButton = GetQuitButtonBounds();
     const bool darkTheme = uiGetTheme() == UI_THEME_DARK;
     const Color panelColor = darkTheme ? (Color){35, 43, 55, 244} : (Color){245, 237, 217, 246};
@@ -108,9 +114,6 @@ void DrawMainMenu(void)
     const Color goldColor = darkTheme ? (Color){219, 184, 106, 255} : (Color){191, 145, 61, 255};
     const char *titleLabel = loc("Settlers");
     const char *captionLabel = loc("Build, trade, and test a full match flow.");
-    const char *themeValue = uiGetTheme() == UI_THEME_DARK ? loc("Dark") : loc("Light");
-    const char *themeLabel = TextFormat(loc("Theme: %s"), themeValue);
-    const char *languageLabel = TextFormat(loc("Language: %s"), locLanguageDisplayName(locGetLanguage()));
     const int titleWidth = MeasureUiText(titleLabel, 54);
     const int captionWidth = MeasureUiText(captionLabel, 17);
 
@@ -129,11 +132,11 @@ void DrawMainMenu(void)
     DrawMenuButton(aiStartButton, loc("Start vs AI"), goldColor, borderColor, darkTheme ? (Color){38, 32, 24, 255} : RAYWHITE, true);
     DrawMenuButton(multiplayerButton, loc("Multiplayer"), darkTheme ? (Color){88, 103, 129, 255} : (Color){222, 216, 204, 255}, borderColor, titleColor, false);
     DrawMenuButton(statisticsButton, loc("Statistics"), darkTheme ? (Color){63, 77, 95, 255} : (Color){233, 226, 207, 255}, borderColor, titleColor, false);
-    DrawMenuButton(languageButton, languageLabel, darkTheme ? (Color){63, 77, 95, 255} : (Color){233, 226, 207, 255}, borderColor, titleColor, false);
-    DrawMenuButton(themeButton, themeLabel, darkTheme ? (Color){63, 77, 95, 255} : (Color){233, 226, 207, 255}, borderColor, titleColor, false);
+    DrawMenuButton(settingsButton, loc("Settings"), darkTheme ? (Color){63, 77, 95, 255} : (Color){233, 226, 207, 255}, borderColor, titleColor, false);
     DrawMenuButton(quitButton, loc("Quit"), darkTheme ? (Color){82, 54, 54, 255} : (Color){231, 215, 204, 255}, borderColor, titleColor, false);
     DrawStartPopup();
     DrawStatisticsPopup();
+    DrawSettingsPopup();
     DrawMultiplayerPopup();
 }
 
@@ -239,6 +242,66 @@ enum MainMenuAction HandleMainMenuInput(void)
         return MAIN_MENU_ACTION_NONE;
     }
 
+    if (gMainMenuSettingsOpen)
+    {
+        const Rectangle settingsPanel = GetSettingsPopupBounds();
+        const Rectangle themeButton = GetSettingsPopupThemeButtonBounds();
+        const Rectangle displayButton = GetSettingsPopupDisplayButtonBounds();
+        const Rectangle languageButton = GetSettingsPopupLanguageButtonBounds();
+        const Rectangle aiSpeedTrack = GetSettingsPopupAiSpeedTrackBounds();
+        const Rectangle closeButton = GetSettingsPopupCloseButtonBounds();
+
+        if (IsKeyPressed(KEY_ESCAPE))
+        {
+            gMainMenuSettingsOpen = false;
+            return MAIN_MENU_ACTION_NONE;
+        }
+
+        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, aiSpeedTrack))
+        {
+            const float normalized = (mouse.x - aiSpeedTrack.x) / aiSpeedTrack.width;
+            const int speed = (int)(normalized * 10.0f + 0.5f);
+            if (speed != uiGetAiSpeedSetting())
+            {
+                uiSetAiSpeedSetting(speed);
+                settingsStoreSaveCurrent();
+            }
+            return MAIN_MENU_ACTION_NONE;
+        }
+
+        if (!leftPressed)
+        {
+            return MAIN_MENU_ACTION_NONE;
+        }
+
+        if (!CheckCollisionPointRec(mouse, settingsPanel) || CheckCollisionPointRec(mouse, closeButton))
+        {
+            gMainMenuSettingsOpen = false;
+            return MAIN_MENU_ACTION_NONE;
+        }
+
+        if (CheckCollisionPointRec(mouse, themeButton))
+        {
+            uiSetTheme(uiGetTheme() == UI_THEME_DARK ? UI_THEME_LIGHT : UI_THEME_DARK);
+            settingsStoreSaveCurrent();
+            return MAIN_MENU_ACTION_NONE;
+        }
+        if (CheckCollisionPointRec(mouse, displayButton))
+        {
+            uiSetWindowMode(uiGetWindowMode() == UI_WINDOW_MODE_FULLSCREEN ? UI_WINDOW_MODE_WINDOWED : UI_WINDOW_MODE_FULLSCREEN);
+            settingsStoreSaveCurrent();
+            return MAIN_MENU_ACTION_NONE;
+        }
+        if (CheckCollisionPointRec(mouse, languageButton))
+        {
+            locSetLanguage((enum UiLanguage)((locGetLanguage() + 1) % UI_LANGUAGE_COUNT));
+            settingsStoreSaveCurrent();
+            return MAIN_MENU_ACTION_NONE;
+        }
+
+        return MAIN_MENU_ACTION_NONE;
+    }
+
     if (!leftPressed)
     {
         return MAIN_MENU_ACTION_NONE;
@@ -293,6 +356,7 @@ enum MainMenuAction HandleMainMenuInput(void)
     {
         gMainMenuPopupStartAction = MAIN_MENU_ACTION_START_GAME;
         gMainMenuStatisticsOpen = false;
+        gMainMenuSettingsOpen = false;
         gMainMenuMultiplayerOpen = false;
         return MAIN_MENU_ACTION_NONE;
     }
@@ -300,6 +364,7 @@ enum MainMenuAction HandleMainMenuInput(void)
     {
         gMainMenuPopupStartAction = MAIN_MENU_ACTION_START_AI_GAME;
         gMainMenuStatisticsOpen = false;
+        gMainMenuSettingsOpen = false;
         gMainMenuMultiplayerOpen = false;
         return MAIN_MENU_ACTION_NONE;
     }
@@ -308,24 +373,24 @@ enum MainMenuAction HandleMainMenuInput(void)
         MainMenuSetMultiplayerOpen(true);
         gMainMenuPopupStartAction = MAIN_MENU_ACTION_NONE;
         gMainMenuStatisticsOpen = false;
+        gMainMenuSettingsOpen = false;
         return MAIN_MENU_ACTION_NONE;
     }
     if (CheckCollisionPointRec(mouse, GetStatisticsButtonBounds()))
     {
         gMainMenuStatisticsOpen = true;
         gMainMenuPopupStartAction = MAIN_MENU_ACTION_NONE;
+        gMainMenuSettingsOpen = false;
         gMainMenuMultiplayerOpen = false;
         return MAIN_MENU_ACTION_NONE;
     }
-    if (CheckCollisionPointRec(mouse, GetLanguageButtonBounds()))
+    if (CheckCollisionPointRec(mouse, GetMainMenuSettingsButtonBounds()))
     {
-        locSetLanguage((enum UiLanguage)((locGetLanguage() + 1) % UI_LANGUAGE_COUNT));
-        settingsStoreSaveCurrent();
+        gMainMenuSettingsOpen = true;
+        gMainMenuPopupStartAction = MAIN_MENU_ACTION_NONE;
+        gMainMenuStatisticsOpen = false;
+        gMainMenuMultiplayerOpen = false;
         return MAIN_MENU_ACTION_NONE;
-    }
-    if (CheckCollisionPointRec(mouse, GetThemeButtonBounds()))
-    {
-        return MAIN_MENU_ACTION_TOGGLE_THEME;
     }
     if (CheckCollisionPointRec(mouse, GetQuitButtonBounds()))
     {
@@ -338,7 +403,7 @@ enum MainMenuAction HandleMainMenuInput(void)
 static Rectangle GetMainMenuPanelBounds(void)
 {
     const float panelWidth = 452.0f;
-    const float panelHeight = 646.0f;
+    const float panelHeight = 588.0f;
     return (Rectangle){
         (float)GetScreenWidth() * 0.5f - panelWidth * 0.5f,
         (float)GetScreenHeight() * 0.5f - panelHeight * 0.5f - 18.0f,
@@ -370,22 +435,16 @@ static Rectangle GetStatisticsButtonBounds(void)
     return (Rectangle){panel.x + 34.0f, panel.y + 404.0f, panel.width - 68.0f, 46.0f};
 }
 
-static Rectangle GetLanguageButtonBounds(void)
+static Rectangle GetMainMenuSettingsButtonBounds(void)
 {
     const Rectangle panel = GetMainMenuPanelBounds();
     return (Rectangle){panel.x + 34.0f, panel.y + 462.0f, panel.width - 68.0f, 46.0f};
 }
 
-static Rectangle GetThemeButtonBounds(void)
-{
-    const Rectangle panel = GetMainMenuPanelBounds();
-    return (Rectangle){panel.x + 34.0f, panel.y + 520.0f, panel.width - 68.0f, 46.0f};
-}
-
 static Rectangle GetQuitButtonBounds(void)
 {
     const Rectangle panel = GetMainMenuPanelBounds();
-    return (Rectangle){panel.x + 34.0f, panel.y + 578.0f, panel.width - 68.0f, 40.0f};
+    return (Rectangle){panel.x + 34.0f, panel.y + 520.0f, panel.width - 68.0f, 40.0f};
 }
 
 static Rectangle GetStartPopupBounds(void)
@@ -437,6 +496,47 @@ static Rectangle GetStatisticsPopupBounds(void)
 static Rectangle GetStatisticsPopupCloseButtonBounds(void)
 {
     const Rectangle panel = GetStatisticsPopupBounds();
+    return (Rectangle){panel.x + 28.0f, panel.y + panel.height - 56.0f, panel.width - 56.0f, 38.0f};
+}
+
+static Rectangle GetSettingsPopupBounds(void)
+{
+    const float panelWidth = 408.0f;
+    const float panelHeight = 404.0f;
+    return (Rectangle){
+        (float)GetScreenWidth() * 0.5f - panelWidth * 0.5f,
+        (float)GetScreenHeight() * 0.5f - panelHeight * 0.5f,
+        panelWidth,
+        panelHeight};
+}
+
+static Rectangle GetSettingsPopupThemeButtonBounds(void)
+{
+    const Rectangle panel = GetSettingsPopupBounds();
+    return (Rectangle){panel.x + 28.0f, panel.y + 88.0f, panel.width - 56.0f, 42.0f};
+}
+
+static Rectangle GetSettingsPopupDisplayButtonBounds(void)
+{
+    const Rectangle panel = GetSettingsPopupBounds();
+    return (Rectangle){panel.x + 28.0f, panel.y + 142.0f, panel.width - 56.0f, 42.0f};
+}
+
+static Rectangle GetSettingsPopupLanguageButtonBounds(void)
+{
+    const Rectangle panel = GetSettingsPopupBounds();
+    return (Rectangle){panel.x + 28.0f, panel.y + 196.0f, panel.width - 56.0f, 42.0f};
+}
+
+static Rectangle GetSettingsPopupAiSpeedTrackBounds(void)
+{
+    const Rectangle panel = GetSettingsPopupBounds();
+    return (Rectangle){panel.x + 36.0f, panel.y + 288.0f, panel.width - 72.0f, 10.0f};
+}
+
+static Rectangle GetSettingsPopupCloseButtonBounds(void)
+{
+    const Rectangle panel = GetSettingsPopupBounds();
     return (Rectangle){panel.x + 28.0f, panel.y + panel.height - 56.0f, panel.width - 56.0f, 38.0f};
 }
 
@@ -551,6 +651,10 @@ void MainMenuSetMultiplayerHostAddress(const char *address)
 void MainMenuSetMultiplayerOpen(bool open)
 {
     gMainMenuMultiplayerOpen = open;
+    if (open)
+    {
+        gMainMenuSettingsOpen = false;
+    }
     gMainMenuMultiplayerField = open
                                     ? (gMainMenuMultiplayerMode == MAIN_MENU_MULTIPLAYER_JOIN
                                            ? MAIN_MENU_MULTIPLAYER_FIELD_HOST_ADDRESS
@@ -660,6 +764,71 @@ static void DrawStatisticsPopup(void)
     DrawStatisticsRow(statsCard, statsCard.y + 86.0f, loc("Win Rate"), winrateLabel, bodyColor, textColor);
     DrawUiText(loc("Wins and losses count single-player matches."), panel.x + 28.0f, closeButton.y - 30.0f, 16, bodyColor);
     DrawMenuButton(closeButton, loc("Close"), darkTheme ? (Color){63, 77, 95, 255} : (Color){233, 226, 207, 255}, borderColor, textColor, false);
+}
+
+static void DrawSettingsPopup(void)
+{
+    const bool darkTheme = uiGetTheme() == UI_THEME_DARK;
+    const enum UiWindowMode windowMode = uiGetWindowMode();
+    const Rectangle panel = GetSettingsPopupBounds();
+    const Rectangle themeButton = GetSettingsPopupThemeButtonBounds();
+    const Rectangle displayButton = GetSettingsPopupDisplayButtonBounds();
+    const Rectangle languageButton = GetSettingsPopupLanguageButtonBounds();
+    const Rectangle aiSpeedTrack = GetSettingsPopupAiSpeedTrackBounds();
+    const Rectangle closeButton = GetSettingsPopupCloseButtonBounds();
+    const Color panelColor = darkTheme ? (Color){35, 43, 55, 252} : (Color){245, 237, 217, 252};
+    const Color borderColor = darkTheme ? (Color){132, 151, 176, 255} : (Color){118, 88, 56, 255};
+    const Color textColor = darkTheme ? (Color){236, 241, 246, 255} : (Color){54, 39, 29, 255};
+    const Color bodyColor = darkTheme ? (Color){194, 205, 216, 255} : (Color){92, 70, 50, 255};
+    const Color sectionFill = darkTheme ? (Color){63, 77, 95, 255} : (Color){233, 226, 207, 255};
+    const Color accentColor = darkTheme ? (Color){188, 135, 83, 255} : (Color){171, 82, 54, 255};
+    const int aiSpeed = uiGetAiSpeedSetting();
+    const float aiSpeedNormalized = (float)aiSpeed / 10.0f;
+    const float aiSpeedKnobX = aiSpeedTrack.x + aiSpeedTrack.width * aiSpeedNormalized;
+    char themeLabel[48];
+    char displayLabel[48];
+    char languageLabel[64];
+
+    if (!gMainMenuSettingsOpen)
+    {
+        return;
+    }
+
+    snprintf(themeLabel,
+             sizeof(themeLabel),
+             loc("Theme: %s"),
+             uiGetTheme() == UI_THEME_DARK ? loc("Dark") : loc("Light"));
+    snprintf(displayLabel,
+             sizeof(displayLabel),
+             "%s: %s",
+             loc("Display Mode"),
+             loc(windowMode == UI_WINDOW_MODE_FULLSCREEN ? "Fullscreen" : "Windowed"));
+    snprintf(languageLabel,
+             sizeof(languageLabel),
+             loc("Language: %s"),
+             locLanguageDisplayName(locGetLanguage()));
+
+    DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, darkTheme ? 0.46f : 0.28f));
+    DrawRectangleRounded((Rectangle){panel.x + 8.0f, panel.y + 10.0f, panel.width, panel.height}, 0.08f, 8, Fade(BLACK, 0.16f));
+    DrawRectangleRounded(panel, 0.08f, 8, panelColor);
+    DrawRectangleLinesEx(panel, 2.0f, borderColor);
+
+    DrawUiText(loc("Settings"), panel.x + 28.0f, panel.y + 24.0f, 30, textColor);
+    DrawUiText(loc("Tracked across sessions."), panel.x + 28.0f, panel.y + 58.0f, 18, bodyColor);
+    DrawMenuButton(themeButton, themeLabel, sectionFill, borderColor, textColor, false);
+    DrawMenuButton(displayButton, displayLabel, sectionFill, borderColor, textColor, false);
+    DrawMenuButton(languageButton, languageLabel, sectionFill, borderColor, textColor, false);
+
+    DrawUiText(loc("AI Speed"), panel.x + 28.0f, panel.y + 246.0f, 18, bodyColor);
+    DrawUiText(loc("0 slow"), aiSpeedTrack.x, aiSpeedTrack.y + 16.0f, 14, bodyColor);
+    DrawUiText(loc("10 instant"), aiSpeedTrack.x + aiSpeedTrack.width - MeasureUiText(loc("10 instant"), 14), aiSpeedTrack.y + 16.0f, 14, bodyColor);
+    DrawRectangleRounded(aiSpeedTrack, 0.45f, 8, darkTheme ? (Color){51, 63, 79, 255} : (Color){224, 216, 198, 255});
+    DrawRectangleRounded((Rectangle){aiSpeedTrack.x, aiSpeedTrack.y, aiSpeedTrack.width * aiSpeedNormalized, aiSpeedTrack.height}, 0.45f, 8, accentColor);
+    DrawCircleV((Vector2){aiSpeedKnobX, aiSpeedTrack.y + aiSpeedTrack.height * 0.5f}, 9.0f, darkTheme ? (Color){236, 241, 246, 255} : (Color){247, 240, 226, 255});
+    DrawCircleLines((int)aiSpeedKnobX, (int)(aiSpeedTrack.y + aiSpeedTrack.height * 0.5f), 9.0f, borderColor);
+    DrawUiText(TextFormat("%d", aiSpeed), panel.x + panel.width * 0.5f - 5.0f, aiSpeedTrack.y - 24.0f, 18, textColor);
+
+    DrawMenuButton(closeButton, loc("Close"), sectionFill, borderColor, textColor, false);
 }
 
 static void DrawMultiplayerPopup(void)

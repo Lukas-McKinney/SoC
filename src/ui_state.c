@@ -30,6 +30,7 @@ static bool gPlayerTradeMenuOpen = false;
 static float gPlayerTradeMenuOpenAmount = 0.0f;
 static bool gSettingsMenuOpen = false;
 static float gSettingsMenuOpenAmount = 0.0f;
+static bool gSettingsSubmenuOpen = false;
 static bool gSettingsMultiplayerInfoExpanded = false;
 static enum UiSettingsConfirmAction gSettingsConfirmAction = UI_SETTINGS_CONFIRM_NONE;
 static bool gBuildPanelOpen = false;
@@ -72,6 +73,7 @@ static double gRecentRollHighlightStartTime = -1.0;
 static bool gDevelopmentCardDrawAnimating = false;
 static double gDevelopmentCardDrawAnimationStartTime = 0.0;
 static enum DevelopmentCardType gAnimatedDevelopmentCardType = DEVELOPMENT_CARD_KNIGHT;
+static enum UiWindowMode gWindowMode = UI_WINDOW_MODE_WINDOWED;
 static bool gPlayerDeltaTrackerInitialized = false;
 static enum PlayerType gTrackedCurrentPlayer = PLAYER_NONE;
 static int gCurrentTurnResourceGain[5] = {0};
@@ -82,7 +84,10 @@ static char gCenteredWarningText[CENTERED_WARNING_TEXT_CAPACITY] = {0};
 static double gCenteredWarningStartTime = -1.0;
 static char gCenteredStatusText[CENTERED_WARNING_TEXT_CAPACITY] = {0};
 static enum UiNotificationTone gCenteredStatusTone = UI_NOTIFICATION_NEUTRAL;
+static enum PlayerType gCenteredStatusPlayer = PLAYER_NONE;
 static double gCenteredStatusStartTime = -1.0;
+static double gTurnAnnouncementStartTime = -1.0;
+static enum PlayerType gTurnAnnouncementPlayer = PLAYER_NONE;
 
 static void update_build_panel_animation(void);
 static void update_development_purchase_confirm_animation(void);
@@ -104,10 +109,12 @@ static void show_local_resource_feedback(const struct Map *map, enum PlayerType 
                                          const int positiveDeltas[5], const int negativeDeltas[5],
                                          bool localTurnStarted, bool *showedStatus);
 static void format_resource_delta_list(const int deltas[5], char *buffer, size_t bufferSize);
+static void apply_window_mode(enum UiWindowMode mode);
 static void reset_ui_state(bool resetTheme);
 static unsigned long long current_match_elapsed_seconds(void);
 static void commit_match_result_if_needed(const struct Map *map);
 static void choose_canonical_dice_faces(int total, int *dieA, int *dieB);
+static void show_centered_status_internal(const char *text, enum UiNotificationTone tone, enum PlayerType player);
 
 static void choose_canonical_dice_faces(int total, int *dieA, int *dieB)
 {
@@ -169,6 +176,7 @@ static void reset_ui_state(bool resetTheme)
     gPlayerTradeMenuOpenAmount = 0.0f;
     gSettingsMenuOpen = false;
     gSettingsMenuOpenAmount = 0.0f;
+    gSettingsSubmenuOpen = false;
     gSettingsMultiplayerInfoExpanded = false;
     gSettingsConfirmAction = UI_SETTINGS_CONFIRM_NONE;
     gBuildPanelOpen = false;
@@ -189,6 +197,10 @@ static void reset_ui_state(bool resetTheme)
     gDevelopmentCardDrawAnimating = false;
     gDevelopmentCardDrawAnimationStartTime = 0.0;
     gAnimatedDevelopmentCardType = DEVELOPMENT_CARD_KNIGHT;
+    if (resetTheme)
+    {
+        gWindowMode = UI_WINDOW_MODE_WINDOWED;
+    }
     gPlayerDeltaTrackerInitialized = false;
     gTrackedCurrentPlayer = PLAYER_NONE;
     memset(gCurrentTurnResourceGain, 0, sizeof(gCurrentTurnResourceGain));
@@ -199,7 +211,10 @@ static void reset_ui_state(bool resetTheme)
     gCenteredWarningStartTime = -1.0;
     memset(gCenteredStatusText, 0, sizeof(gCenteredStatusText));
     gCenteredStatusTone = UI_NOTIFICATION_NEUTRAL;
+    gCenteredStatusPlayer = PLAYER_NONE;
     gCenteredStatusStartTime = -1.0;
+    gTurnAnnouncementStartTime = -1.0;
+    gTurnAnnouncementPlayer = PLAYER_NONE;
     gReturnToMainMenuRequested = false;
     gRestartGameRequested = false;
     gQuitGameRequested = false;
@@ -215,6 +230,8 @@ static void reset_ui_state(bool resetTheme)
 
 void updateUiState(struct Map *map)
 {
+    const struct MatchSession *session = matchSessionGetActive();
+
     if (map != NULL &&
         gCurrentMatchStartTime >= 0.0 &&
         gCurrentMatchFrozenDurationSeconds < 0.0 &&
@@ -223,6 +240,11 @@ void updateUiState(struct Map *map)
         gCurrentMatchFrozenDurationSeconds = GetTime() - gCurrentMatchStartTime;
     }
     commit_match_result_if_needed(map);
+
+    if (!matchSessionIsNetplay(session))
+    {
+        gSettingsMultiplayerInfoExpanded = false;
+    }
 
     update_build_panel_animation();
     update_development_purchase_confirm_animation();
@@ -405,12 +427,13 @@ float uiGetCenteredWarningVerticalOffset(void)
     return 24.0f;
 }
 
-void uiShowCenteredStatus(const char *text, enum UiNotificationTone tone)
+static void show_centered_status_internal(const char *text, enum UiNotificationTone tone, enum PlayerType player)
 {
     if (text == NULL || text[0] == '\0')
     {
         gCenteredStatusText[0] = '\0';
         gCenteredStatusTone = UI_NOTIFICATION_NEUTRAL;
+        gCenteredStatusPlayer = PLAYER_NONE;
         gCenteredStatusStartTime = -1.0;
         return;
     }
@@ -418,7 +441,23 @@ void uiShowCenteredStatus(const char *text, enum UiNotificationTone tone)
     strncpy(gCenteredStatusText, text, sizeof(gCenteredStatusText) - 1);
     gCenteredStatusText[sizeof(gCenteredStatusText) - 1] = '\0';
     gCenteredStatusTone = tone;
+    gCenteredStatusPlayer = player;
     gCenteredStatusStartTime = GetTime();
+}
+
+void uiShowCenteredStatus(const char *text, enum UiNotificationTone tone)
+{
+    show_centered_status_internal(text, tone, PLAYER_NONE);
+}
+
+void uiShowCenteredStatusForPlayer(const char *text, enum UiNotificationTone tone, enum PlayerType player)
+{
+    if (player < PLAYER_RED || player > PLAYER_BLACK)
+    {
+        player = PLAYER_NONE;
+    }
+
+    show_centered_status_internal(text, tone, player);
 }
 
 bool uiHasCenteredStatus(void)
@@ -436,11 +475,16 @@ enum UiNotificationTone uiGetCenteredStatusTone(void)
     return gCenteredStatusTone;
 }
 
+enum PlayerType uiGetCenteredStatusPlayer(void)
+{
+    return gCenteredStatusPlayer;
+}
+
 float uiGetCenteredStatusAlpha(void)
 {
-    const float fadeIn = 0.16f;
-    const float hold = 2.25f;
-    const float fadeOut = 0.34f;
+    const float fadeIn = 0.14f;
+    const float hold = 2.40f;
+    const float fadeOut = 0.36f;
     const float totalDuration = fadeIn + hold + fadeOut;
     const float elapsed = gCenteredStatusStartTime < 0.0 ? totalDuration : (float)(GetTime() - gCenteredStatusStartTime);
 
@@ -469,9 +513,9 @@ float uiGetCenteredStatusAlpha(void)
 
 float uiGetCenteredStatusVerticalOffset(void)
 {
-    const float fadeIn = 0.16f;
-    const float hold = 2.25f;
-    const float fadeOut = 0.34f;
+    const float fadeIn = 0.14f;
+    const float hold = 2.40f;
+    const float fadeOut = 0.36f;
     const float totalDuration = fadeIn + hold + fadeOut;
     const float elapsed = gCenteredStatusStartTime < 0.0 ? totalDuration : (float)(GetTime() - gCenteredStatusStartTime);
 
@@ -481,11 +525,11 @@ float uiGetCenteredStatusVerticalOffset(void)
     }
     if (elapsed <= 0.0f)
     {
-        return -26.0f;
+        return -44.0f;
     }
     if (elapsed < fadeIn)
     {
-        return -26.0f + 26.0f * (elapsed / fadeIn);
+        return -44.0f + 44.0f * (elapsed / fadeIn);
     }
     if (elapsed < fadeIn + hold)
     {
@@ -493,9 +537,55 @@ float uiGetCenteredStatusVerticalOffset(void)
     }
     if (elapsed < totalDuration)
     {
-        return 22.0f * ((elapsed - fadeIn - hold) / fadeOut);
+        return 28.0f * ((elapsed - fadeIn - hold) / fadeOut);
     }
-    return 22.0f;
+    return 28.0f;
+}
+
+float uiGetCenteredStatusEmphasis(void)
+{
+    const float duration = 0.58f;
+    const float elapsed = gCenteredStatusStartTime < 0.0 ? duration : (float)(GetTime() - gCenteredStatusStartTime);
+
+    if (gCenteredStatusText[0] == '\0')
+    {
+        return 0.0f;
+    }
+    if (elapsed <= 0.0f)
+    {
+        return 1.0f;
+    }
+    if (elapsed >= duration)
+    {
+        return 0.0f;
+    }
+
+    return 1.0f - elapsed / duration;
+}
+
+float uiGetTurnAnnouncementEmphasis(void)
+{
+    const double durationSeconds = 1.45;
+    double elapsed = 0.0;
+
+    if (gTurnAnnouncementStartTime < 0.0 ||
+        gTurnAnnouncementPlayer < PLAYER_RED ||
+        gTurnAnnouncementPlayer > PLAYER_BLACK)
+    {
+        return 0.0f;
+    }
+
+    elapsed = GetTime() - gTurnAnnouncementStartTime;
+    if (elapsed >= durationSeconds)
+    {
+        return 0.0f;
+    }
+    if (elapsed <= 0.0)
+    {
+        return 1.0f;
+    }
+
+    return (float)(1.0 - elapsed / durationSeconds);
 }
 
 void uiToggleTradeMenu(void)
@@ -543,6 +633,7 @@ void uiToggleSettingsMenu(void)
     gSettingsMenuOpen = !gSettingsMenuOpen;
     if (!gSettingsMenuOpen)
     {
+        gSettingsSubmenuOpen = false;
         gSettingsMultiplayerInfoExpanded = false;
         gSettingsConfirmAction = UI_SETTINGS_CONFIRM_NONE;
     }
@@ -553,6 +644,7 @@ void uiSetSettingsMenuOpen(bool open)
     gSettingsMenuOpen = open;
     if (!open)
     {
+        gSettingsSubmenuOpen = false;
         gSettingsMultiplayerInfoExpanded = false;
         gSettingsConfirmAction = UI_SETTINGS_CONFIRM_NONE;
     }
@@ -568,14 +660,34 @@ float uiGetSettingsMenuOpenAmount(void)
     return gSettingsMenuOpenAmount;
 }
 
+void uiSetSettingsSubmenuOpen(bool open)
+{
+    gSettingsSubmenuOpen = open;
+}
+
+bool uiIsSettingsSubmenuOpen(void)
+{
+    return gSettingsSubmenuOpen;
+}
+
 void uiToggleSettingsMultiplayerInfoExpanded(void)
 {
+    const struct MatchSession *session = matchSessionGetActive();
+
+    if (!matchSessionIsNetplay(session))
+    {
+        gSettingsMultiplayerInfoExpanded = false;
+        return;
+    }
+
     gSettingsMultiplayerInfoExpanded = !gSettingsMultiplayerInfoExpanded;
 }
 
 void uiSetSettingsMultiplayerInfoExpanded(bool expanded)
 {
-    gSettingsMultiplayerInfoExpanded = expanded;
+    const struct MatchSession *session = matchSessionGetActive();
+
+    gSettingsMultiplayerInfoExpanded = matchSessionIsNetplay(session) && expanded;
 }
 
 bool uiIsSettingsMultiplayerInfoExpanded(void)
@@ -591,6 +703,41 @@ void uiSetTheme(enum UiTheme theme)
 enum UiTheme uiGetTheme(void)
 {
     return gTheme;
+}
+
+static void apply_window_mode(enum UiWindowMode mode)
+{
+    if (mode != UI_WINDOW_MODE_FULLSCREEN)
+    {
+        mode = UI_WINDOW_MODE_WINDOWED;
+    }
+
+    if (mode == UI_WINDOW_MODE_FULLSCREEN)
+    {
+        if (!IsWindowFullscreen())
+        {
+            const int monitor = GetCurrentMonitor();
+            SetWindowSize(GetMonitorWidth(monitor), GetMonitorHeight(monitor));
+            ToggleFullscreen();
+        }
+    }
+    else if (IsWindowFullscreen())
+    {
+        ToggleFullscreen();
+    }
+
+    gWindowMode = mode;
+}
+
+void uiSetWindowMode(enum UiWindowMode mode)
+{
+    apply_window_mode(mode);
+}
+
+enum UiWindowMode uiGetWindowMode(void)
+{
+    gWindowMode = IsWindowFullscreen() ? UI_WINDOW_MODE_FULLSCREEN : UI_WINDOW_MODE_WINDOWED;
+    return gWindowMode;
 }
 
 void uiSetAiSpeedSetting(int speed)
@@ -1029,6 +1176,8 @@ void uiRecordStructurePlacement(int x, int y)
 
 float uiGetStructurePlacementPopAmount(int x, int y)
 {
+    const double duration = 0.42;
+
     if (gLastStructurePlacementTime < 0.0)
     {
         return 0.0f;
@@ -1040,12 +1189,12 @@ float uiGetStructurePlacementPopAmount(int x, int y)
     }
 
     const double elapsed = GetTime() - gLastStructurePlacementTime;
-    if (elapsed < 0.0 || elapsed > 0.24)
+    if (elapsed < 0.0 || elapsed > duration)
     {
         return 0.0f;
     }
 
-    return 1.0f - (float)(elapsed / 0.24);
+    return 1.0f - (float)(elapsed / duration);
 }
 
 static void update_build_panel_animation(void)
@@ -1251,6 +1400,8 @@ static void update_player_delta_notifications(const struct Map *map)
     {
         snapshot_player_delta_state(map);
         gTrackedCurrentPlayer = map->currentPlayer;
+        gTurnAnnouncementPlayer = map->currentPlayer;
+        gTurnAnnouncementStartTime = GetTime();
         memset(gCurrentTurnResourceGain, 0, sizeof(gCurrentTurnResourceGain));
         gPlayerDeltaTrackerInitialized = true;
         localTurnStarted = localPlayer != PLAYER_NONE && map->currentPlayer == localPlayer;
@@ -1265,6 +1416,8 @@ static void update_player_delta_notifications(const struct Map *map)
     {
         dismiss_player_notifications();
         gTrackedCurrentPlayer = map->currentPlayer;
+        gTurnAnnouncementPlayer = map->currentPlayer;
+        gTurnAnnouncementStartTime = GetTime();
         memset(gCurrentTurnResourceGain, 0, sizeof(gCurrentTurnResourceGain));
         gRecentRollHighlightValue = 0;
         gRecentRollHighlightStartTime = -1.0;
@@ -1490,12 +1643,12 @@ static void show_local_resource_feedback(const struct Map *map, enum PlayerType 
     char resourceText[128];
     char message[192];
 
-    if (showedStatus != NULL)
+    if (map == NULL || localPlayer == PLAYER_NONE)
     {
-        *showedStatus = false;
+        return;
     }
 
-    if (map == NULL || localPlayer == PLAYER_NONE)
+    if (showedStatus != NULL && *showedStatus)
     {
         return;
     }

@@ -56,6 +56,8 @@ static Vector2 TransformCardPoint(Rectangle bounds, float rotationDegrees, Vecto
 static void DrawCardText(Font font, Rectangle bounds, float rotationDegrees, Vector2 localPoint, const char *text, int fontSize, Color color);
 static int BuildDevelopmentHandLayout(const struct Map *map, struct DevelopmentHandCard cards[DEVELOPMENT_CARD_COUNT]);
 static int BuildWrappedUiLines(const char *message, int fontSize, int maxWidth, char lines[][96], int maxLines);
+static int FitUiTextFontSize(const char *text, int preferredFontSize, int minFontSize, int maxWidth);
+static int BuildWrappedUiLinesFitted(const char *message, int preferredFontSize, int minFontSize, int maxWidth, char lines[][96], int maxLines, int *outFontSize);
 static int DrawWrappedUiTextBlock(const char *message, float x, float y, int fontSize, int maxWidth, float lineHeight, Color color);
 static Rectangle DevelopmentHandHitBounds(Rectangle bounds);
 static void DrawAwardCard(Rectangle bounds, const char *title, const char *subtitle, const char *detail, enum PlayerType owner, Color accent);
@@ -64,239 +66,9 @@ static void BuildVictorySubheadline(const struct Map *map, enum PlayerType winne
 static void FormatElapsedDuration(unsigned long long totalSeconds, char *buffer, size_t bufferSize);
 static void DrawTurnPanelPlaytime(const struct Map *map, Rectangle panel, Color color);
 static const char *NetplayStatusLabel(const struct MatchSession *session);
-static const char *MaskIpForSettings(const char *ipAddress, char *buffer, size_t bufferSize);
 
-static const char *MaskIpForSettings(const char *ipAddress, char *buffer, size_t bufferSize)
-{
-    const char *lastDot = NULL;
-    size_t prefixLength = 0u;
-
-    if (buffer == NULL || bufferSize == 0u)
-    {
-        return "***.***.***.***";
-    }
-
-    if (ipAddress == NULL || ipAddress[0] == '\0')
-    {
-        snprintf(buffer, bufferSize, "%s", "***.***.***.***");
-        return buffer;
-    }
-
-    lastDot = strrchr(ipAddress, '.');
-    if (lastDot == NULL)
-    {
-        snprintf(buffer, bufferSize, "%s", "***.***.***.***");
-        return buffer;
-    }
-
-    prefixLength = (size_t)(lastDot - ipAddress);
-    if (prefixLength + 5u >= bufferSize)
-    {
-        snprintf(buffer, bufferSize, "%s", "***.***.***.***");
-        return buffer;
-    }
-
-    memcpy(buffer, ipAddress, prefixLength);
-    buffer[prefixLength] = '\0';
-    strncat(buffer, ".***", bufferSize - strlen(buffer) - 1u);
-    return buffer;
-}
-
-static int BuildWrappedUiLines(const char *message, int fontSize, int maxWidth, char lines[][96], int maxLines)
-{
-    char textBuffer[192];
-    int lineCount = 0;
-    char *paragraph = NULL;
-
-    if (message == NULL || message[0] == '\0' || lines == NULL || maxLines <= 0)
-    {
-        return 0;
-    }
-
-    strncpy(textBuffer, message, sizeof(textBuffer) - 1);
-    textBuffer[sizeof(textBuffer) - 1] = '\0';
-    paragraph = textBuffer;
-    while (paragraph != NULL && lineCount < maxLines)
-    {
-        char currentLine[96] = {0};
-        char *nextParagraph = strchr(paragraph, '\n');
-        char *word = NULL;
-
-        if (nextParagraph != NULL)
-        {
-            *nextParagraph = '\0';
-            nextParagraph++;
-        }
-
-        word = strtok(paragraph, " ");
-        while (word != NULL && lineCount < maxLines)
-        {
-            char candidate[96] = {0};
-
-            if (currentLine[0] != '\0')
-            {
-                strncpy(candidate, currentLine, sizeof(candidate) - 1);
-                strncat(candidate, " ", sizeof(candidate) - strlen(candidate) - 1);
-                strncat(candidate, word, sizeof(candidate) - strlen(candidate) - 1);
-            }
-            else
-            {
-                strncpy(candidate, word, sizeof(candidate) - 1);
-            }
-
-            if (currentLine[0] != '\0' && MeasureUiText(candidate, fontSize) > maxWidth)
-            {
-                strncpy(lines[lineCount], currentLine, 95);
-                lines[lineCount][95] = '\0';
-                lineCount++;
-                currentLine[0] = '\0';
-                if (lineCount >= maxLines)
-                {
-                    break;
-                }
-                strncpy(currentLine, word, sizeof(currentLine) - 1);
-            }
-            else
-            {
-                strncpy(currentLine, candidate, sizeof(currentLine) - 1);
-            }
-
-            word = strtok(NULL, " ");
-        }
-
-        if (lineCount < maxLines && currentLine[0] != '\0')
-        {
-            strncpy(lines[lineCount], currentLine, 95);
-            lines[lineCount][95] = '\0';
-            lineCount++;
-        }
-
-        paragraph = nextParagraph;
-    }
-
-    return lineCount;
-}
-
-static int DrawWrappedUiTextBlock(const char *message, float x, float y, int fontSize, int maxWidth, float lineHeight, Color color)
-{
-    char lines[3][96] = {{0}};
-    const int lineCount = BuildWrappedUiLines(message, fontSize, maxWidth, lines, 3);
-
-    for (int i = 0; i < lineCount; i++)
-    {
-        DrawUiText(lines[i], x, y + (float)i * lineHeight, fontSize, color);
-    }
-
-    return lineCount;
-}
-
-static void BuildVictoryHeadline(const struct Map *map, enum PlayerType winner, char *buffer, size_t bufferSize)
-{
-    const enum PlayerType localHuman = LocalHumanPlayer(map);
-
-    if (buffer == NULL || bufferSize == 0)
-    {
-        return;
-    }
-
-    if (localHuman != PLAYER_NONE)
-    {
-        snprintf(buffer, bufferSize, "%s", winner == localHuman ? loc("You won") : loc("You lost"));
-        return;
-    }
-
-    snprintf(buffer, bufferSize, loc("%s won"), PlayerName(winner));
-}
-
-static void BuildVictorySubheadline(const struct Map *map, enum PlayerType winner, char *buffer, size_t bufferSize)
-{
-    const enum PlayerType localHuman = LocalHumanPlayer(map);
-
-    if (buffer == NULL || bufferSize == 0)
-    {
-        return;
-    }
-
-    if (localHuman != PLAYER_NONE)
-    {
-        if (winner == localHuman)
-        {
-            snprintf(buffer, bufferSize, "%s", loc("You reached 10 points"));
-        }
-        else
-        {
-            snprintf(buffer, bufferSize, loc("%s won"), PlayerName(winner));
-        }
-        return;
-    }
-
-    snprintf(buffer, bufferSize, loc("%s reaches 10 points"), PlayerName(winner));
-}
-
-static void FormatElapsedDuration(unsigned long long totalSeconds, char *buffer, size_t bufferSize)
-{
-    const unsigned long long hours = totalSeconds / 3600ULL;
-    const unsigned long long minutes = (totalSeconds % 3600ULL) / 60ULL;
-    const unsigned long long seconds = totalSeconds % 60ULL;
-
-    if (buffer == NULL || bufferSize == 0)
-    {
-        return;
-    }
-
-    if (hours > 0ULL)
-    {
-        snprintf(buffer, bufferSize, "%llu:%02llu:%02llu", hours, minutes, seconds);
-        return;
-    }
-
-    snprintf(buffer, bufferSize, "%02llu:%02llu", minutes, seconds);
-}
-
-static void DrawTurnPanelPlaytime(const struct Map *map, Rectangle panel, Color color)
-{
-    char duration[24];
-    char label[48];
-    const int fontSize = 16;
-    int width = 0;
-
-    if (map == NULL || gameHasWinner(map))
-    {
-        return;
-    }
-
-    FormatElapsedDuration(uiGetCurrentMatchPlaytimeSeconds(), duration, sizeof(duration));
-    snprintf(label, sizeof(label), loc("Playtime %s"), duration);
-    width = MeasureUiText(label, fontSize);
-    DrawUiText(label, panel.x + panel.width - 16.0f - width, panel.y + 18.0f, fontSize, color);
-}
-
-static const char *NetplayStatusLabel(const struct MatchSession *session)
-{
-    if (session == NULL || !matchSessionIsNetplay(session))
-    {
-        return "";
-    }
-
-    switch (matchSessionGetConnectionStatus(session))
-    {
-    case MATCH_CONNECTION_WAITING_FOR_PLAYER:
-        return loc("Waiting for remote player...");
-    case MATCH_CONNECTION_CONNECTING:
-        return loc("Connecting to host...");
-    case MATCH_CONNECTION_SYNCING:
-        return loc("Syncing match state...");
-    case MATCH_CONNECTION_CONNECTED:
-        return loc("Private multiplayer connected");
-    case MATCH_CONNECTION_DISCONNECTED:
-        return loc("Disconnected from remote player");
-    case MATCH_CONNECTION_ERROR:
-        return loc("Private multiplayer error");
-    case MATCH_CONNECTION_LOCAL:
-    default:
-        return "";
-    }
-}
+/* Shared UI copy/layout helpers stay file-local without bloating the main UI file. */
+#include "renderer_ui_common.inc"
 
 void DrawBuildPanel(const struct Map *map)
 {
@@ -403,169 +175,254 @@ void DrawSettingsButton(void)
 
 void DrawSettingsModal(void)
 {
-    const Rectangle targetPanel = GetSettingsModalBounds();
+    const Rectangle targetMenu = GetSettingsModalBounds();
+    const Rectangle targetSubmenu = GetSettingsSubmenuBounds();
+    const Rectangle targetMultiplayer = GetSettingsMultiplayerPanelBounds();
     const float openAmount = uiGetSettingsMenuOpenAmount();
     const float eased = openAmount * openAmount * (3.0f - 2.0f * openAmount);
     const float scale = 0.9f + 0.1f * eased;
-    const Rectangle panel = {
-        targetPanel.x + targetPanel.width * (1.0f - scale) * 0.5f,
-        targetPanel.y + targetPanel.height * (1.0f - scale) * 0.5f,
-        targetPanel.width * scale,
-        targetPanel.height * scale};
-    const Rectangle closeButton = {panel.x + panel.width - 42.0f, panel.y + 12.0f, 28.0f, 28.0f};
-    const Rectangle lightButton = {panel.x + 24.0f, panel.y + 82.0f, panel.width - 48.0f, 42.0f};
-    const Rectangle darkButton = {panel.x + 24.0f, panel.y + 136.0f, panel.width - 48.0f, 42.0f};
-    const Rectangle languageButton = {panel.x + 24.0f, panel.y + 222.0f, panel.width - 48.0f, 42.0f};
-    const Rectangle aiSpeedTrack = {panel.x + 36.0f, panel.y + 318.0f, panel.width - 72.0f, 10.0f};
-    const bool showMultiplayerInfo = uiIsSettingsMultiplayerInfoExpanded();
-    const Rectangle multiplayerInfoButton = {panel.x + 24.0f, panel.y + 376.0f, panel.width - 48.0f, 42.0f};
-    const float multiplayerInfoExtra = showMultiplayerInfo ? 62.0f : 0.0f;
-    const float gameSectionY = panel.y + 422.0f + multiplayerInfoExtra;
-    const Rectangle restartButton = {panel.x + 24.0f, gameSectionY + 24.0f, panel.width - 48.0f, 42.0f};
-    const Rectangle backToMenuButton = {panel.x + 24.0f, gameSectionY + 78.0f, panel.width - 48.0f, 42.0f};
-    const Rectangle quitButton = {panel.x + 24.0f, gameSectionY + 132.0f, panel.width - 48.0f, 42.0f};
-    const Rectangle confirmPanel = {panel.x + 26.0f, restartButton.y - 18.0f, panel.width - 52.0f, 140.0f};
-    const Rectangle confirmButton = {confirmPanel.x + 18.0f, confirmPanel.y + confirmPanel.height - 46.0f, 132.0f, 30.0f};
+    const Rectangle menuPanel = ScaleRectangleFromCenter(targetMenu, scale);
+    const Rectangle submenuPanel = ScaleRectangleFromCenter(targetSubmenu, scale);
+    const Rectangle multiplayerPanel = ScaleRectangleFromCenter(targetMultiplayer, scale);
+    const Rectangle closeButton = {menuPanel.x + menuPanel.width - 42.0f, menuPanel.y + 12.0f, 28.0f, 28.0f};
+    const Rectangle settingsButton = {menuPanel.x + 24.0f, menuPanel.y + 82.0f, menuPanel.width - 48.0f, 42.0f};
+    const Rectangle restartButton = {menuPanel.x + 24.0f, menuPanel.y + 136.0f, menuPanel.width - 48.0f, 42.0f};
+    const Rectangle backToMenuButton = {menuPanel.x + 24.0f, menuPanel.y + 190.0f, menuPanel.width - 48.0f, 42.0f};
+    const Rectangle quitButton = {menuPanel.x + 24.0f, menuPanel.y + 244.0f, menuPanel.width - 48.0f, 42.0f};
+    const Rectangle confirmPanel = {menuPanel.x + 18.0f, menuPanel.y + menuPanel.height - 166.0f, menuPanel.width - 36.0f, 150.0f};
+    const Rectangle confirmButton = {confirmPanel.x + 18.0f, confirmPanel.y + confirmPanel.height - 46.0f, 144.0f, 30.0f};
     const Rectangle cancelButton = {confirmPanel.x + confirmPanel.width - 110.0f, confirmPanel.y + confirmPanel.height - 46.0f, 92.0f, 30.0f};
+    const bool submenuOpen = uiIsSettingsSubmenuOpen();
+    const struct MatchSession *session = matchSessionGetActive();
+    const bool showNetplayPanel = matchSessionIsNetplay(session);
     const Color panelColor = (Color){244, 236, 217, 250};
     const Color borderColor = (Color){118, 88, 56, 255};
     const Color textColor = (Color){54, 39, 29, 255};
     const Color mutedText = (Color){92, 70, 50, 255};
+    const Color sectionFill = (Color){236, 228, 208, 255};
+    const Color sectionBorder = (Color){154, 132, 108, 255};
+    const Color accent = (Color){171, 82, 54, 255};
     const bool lightSelected = uiGetTheme() == UI_THEME_LIGHT;
     const bool darkSelected = uiGetTheme() == UI_THEME_DARK;
     const enum UiSettingsConfirmAction confirmAction = uiGetSettingsConfirmAction();
     const bool showingConfirm = confirmAction != UI_SETTINGS_CONFIRM_NONE;
+    const enum UiWindowMode windowMode = uiGetWindowMode();
     const int aiSpeed = uiGetAiSpeedSetting();
     const float aiSpeedNormalized = (float)aiSpeed / 10.0f;
-    const float aiSpeedKnobX = aiSpeedTrack.x + aiSpeedTrack.width * aiSpeedNormalized;
-    const struct MatchSession *session = matchSessionGetActive();
     const Vector2 mouse = GetMousePosition();
     const char *localIp = "";
-    char maskedIp[32];
+    char portValue[16];
     char ipLine[96];
     char portLine[64];
-    const Rectangle multiplayerIpHoverRow = {panel.x + 24.0f, multiplayerInfoButton.y + 68.0f, panel.width - 48.0f, 20.0f};
-    const bool revealLocalIp = CheckCollisionPointRec(mouse, multiplayerIpHoverRow);
-    char languageButtonLabel[64];
+    char themeLabel[48];
+    char displayLabel[48];
+    char languageLabel[64];
+    const Rectangle submenuCloseButton = {submenuPanel.x + submenuPanel.width - 42.0f, submenuPanel.y + 12.0f, 28.0f, 28.0f};
+    const Rectangle lightButton = {submenuPanel.x + 24.0f, submenuPanel.y + 82.0f, submenuPanel.width - 48.0f, 42.0f};
+    const Rectangle darkButton = {submenuPanel.x + 24.0f, submenuPanel.y + 136.0f, submenuPanel.width - 48.0f, 42.0f};
+    const Rectangle windowModeButton = {submenuPanel.x + 24.0f, submenuPanel.y + 190.0f, submenuPanel.width - 48.0f, 42.0f};
+    const Rectangle languageButton = {submenuPanel.x + 24.0f, submenuPanel.y + 244.0f, submenuPanel.width - 48.0f, 42.0f};
+    const Rectangle aiSpeedTrack = {submenuPanel.x + 36.0f, submenuPanel.y + 336.0f, submenuPanel.width - 72.0f, 10.0f};
+    const float aiSpeedKnobX = aiSpeedTrack.x + aiSpeedTrack.width * aiSpeedNormalized;
+    const Rectangle multiplayerIpRow = {multiplayerPanel.x + 18.0f, multiplayerPanel.y + 74.0f, multiplayerPanel.width - 36.0f, 34.0f};
+    const Rectangle multiplayerPortRow = {multiplayerPanel.x + 18.0f, multiplayerPanel.y + 116.0f, multiplayerPanel.width - 36.0f, 34.0f};
+    const bool revealLocalIp = CheckCollisionPointRec(mouse, multiplayerIpRow);
+    const bool revealPort = CheckCollisionPointRec(mouse, multiplayerPortRow);
+    char confirmTitleLines[2][96] = {{0}};
+    char confirmBodyLines[3][96] = {{0}};
+    const char *confirmTitle = "";
+    const char *confirmBody = "";
+    const char *confirmButtonLabel = "";
+    Color confirmButtonColor = (Color){182, 141, 97, 255};
+    int confirmTitleFont = 24;
+    int confirmBodyFont = 17;
+    int confirmTitleLineCount = 0;
+    int confirmBodyLineCount = 0;
+    int confirmButtonFont = 17;
+    int cancelButtonFont = 17;
 
     if (session != NULL && session->netplay != NULL)
     {
         localIp = netplayGetLocalAddress(session->netplay);
     }
-    snprintf(ipLine, sizeof(ipLine), "%s: %s", loc("Your IP"), revealLocalIp ? (localIp[0] != '\0' ? localIp : "-") : MaskIpForSettings(localIp, maskedIp, sizeof(maskedIp)));
-    snprintf(portLine, sizeof(portLine), "%s: %u", loc("Port"), (unsigned int)((session != NULL && session->netplay != NULL) ? netplayGetPort(session->netplay) : 0u));
 
-    snprintf(languageButtonLabel, sizeof(languageButtonLabel), "%s: %s", loc("Language"), locLanguageDisplayName(locGetLanguage()));
+    snprintf(themeLabel,
+             sizeof(themeLabel),
+             loc("Theme: %s"),
+             uiGetTheme() == UI_THEME_DARK ? loc("Dark") : loc("Light"));
+    snprintf(displayLabel,
+             sizeof(displayLabel),
+             "%s: %s",
+             loc("Display Mode"),
+             loc(windowMode == UI_WINDOW_MODE_FULLSCREEN ? "Fullscreen" : "Windowed"));
+    snprintf(languageLabel,
+             sizeof(languageLabel),
+             loc("Language: %s"),
+             locLanguageDisplayName(locGetLanguage()));
+
+    snprintf(ipLine,
+             sizeof(ipLine),
+             "%s: %s",
+             loc("Your IP"),
+             revealLocalIp ? (localIp[0] != '\0' ? localIp : "-") : "***.***.***.***");
+    snprintf(portValue, sizeof(portValue), "%s", revealPort ? TextFormat("%u", (unsigned int)((session != NULL && session->netplay != NULL) ? netplayGetPort(session->netplay) : 0u)) : "*****");
+    snprintf(portLine, sizeof(portLine), "%s: %s", loc("Port"), portValue);
 
     DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, 0.24f * eased));
-    DrawRectangleRounded((Rectangle){panel.x + 8.0f, panel.y + 10.0f, panel.width, panel.height}, 0.06f, 8, Fade(BLACK, 0.14f * eased));
-    DrawRectangleRounded(panel, 0.06f, 8, Fade(panelColor, eased));
-    DrawRectangleLinesEx(panel, 2.0f, Fade(borderColor, eased));
+    DrawRectangleRounded((Rectangle){menuPanel.x + 8.0f, menuPanel.y + 10.0f, menuPanel.width, menuPanel.height}, 0.08f, 8, Fade(BLACK, 0.14f * eased));
+    DrawRectangleRounded(menuPanel, 0.08f, 8, Fade(panelColor, eased));
+    DrawRectangleLinesEx(menuPanel, 2.0f, Fade(borderColor, eased));
+
+    if (submenuOpen)
+    {
+        DrawRectangleRounded((Rectangle){submenuPanel.x + 8.0f, submenuPanel.y + 10.0f, submenuPanel.width, submenuPanel.height}, 0.08f, 8, Fade(BLACK, 0.12f * eased));
+        DrawRectangleRounded(submenuPanel, 0.08f, 8, Fade(panelColor, eased));
+        DrawRectangleLinesEx(submenuPanel, 2.0f, Fade(borderColor, eased));
+    }
+
+    if (showNetplayPanel)
+    {
+        DrawRectangleRounded((Rectangle){multiplayerPanel.x + 8.0f, multiplayerPanel.y + 10.0f, multiplayerPanel.width, multiplayerPanel.height}, 0.08f, 8, Fade(BLACK, 0.12f * eased));
+        DrawRectangleRounded(multiplayerPanel, 0.08f, 8, Fade(panelColor, eased));
+        DrawRectangleLinesEx(multiplayerPanel, 2.0f, Fade(borderColor, eased));
+    }
+
     if (openAmount < 0.90f)
     {
         return;
     }
 
-    DrawUiText(loc("Settings"), panel.x + 22.0f, panel.y + 16.0f, 28, textColor);
-    DrawUiText(loc("Theme"), panel.x + 22.0f, panel.y + 52.0f, 18, mutedText);
+    DrawUiText(loc("Menu"), menuPanel.x + 22.0f, menuPanel.y + 18.0f, 28, textColor);
     DrawRectangleRounded(closeButton, 0.22f, 6, (Color){224, 216, 198, 255});
     DrawRectangleLinesEx(closeButton, 1.5f, borderColor);
     DrawUiText("X", closeButton.x + 9.0f, closeButton.y + 4.0f, 20, textColor);
 
-    DrawRectangleRounded(lightButton, 0.18f, 8, lightSelected ? (Color){171, 82, 54, 255} : (Color){236, 228, 208, 255});
-    DrawRectangleLinesEx(lightButton, 2.0f, lightSelected ? borderColor : (Color){154, 132, 108, 255});
-    DrawUiText(loc("Light Mode"), lightButton.x + 18.0f, lightButton.y + 10.0f, 20, lightSelected ? RAYWHITE : textColor);
+    DrawRectangleRounded(settingsButton, 0.18f, 8, submenuOpen ? accent : sectionFill);
+    DrawRectangleLinesEx(settingsButton, 2.0f, submenuOpen ? borderColor : sectionBorder);
+    DrawUiText(loc("Settings"), settingsButton.x + 18.0f, settingsButton.y + 10.0f, 20, submenuOpen ? RAYWHITE : textColor);
 
-    DrawRectangleRounded(darkButton, 0.18f, 8, darkSelected ? (Color){171, 82, 54, 255} : (Color){236, 228, 208, 255});
-    DrawRectangleLinesEx(darkButton, 2.0f, darkSelected ? borderColor : (Color){154, 132, 108, 255});
-    DrawUiText(loc("Dark Mode"), darkButton.x + 18.0f, darkButton.y + 10.0f, 20, darkSelected ? RAYWHITE : textColor);
-
-    DrawUiText(loc("Language"), panel.x + 22.0f, panel.y + 192.0f, 18, mutedText);
-    DrawRectangleRounded(languageButton, 0.18f, 8, (Color){236, 228, 208, 255});
-    DrawRectangleLinesEx(languageButton, 2.0f, (Color){154, 132, 108, 255});
-    DrawUiText(languageButtonLabel, languageButton.x + 18.0f, languageButton.y + 10.0f, 20, textColor);
-
-    DrawUiText(loc("AI Speed"), panel.x + 22.0f, panel.y + 276.0f, 18, mutedText);
-    DrawUiText(loc("0 slow"), aiSpeedTrack.x, aiSpeedTrack.y + 16.0f, 14, mutedText);
-    DrawUiText(loc("10 instant"), aiSpeedTrack.x + aiSpeedTrack.width - MeasureUiText(loc("10 instant"), 14), aiSpeedTrack.y + 16.0f, 14, mutedText);
-    DrawRectangleRounded(aiSpeedTrack, 0.45f, 8, (Color){224, 216, 198, 255});
-    DrawRectangleRounded((Rectangle){aiSpeedTrack.x, aiSpeedTrack.y, aiSpeedTrack.width * aiSpeedNormalized, aiSpeedTrack.height}, 0.45f, 8, (Color){171, 82, 54, 255});
-    DrawCircleV((Vector2){aiSpeedKnobX, aiSpeedTrack.y + aiSpeedTrack.height * 0.5f}, 9.0f, (Color){247, 240, 226, 255});
-    DrawCircleLines((int)aiSpeedKnobX, (int)(aiSpeedTrack.y + aiSpeedTrack.height * 0.5f), 9.0f, borderColor);
-    DrawUiText(TextFormat("%d", aiSpeed), panel.x + panel.width * 0.5f - 5.0f, aiSpeedTrack.y - 24.0f, 18, textColor);
-
-    DrawUiText(loc("Multiplayer"), panel.x + 22.0f, panel.y + 352.0f, 18, mutedText);
-    DrawRectangleRounded(multiplayerInfoButton, 0.18f, 8, showMultiplayerInfo ? (Color){171, 82, 54, 255} : (Color){236, 228, 208, 255});
-    DrawRectangleLinesEx(multiplayerInfoButton, 2.0f, showMultiplayerInfo ? borderColor : (Color){154, 132, 108, 255});
-    DrawUiText(showMultiplayerInfo ? loc("Hide Multiplayer Info") : loc("Show Multiplayer Info"), multiplayerInfoButton.x + 18.0f, multiplayerInfoButton.y + 10.0f, 20, showMultiplayerInfo ? RAYWHITE : textColor);
-
-    if (showMultiplayerInfo)
-    {
-        DrawUiText(loc("Host waits for one remote player."), panel.x + 26.0f, multiplayerInfoButton.y + 52.0f, 16, mutedText);
-        DrawUiText(ipLine, panel.x + 26.0f, multiplayerInfoButton.y + 74.0f, 16, mutedText);
-        DrawUiText(portLine, panel.x + 26.0f, multiplayerInfoButton.y + 96.0f, 16, mutedText);
-    }
-
-    DrawUiText(loc("Game"), panel.x + 22.0f, gameSectionY, 18, mutedText);
-
-    DrawRectangleRounded(restartButton, 0.18f, 8, (Color){236, 228, 208, 255});
-    DrawRectangleLinesEx(restartButton, 2.0f, (Color){154, 132, 108, 255});
+    DrawRectangleRounded(restartButton, 0.18f, 8, sectionFill);
+    DrawRectangleLinesEx(restartButton, 2.0f, sectionBorder);
     DrawUiText(loc("Restart Game"), restartButton.x + 18.0f, restartButton.y + 10.0f, 20, textColor);
 
-    DrawRectangleRounded(backToMenuButton, 0.18f, 8, (Color){236, 228, 208, 255});
-    DrawRectangleLinesEx(backToMenuButton, 2.0f, (Color){154, 132, 108, 255});
+    DrawRectangleRounded(backToMenuButton, 0.18f, 8, sectionFill);
+    DrawRectangleLinesEx(backToMenuButton, 2.0f, sectionBorder);
     DrawUiText(loc("Back to Menu"), backToMenuButton.x + 18.0f, backToMenuButton.y + 10.0f, 20, textColor);
 
-    DrawRectangleRounded(quitButton, 0.18f, 8, (Color){171, 82, 54, 255});
+    DrawRectangleRounded(quitButton, 0.18f, 8, accent);
     DrawRectangleLinesEx(quitButton, 2.0f, borderColor);
     DrawUiText(loc("Quit Game"), quitButton.x + 18.0f, quitButton.y + 10.0f, 20, RAYWHITE);
+
+    if (submenuOpen)
+    {
+        DrawUiText(loc("Settings"), submenuPanel.x + 22.0f, submenuPanel.y + 18.0f, 28, textColor);
+        DrawRectangleRounded(submenuCloseButton, 0.22f, 6, (Color){224, 216, 198, 255});
+        DrawRectangleLinesEx(submenuCloseButton, 1.5f, borderColor);
+        DrawUiText("X", submenuCloseButton.x + 9.0f, submenuCloseButton.y + 4.0f, 20, textColor);
+
+        DrawRectangleRounded(lightButton, 0.18f, 8, lightSelected ? accent : sectionFill);
+        DrawRectangleLinesEx(lightButton, 2.0f, lightSelected ? borderColor : sectionBorder);
+        DrawUiText(loc("Light Mode"), lightButton.x + 18.0f, lightButton.y + 10.0f, 20, lightSelected ? RAYWHITE : textColor);
+
+        DrawRectangleRounded(darkButton, 0.18f, 8, darkSelected ? accent : sectionFill);
+        DrawRectangleLinesEx(darkButton, 2.0f, darkSelected ? borderColor : sectionBorder);
+        DrawUiText(loc("Dark Mode"), darkButton.x + 18.0f, darkButton.y + 10.0f, 20, darkSelected ? RAYWHITE : textColor);
+
+        DrawRectangleRounded(windowModeButton, 0.18f, 8, windowMode == UI_WINDOW_MODE_FULLSCREEN ? accent : sectionFill);
+        DrawRectangleLinesEx(windowModeButton, 2.0f, windowMode == UI_WINDOW_MODE_FULLSCREEN ? borderColor : sectionBorder);
+        DrawUiText(displayLabel, windowModeButton.x + 18.0f, windowModeButton.y + 10.0f, 19, windowMode == UI_WINDOW_MODE_FULLSCREEN ? RAYWHITE : textColor);
+
+        DrawRectangleRounded(languageButton, 0.18f, 8, sectionFill);
+        DrawRectangleLinesEx(languageButton, 2.0f, sectionBorder);
+        DrawUiText(languageLabel, languageButton.x + 18.0f, languageButton.y + 10.0f, 20, textColor);
+
+        DrawUiText(loc("AI Speed"), submenuPanel.x + 24.0f, submenuPanel.y + 300.0f, 18, mutedText);
+        DrawUiText(loc("0 slow"), aiSpeedTrack.x, aiSpeedTrack.y + 16.0f, 14, mutedText);
+        DrawUiText(loc("10 instant"), aiSpeedTrack.x + aiSpeedTrack.width - MeasureUiText(loc("10 instant"), 14), aiSpeedTrack.y + 16.0f, 14, mutedText);
+        DrawRectangleRounded(aiSpeedTrack, 0.45f, 8, (Color){224, 216, 198, 255});
+        DrawRectangleRounded((Rectangle){aiSpeedTrack.x, aiSpeedTrack.y, aiSpeedTrack.width * aiSpeedNormalized, aiSpeedTrack.height}, 0.45f, 8, accent);
+        DrawCircleV((Vector2){aiSpeedKnobX, aiSpeedTrack.y + aiSpeedTrack.height * 0.5f}, 9.0f, (Color){247, 240, 226, 255});
+        DrawCircleLines((int)aiSpeedKnobX, (int)(aiSpeedTrack.y + aiSpeedTrack.height * 0.5f), 9.0f, borderColor);
+        DrawUiText(TextFormat("%d", aiSpeed), submenuPanel.x + submenuPanel.width * 0.5f - 5.0f, aiSpeedTrack.y - 24.0f, 18, textColor);
+
+        DrawUiText(themeLabel, submenuPanel.x + 24.0f, submenuPanel.y + 64.0f, 16, mutedText);
+    }
+
+    if (showNetplayPanel)
+    {
+        DrawUiText(loc("Multiplayer Options"), multiplayerPanel.x + 18.0f, multiplayerPanel.y + 18.0f, 24, textColor);
+        DrawRectangleRounded(multiplayerIpRow, 0.16f, 8, revealLocalIp ? Fade(accent, 0.16f) : Fade(sectionFill, 0.94f));
+        DrawRectangleLinesEx(multiplayerIpRow, 1.5f, revealLocalIp ? Fade(borderColor, 0.90f) : Fade(sectionBorder, 0.90f));
+        DrawUiText(ipLine, multiplayerIpRow.x + 12.0f, multiplayerIpRow.y + 8.0f, 17, textColor);
+
+        DrawRectangleRounded(multiplayerPortRow, 0.16f, 8, revealPort ? Fade(accent, 0.16f) : Fade(sectionFill, 0.94f));
+        DrawRectangleLinesEx(multiplayerPortRow, 1.5f, revealPort ? Fade(borderColor, 0.90f) : Fade(sectionBorder, 0.90f));
+        DrawUiText(portLine, multiplayerPortRow.x + 12.0f, multiplayerPortRow.y + 8.0f, 17, textColor);
+    }
 
     if (!showingConfirm)
     {
         return;
     }
 
-    DrawRectangleRounded((Rectangle){confirmPanel.x + 4.0f, confirmPanel.y + 6.0f, confirmPanel.width, confirmPanel.height}, 0.08f, 8, Fade(BLACK, 0.06f));
-    DrawRectangleRounded(confirmPanel, 0.08f, 8, (Color){248, 241, 225, 252});
-    DrawRectangleLinesEx(confirmPanel, 2.0f, borderColor);
-
     if (confirmAction == UI_SETTINGS_CONFIRM_MAIN_MENU)
     {
-        const char *confirmLabel = loc("Return to Menu");
-        const int confirmLabelWidth = MeasureUiText(confirmLabel, 17);
-        DrawUiText(loc("Back to main menu?"), confirmPanel.x + 18.0f, confirmPanel.y + 16.0f, 24, textColor);
-        DrawUiText(loc("Current progress will be lost."), confirmPanel.x + 18.0f, confirmPanel.y + 48.0f, 17, mutedText);
-        DrawRectangleRounded(confirmButton, 0.18f, 8, (Color){182, 141, 97, 255});
-        DrawRectangleLinesEx(confirmButton, 1.5f, borderColor);
-        DrawUiText(confirmLabel, confirmButton.x + confirmButton.width * 0.5f - confirmLabelWidth * 0.5f, confirmButton.y + 6.0f, 17, RAYWHITE);
+        confirmTitle = loc("Back to main menu?");
+        confirmBody = loc("Current progress will be lost.");
+        confirmButtonLabel = loc("Return to Menu");
     }
     else if (confirmAction == UI_SETTINGS_CONFIRM_RESTART)
     {
-        const char *confirmLabel = loc("Confirm Restart");
-        const int confirmLabelWidth = MeasureUiText(confirmLabel, 17);
-        DrawUiText(loc("Restart game?"), confirmPanel.x + 18.0f, confirmPanel.y + 16.0f, 24, textColor);
-        DrawUiText(loc("Current progress will be lost."), confirmPanel.x + 18.0f, confirmPanel.y + 48.0f, 17, mutedText);
-        DrawRectangleRounded(confirmButton, 0.18f, 8, (Color){182, 141, 97, 255});
-        DrawRectangleLinesEx(confirmButton, 1.5f, borderColor);
-        DrawUiText(confirmLabel, confirmButton.x + confirmButton.width * 0.5f - confirmLabelWidth * 0.5f, confirmButton.y + 6.0f, 17, RAYWHITE);
+        confirmTitle = loc("Restart game?");
+        confirmBody = loc("Current progress will be lost.");
+        confirmButtonLabel = loc("Confirm Restart");
     }
     else
     {
-        const char *confirmLabel = loc("Confirm Quit");
-        const int confirmLabelWidth = MeasureUiText(confirmLabel, 17);
-        DrawUiText(loc("Quit game?"), confirmPanel.x + 18.0f, confirmPanel.y + 16.0f, 24, textColor);
-        DrawUiText(loc("The application will close."), confirmPanel.x + 18.0f, confirmPanel.y + 48.0f, 17, mutedText);
-        DrawRectangleRounded(confirmButton, 0.18f, 8, (Color){171, 82, 54, 255});
+        confirmTitle = loc("Quit game?");
+        confirmBody = loc("The application will close.");
+        confirmButtonLabel = loc("Confirm Quit");
+        confirmButtonColor = accent;
+    }
+
+    confirmTitleLineCount = BuildWrappedUiLinesFitted(confirmTitle, 24, 18, (int)confirmPanel.width - 36, confirmTitleLines, 2, &confirmTitleFont);
+    confirmBodyLineCount = BuildWrappedUiLinesFitted(confirmBody, 17, 14, (int)confirmPanel.width - 36, confirmBodyLines, 3, &confirmBodyFont);
+
+    DrawRectangleRounded((Rectangle){confirmPanel.x + 4.0f, confirmPanel.y + 6.0f, confirmPanel.width, confirmPanel.height}, 0.08f, 8, Fade(BLACK, 0.08f));
+    DrawRectangleRounded(confirmPanel, 0.08f, 8, (Color){248, 241, 225, 252});
+    DrawRectangleLinesEx(confirmPanel, 2.0f, borderColor);
+
+    for (int i = 0; i < confirmTitleLineCount; i++)
+    {
+        DrawUiText(confirmTitleLines[i], confirmPanel.x + 18.0f, confirmPanel.y + 16.0f + (float)i * ((float)confirmTitleFont + 4.0f), confirmTitleFont, textColor);
+    }
+    for (int i = 0; i < confirmBodyLineCount; i++)
+    {
+        DrawUiText(
+            confirmBodyLines[i],
+            confirmPanel.x + 18.0f,
+            confirmPanel.y + 24.0f + (float)confirmTitleLineCount * ((float)confirmTitleFont + 4.0f) + (float)i * ((float)confirmBodyFont + 3.0f),
+            confirmBodyFont,
+            mutedText);
+    }
+
+    {
+        const int confirmLabelMaxWidth = (int)confirmButton.width - 20;
+        confirmButtonFont = FitUiTextFontSize(confirmButtonLabel, 17, 14, confirmLabelMaxWidth);
+        const int confirmLabelWidth = MeasureUiText(confirmButtonLabel, confirmButtonFont);
+        DrawRectangleRounded(confirmButton, 0.18f, 8, confirmButtonColor);
         DrawRectangleLinesEx(confirmButton, 1.5f, borderColor);
-        DrawUiText(confirmLabel, confirmButton.x + confirmButton.width * 0.5f - confirmLabelWidth * 0.5f, confirmButton.y + 6.0f, 17, RAYWHITE);
+        DrawUiText(confirmButtonLabel, confirmButton.x + confirmButton.width * 0.5f - confirmLabelWidth * 0.5f, confirmButton.y + confirmButton.height * 0.5f - (float)confirmButtonFont * 0.48f, confirmButtonFont, RAYWHITE);
     }
 
     {
         const char *cancelLabel = loc("Cancel");
-        const int cancelLabelWidth = MeasureUiText(cancelLabel, 17);
-    DrawRectangleRounded(cancelButton, 0.18f, 8, (Color){236, 228, 208, 255});
-    DrawRectangleLinesEx(cancelButton, 1.5f, (Color){154, 132, 108, 255});
-        DrawUiText(cancelLabel, cancelButton.x + cancelButton.width * 0.5f - cancelLabelWidth * 0.5f, cancelButton.y + 6.0f, 17, textColor);
+        const int cancelLabelMaxWidth = (int)cancelButton.width - 20;
+        cancelButtonFont = FitUiTextFontSize(cancelLabel, 17, 14, cancelLabelMaxWidth);
+        const int cancelLabelWidth = MeasureUiText(cancelLabel, cancelButtonFont);
+        DrawRectangleRounded(cancelButton, 0.18f, 8, sectionFill);
+        DrawRectangleLinesEx(cancelButton, 1.5f, sectionBorder);
+        DrawUiText(cancelLabel, cancelButton.x + cancelButton.width * 0.5f - cancelLabelWidth * 0.5f, cancelButton.y + cancelButton.height * 0.5f - (float)cancelButtonFont * 0.48f, cancelButtonFont, textColor);
     }
 }
 
@@ -1218,6 +1075,191 @@ void DrawOpponentVictoryBar(const struct Map *map)
     }
 }
 
+void DrawTurnBanner(const struct Map *map)
+{
+    const struct MatchSession *session = matchSessionGetActive();
+    const enum PlayerType currentPlayer = map != NULL ? map->currentPlayer : PLAYER_NONE;
+    enum PlayerType bannerPlayer = currentPlayer;
+    const enum PlayerType localHuman = LocalHumanPlayer(map);
+    const float emphasis = uiGetTurnAnnouncementEmphasis();
+    const float pulse = 0.5f + 0.5f * sinf((float)GetTime() * 3.8f);
+    bool currentPlayerValid = currentPlayer >= PLAYER_RED && currentPlayer <= PLAYER_BLACK;
+    bool currentHuman = false;
+    bool localTurn = false;
+    bool showHandoffHint = false;
+    int humanCount = 0;
+    const char *eyebrow = NULL;
+    const char *title = NULL;
+    const char *subtitle = "";
+    char subtitleLines[2][96] = {{0}};
+    const Color textColor = (Color){54, 39, 29, 255};
+    const Color mutedText = (Color){92, 70, 50, 255};
+    const float maxPanelWidth = (float)GetScreenWidth() - 20.0f;
+    float width = 336.0f + emphasis * 20.0f;
+    float height = 74.0f + emphasis * 6.0f;
+    float subtitleLineHeight = 0.0f;
+    float titleY = 0.0f;
+    float subtitleY = 0.0f;
+    Rectangle panel = {0};
+    Rectangle accentStrip = {0};
+    Color accent = {171, 82, 54, 255};
+    Color border = {118, 88, 56, 255};
+    Color panelColor = {247, 240, 226, 246};
+    int contentWidth = 0;
+    int eyebrowFont = 14;
+    int titleFont = 26 + (int)(emphasis * 2.0f);
+    int subtitleFont = 14;
+    int subtitleLineCount = 0;
+
+    if (map == NULL || gameHasWinner(map) || !currentPlayerValid)
+    {
+        return;
+    }
+
+    if (gameHasPendingDiscards(map))
+    {
+        bannerPlayer = gameGetCurrentDiscardPlayer(map);
+        currentPlayerValid = bannerPlayer >= PLAYER_RED && bannerPlayer <= PLAYER_BLACK;
+        if (!currentPlayerValid)
+        {
+            return;
+        }
+    }
+
+    currentHuman = map->players[bannerPlayer].controlMode != PLAYER_CONTROL_AI;
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        if (map->players[player].controlMode != PLAYER_CONTROL_AI)
+        {
+            humanCount++;
+        }
+    }
+
+    localTurn = localHuman != PLAYER_NONE && matchSessionLocalControlsPlayer(session, bannerPlayer);
+    if (!currentHuman && !localTurn)
+    {
+        return;
+    }
+
+    if (emphasis <= 0.02f)
+    {
+        return;
+    }
+
+    accent = PlayerColor(bannerPlayer);
+    border = ColorBrightness(accent, -0.36f);
+    panelColor = localTurn ? (Color){249, 242, 225, 252} : (Color){244, 236, 217, 244};
+
+    eyebrow = localTurn ? loc("Your turn.") : loc("Current Player");
+    title = PlayerName(bannerPlayer);
+
+    if (humanCount > 1 && localHuman == PLAYER_NONE && emphasis > 0.08f)
+    {
+        subtitle = loc("Pass the screen to continue");
+        showHandoffHint = true;
+    }
+    else if (map->phase == GAME_PHASE_SETUP)
+    {
+        subtitle = map->setupNeedsRoad ? loc("Place 1 road") : loc("Place 1 settlement");
+    }
+    else if (gameHasPendingDiscards(map))
+    {
+        subtitle = loc("Discard Cards");
+    }
+    else if (gameNeedsThiefPlacement(map))
+    {
+        subtitle = loc("Move Thief");
+    }
+    else if (gameNeedsThiefVictimSelection(map))
+    {
+        subtitle = loc("Steal Resource");
+    }
+    else if (localTurn && !map->rolledThisTurn)
+    {
+        subtitle = loc("Roll Dice (Enter)");
+    }
+    else if (localTurn && gameCanEndTurn(map))
+    {
+        subtitle = loc("End Turn");
+    }
+
+    width = 320.0f + emphasis * 18.0f;
+    height = 74.0f + emphasis * 4.0f;
+    eyebrowFont = 14;
+    titleFont = 24 + (int)(emphasis * 2.0f);
+
+    if (width > maxPanelWidth)
+    {
+        width = maxPanelWidth;
+    }
+
+    contentWidth = (int)(width - 50.0f);
+    if (contentWidth < 210)
+    {
+        contentWidth = (int)(width - 38.0f);
+    }
+
+    eyebrowFont = FitUiTextFontSize(eyebrow, eyebrowFont, 13, contentWidth);
+    titleFont = FitUiTextFontSize(title, titleFont, 20, contentWidth);
+
+    if (subtitle[0] != '\0')
+    {
+        subtitleFont = showHandoffHint ? 16 : 15;
+        subtitleLineCount = BuildWrappedUiLinesFitted(subtitle, subtitleFont, 12, contentWidth, subtitleLines, 2, &subtitleFont);
+    }
+
+    subtitleLineHeight = (float)subtitleFont + 3.0f;
+    if (subtitleLineCount > 0)
+    {
+        height = 28.0f + (float)eyebrowFont + (float)titleFont + 6.0f + subtitleLineHeight * (float)subtitleLineCount + 12.0f;
+    }
+    else
+    {
+        height = 28.0f + (float)eyebrowFont + (float)titleFont + 12.0f;
+    }
+
+    if (height < 64.0f + emphasis * 4.0f)
+    {
+        height = 64.0f + emphasis * 4.0f;
+    }
+
+    panel = (Rectangle){
+        (float)GetScreenWidth() * 0.5f - width * 0.5f,
+        10.0f - emphasis * 2.0f,
+        width,
+        height};
+    accentStrip = (Rectangle){panel.x + 10.0f, panel.y + 8.0f, panel.width - 20.0f, 5.0f};
+    titleY = panel.y + 14.0f + (float)eyebrowFont + 2.0f;
+    subtitleY = titleY + (float)titleFont + 6.0f;
+
+    DrawRectangleRounded(
+        (Rectangle){panel.x + 6.0f, panel.y + 8.0f, panel.width, panel.height},
+        0.22f,
+        8,
+        Fade(BLACK, 0.10f + emphasis * 0.05f));
+    DrawRectangleRounded(
+        (Rectangle){panel.x - 4.0f - emphasis * 6.0f, panel.y - 2.0f - emphasis * 3.0f, panel.width + 8.0f + emphasis * 12.0f, panel.height + 4.0f + emphasis * 6.0f},
+        0.24f,
+        8,
+        Fade(accent, 0.06f + 0.06f * pulse + emphasis * 0.10f));
+    DrawRectangleRounded(panel, 0.22f, 8, panelColor);
+    DrawRectangleLinesEx(panel, 2.2f, Fade(border, 0.95f));
+    DrawRectangleRounded(accentStrip, 0.45f, 8, Fade(accent, 0.86f));
+    DrawCircleGradient((int)(panel.x + panel.width - 28.0f), (int)(panel.y + 16.0f), 14.0f + emphasis * 4.0f, Fade(accent, 0.18f + emphasis * 0.08f), BLANK);
+
+    DrawUiText(eyebrow, panel.x + 18.0f, panel.y + 16.0f, eyebrowFont, mutedText);
+    DrawUiText(title, panel.x + 18.0f, titleY, titleFont, accent);
+    for (int i = 0; i < subtitleLineCount; i++)
+    {
+        DrawUiText(
+            subtitleLines[i],
+            panel.x + 18.0f,
+            subtitleY + (float)i * subtitleLineHeight,
+            subtitleFont,
+            showHandoffHint ? textColor : mutedText);
+    }
+}
+
 bool GetHoveredDevelopmentHandCard(const struct Map *map, enum DevelopmentCardType *type)
 {
     struct DevelopmentHandCard cards[DEVELOPMENT_CARD_COUNT];
@@ -1579,17 +1621,22 @@ void DrawCenteredStatus(void)
     int lineCount = 0;
     const char *message = uiGetCenteredStatusText();
     const enum UiNotificationTone tone = uiGetCenteredStatusTone();
+    const enum PlayerType accentPlayer = uiGetCenteredStatusPlayer();
     const float alpha = uiGetCenteredStatusAlpha();
     const float yOffset = uiGetCenteredStatusVerticalOffset();
+    const float emphasis = uiGetCenteredStatusEmphasis();
     const int fontSize = 18;
     const float lineStep = 22.0f;
     float widestLine = 0.0f;
     float panelWidth = 320.0f;
     float panelHeight = 72.0f;
     Rectangle panel = {0};
+    Rectangle scaledPanel = {0};
     Color panelColor = (Color){241, 235, 219, 248};
     Color borderColor = (Color){118, 88, 56, 255};
     Color textColor = (Color){54, 39, 29, 255};
+    Color glowColor = (Color){196, 158, 112, 255};
+    Color accentColor = (Color){196, 158, 112, 255};
 
     if (message == NULL || message[0] == '\0' || alpha <= 0.01f)
     {
@@ -1601,18 +1648,29 @@ void DrawCenteredStatus(void)
         panelColor = (Color){230, 242, 228, 248};
         borderColor = (Color){78, 136, 76, 255};
         textColor = (Color){47, 92, 48, 255};
+        glowColor = (Color){102, 178, 94, 255};
     }
     else if (tone == UI_NOTIFICATION_NEGATIVE)
     {
         panelColor = (Color){247, 229, 225, 248};
         borderColor = (Color){176, 63, 52, 255};
         textColor = (Color){140, 43, 34, 255};
+        glowColor = (Color){208, 92, 82, 255};
     }
     else if (tone == UI_NOTIFICATION_VICTORY)
     {
         panelColor = (Color){247, 239, 213, 248};
         borderColor = (Color){184, 140, 43, 255};
         textColor = (Color){120, 84, 19, 255};
+        glowColor = (Color){212, 175, 72, 255};
+    }
+
+    if (accentPlayer >= PLAYER_RED && accentPlayer <= PLAYER_BLACK)
+    {
+        accentColor = PlayerColor(accentPlayer);
+        borderColor = ColorBrightness(accentColor, -0.28f);
+        textColor = accentColor;
+        glowColor = accentColor;
     }
 
     lineCount = BuildWrappedUiLines(message, fontSize, 338, lines, 4);
@@ -1623,14 +1681,15 @@ void DrawCenteredStatus(void)
 
     for (int i = 0; i < lineCount; i++)
     {
-        const float lineWidth = (float)MeasureUiText(lines[i], lineCount == 1 ? 20 : fontSize);
+        const int lineFontSize = (lineCount == 1 ? 20 : fontSize) + (int)roundf(2.0f * emphasis);
+        const float lineWidth = (float)MeasureUiText(lines[i], lineFontSize);
         if (lineWidth > widestLine)
         {
             widestLine = lineWidth;
         }
     }
 
-    panelWidth = widestLine + 42.0f;
+    panelWidth = widestLine + 50.0f + emphasis * 16.0f;
     if (panelWidth < 290.0f)
     {
         panelWidth = 290.0f;
@@ -1646,16 +1705,21 @@ void DrawCenteredStatus(void)
         (float)GetScreenHeight() * 0.5f - 122.0f + yOffset,
         panelWidth,
         panelHeight};
+    scaledPanel = ScaleRectangleFromCenter(panel, 1.0f + emphasis * 0.07f);
 
-    DrawRectangleRounded((Rectangle){panel.x + 7.0f, panel.y + 9.0f, panel.width, panel.height}, 0.18f, 8, Fade(BLACK, 0.11f * alpha));
-    DrawRectangleRounded(panel, 0.18f, 8, Fade(panelColor, alpha));
-    DrawRectangleLinesEx(panel, 2.0f, Fade(borderColor, alpha));
+    DrawRectangleRounded((Rectangle){scaledPanel.x - 10.0f, scaledPanel.y - 8.0f, scaledPanel.width + 20.0f, scaledPanel.height + 16.0f}, 0.22f, 8, Fade(glowColor, alpha * (0.05f + 0.17f * emphasis)));
+    DrawRectangleRounded((Rectangle){scaledPanel.x + 8.0f, scaledPanel.y + 12.0f, scaledPanel.width, scaledPanel.height}, 0.18f, 8, Fade(BLACK, 0.13f * alpha));
+    DrawRectangleRounded(scaledPanel, 0.18f, 8, Fade(panelColor, alpha));
+    DrawRectangleLinesEx(scaledPanel, 2.0f + emphasis * 1.2f, Fade(borderColor, alpha));
+    DrawRectangleRounded((Rectangle){scaledPanel.x + 14.0f, scaledPanel.y + 10.0f, scaledPanel.width - 28.0f, 6.0f + emphasis * 3.0f}, 0.5f, 8, Fade(glowColor, alpha * (0.50f + 0.24f * emphasis)));
     for (int i = 0; i < lineCount; i++)
     {
-        const int lineFontSize = lineCount == 1 ? 20 : fontSize;
+        const int lineFontSize = (lineCount == 1 ? 20 : fontSize) + (int)roundf(2.0f * emphasis);
         const int width = MeasureUiText(lines[i], lineFontSize);
-        const float textY = panel.y + panel.height * 0.5f - (lineCount - 1) * lineStep * 0.5f - lineFontSize * 0.5f + i * lineStep;
-        DrawUiText(lines[i], panel.x + panel.width * 0.5f - width * 0.5f, textY, lineFontSize, Fade(textColor, alpha));
+        const float textY = scaledPanel.y + scaledPanel.height * 0.5f - (lineCount - 1) * lineStep * 0.5f - lineFontSize * 0.5f + i * lineStep + 2.0f;
+        const float textX = scaledPanel.x + scaledPanel.width * 0.5f - width * 0.5f;
+        DrawUiText(lines[i], textX + 1.2f, textY + 1.4f, lineFontSize, Fade(BLACK, alpha * 0.18f));
+        DrawUiText(lines[i], textX, textY, lineFontSize, Fade(textColor, alpha));
     }
 }
 
@@ -1665,9 +1729,12 @@ void DrawTurnPanel(const struct Map *map)
     const Rectangle rollDiceButton = GetRollDiceButtonBounds();
     const Rectangle endTurnButton = GetEndTurnButtonBounds();
     const struct MatchSession *session = matchSessionGetActive();
+    const Color turnAccent = map->currentPlayer >= PLAYER_RED && map->currentPlayer <= PLAYER_BLACK
+                                 ? PlayerColor(map->currentPlayer)
+                                 : (Color){171, 82, 54, 255};
     const Color panelColor = (Color){244, 236, 217, 245};
-    const Color borderColor = (Color){118, 88, 56, 255};
-    const Color actionColor = (Color){171, 82, 54, 255};
+    const Color borderColor = ColorBrightness(turnAccent, -0.34f);
+    const Color actionColor = ColorBrightness(turnAccent, -0.08f);
     const Color mutedButton = (Color){214, 202, 181, 255};
     const Color textColor = (Color){54, 39, 29, 255};
     const bool humanControlledTurn = matchSessionLocalControlsPlayer(session, map->currentPlayer);
@@ -1679,12 +1746,14 @@ void DrawTurnPanel(const struct Map *map)
     const Rectangle dieB = {panel.x + 84.0f, panel.y + 76.0f, 54.0f, 54.0f};
     const int shownTotal = uiIsDiceRolling() ? (uiGetDisplayedDieA() + uiGetDisplayedDieB()) : map->lastDiceRoll;
     const char *turnTitle = TextFormat("%s: %s", loc("Turn"), PlayerName(map->currentPlayer));
+    const float headerTextY = panel.y + 28.0f;
 
     DrawRectangleRounded((Rectangle){panel.x + 6.0f, panel.y + 8.0f, panel.width, panel.height}, 0.08f, 8, Fade(BLACK, 0.10f));
     DrawRectangleRounded(panel, 0.08f, 8, panelColor);
     DrawRectangleLinesEx(panel, 2.0f, borderColor);
+    DrawRectangleRounded((Rectangle){panel.x + 12.0f, panel.y + 12.0f, panel.width - 24.0f, 8.0f}, 0.4f, 8, Fade(turnAccent, 0.82f));
 
-    DrawUiText(turnTitle, panel.x + 16.0f, panel.y + 16.0f, 20, textColor);
+    DrawUiText(turnTitle, panel.x + 16.0f, headerTextY, 22, turnAccent);
     DrawTurnPanelPlaytime(map, panel, (Color){92, 70, 50, 255});
     if (matchSessionIsNetplay(session))
     {
@@ -1958,692 +2027,8 @@ static void DrawTurnActionButton(Rectangle bounds, const char *label, int fontSi
     DrawUiText(label, labelX, labelY, fontSize, textColor);
 }
 
-Rectangle GetPlayerPanelBounds(void)
-{
-    const float panelWidth = 250.0f;
-    const float panelHeight = 238.0f;
-    return (Rectangle){(float)GetScreenWidth() - panelWidth - 24.0f, 24.0f, panelWidth, panelHeight};
-}
-
-Rectangle GetTurnPanelBounds(void)
-{
-    const float panelWidth = 250.0f;
-    const float panelHeight = 316.0f;
-    return (Rectangle){(float)GetScreenWidth() - panelWidth - 24.0f, (float)GetScreenHeight() * 0.5f - panelHeight * 0.5f - 42.0f, panelWidth, panelHeight};
-}
-
-Rectangle GetTradeButtonBounds(void)
-{
-    const float panelWidth = 250.0f;
-    const float panelHeight = 44.0f;
-    const Rectangle turnPanel = GetTurnPanelBounds();
-    return (Rectangle){turnPanel.x, turnPanel.y + turnPanel.height + 18.0f, panelWidth, panelHeight};
-}
-
-Rectangle GetPlayerTradeButtonBounds(void)
-{
-    const Rectangle waterTrade = GetTradeButtonBounds();
-    return (Rectangle){waterTrade.x, waterTrade.y + waterTrade.height + 12.0f, waterTrade.width, waterTrade.height};
-}
-
-Rectangle GetSettingsButtonBounds(void)
-{
-    return (Rectangle){24.0f, 24.0f, 156.0f, 42.0f};
-}
-
-Rectangle GetTradeModalBounds(void)
-{
-    const float panelWidth = 460.0f;
-    const float panelHeight = 380.0f;
-    return (Rectangle){(float)GetScreenWidth() * 0.5f - panelWidth * 0.5f, (float)GetScreenHeight() * 0.5f - panelHeight * 0.5f, panelWidth, panelHeight};
-}
-
-Rectangle GetSettingsModalBounds(void)
-{
-    const float panelWidth = 320.0f;
-    const float panelHeight = 690.0f;
-    return (Rectangle){(float)GetScreenWidth() * 0.5f - panelWidth * 0.5f, (float)GetScreenHeight() * 0.5f - panelHeight * 0.5f, panelWidth, panelHeight};
-}
-
-Rectangle GetPlayerTradeModalBounds(void)
-{
-    const float panelWidth = 440.0f;
-    const float panelHeight = 430.0f;
-    return (Rectangle){(float)GetScreenWidth() * 0.5f - panelWidth * 0.5f, (float)GetScreenHeight() * 0.5f - panelHeight * 0.5f, panelWidth, panelHeight};
-}
-
-Rectangle GetIncomingTradeOfferModalBounds(void)
-{
-    const float panelWidth = 430.0f;
-    const float panelHeight = 372.0f;
-    return (Rectangle){(float)GetScreenWidth() * 0.5f - panelWidth * 0.5f, (float)GetScreenHeight() * 0.5f - panelHeight * 0.5f, panelWidth, panelHeight};
-}
-
-Rectangle GetIncomingTradeOfferAcceptButtonBounds(void)
-{
-    const Rectangle panel = GetIncomingTradeOfferModalBounds();
-    return (Rectangle){panel.x + 24.0f, panel.y + panel.height - 58.0f, panel.width * 0.5f - 30.0f, 40.0f};
-}
-
-Rectangle GetIncomingTradeOfferDeclineButtonBounds(void)
-{
-    const Rectangle panel = GetIncomingTradeOfferModalBounds();
-    return (Rectangle){panel.x + panel.width * 0.5f + 6.0f, panel.y + panel.height - 58.0f, panel.width * 0.5f - 30.0f, 40.0f};
-}
-
-Rectangle GetDiscardModalBounds(void)
-{
-    const float panelWidth = 390.0f;
-    const float panelHeight = 360.0f;
-    return (Rectangle){(float)GetScreenWidth() * 0.5f - panelWidth * 0.5f, (float)GetScreenHeight() * 0.5f - panelHeight * 0.5f, panelWidth, panelHeight};
-}
-
-Rectangle GetThiefVictimModalBounds(void)
-{
-    const float panelWidth = 430.0f;
-    const float panelHeight = 190.0f;
-    return (Rectangle){(float)GetScreenWidth() * 0.5f - panelWidth * 0.5f, (float)GetScreenHeight() * 0.5f - panelHeight * 0.5f, panelWidth, panelHeight};
-}
-
-Rectangle GetBuildPanelBounds(void)
-{
-    const float closedWidth = 220.0f;
-    const float openWidth = 392.0f;
-    const float closedHeight = 54.0f;
-    const float openHeight = 182.0f;
-    const float panelWidth = closedWidth + (openWidth - closedWidth) * uiGetBuildPanelOpenAmount();
-    const float panelHeight = closedHeight + (openHeight - closedHeight) * uiGetBuildPanelOpenAmount();
-    return (Rectangle){(float)GetScreenWidth() - panelWidth - 24.0f, (float)GetScreenHeight() - panelHeight - 24.0f, panelWidth, panelHeight};
-}
-
-Rectangle GetBuildPanelDevelopmentCardBounds(void)
-{
-    const Rectangle panel = GetBuildPanelBounds();
-    return (Rectangle){panel.x + 204.0f, panel.y + 118.0f, 170.0f, 56.0f};
-}
-
-Rectangle GetDevelopmentPurchaseOverlayBounds(void)
-{
-    const Rectangle buildPanel = GetBuildPanelBounds();
-    return (Rectangle){buildPanel.x + 10.0f, buildPanel.y + 10.0f, buildPanel.width - 20.0f, buildPanel.height - 20.0f};
-}
-
-Rectangle GetDevelopmentPurchaseConfirmButtonBounds(void)
-{
-    const Rectangle panel = GetDevelopmentPurchaseOverlayBounds();
-    return (Rectangle){panel.x + 18.0f, panel.y + panel.height - 48.0f, panel.width - 132.0f, 36.0f};
-}
-
-Rectangle GetDevelopmentPurchaseCancelButtonBounds(void)
-{
-    const Rectangle panel = GetDevelopmentPurchaseOverlayBounds();
-    return (Rectangle){panel.x + panel.width - 100.0f, panel.y + panel.height - 48.0f, 82.0f, 36.0f};
-}
-
-Rectangle GetDevelopmentPlayOverlayBounds(void)
-{
-    const float panelWidth = 476.0f;
-    const float panelHeight = 320.0f;
-    return (Rectangle){
-        (float)GetScreenWidth() * 0.5f - panelWidth * 0.5f,
-        (float)GetScreenHeight() * 0.5f - panelHeight * 0.5f - 24.0f,
-        panelWidth,
-        panelHeight};
-}
-
-Rectangle GetDevelopmentPlayConfirmButtonBounds(void)
-{
-    const Rectangle panel = GetDevelopmentPlayOverlayBounds();
-    return (Rectangle){panel.x + 24.0f, panel.y + panel.height - 54.0f, panel.width - 164.0f, 38.0f};
-}
-
-Rectangle GetDevelopmentPlayCancelButtonBounds(void)
-{
-    const Rectangle panel = GetDevelopmentPlayOverlayBounds();
-    return (Rectangle){panel.x + panel.width - 116.0f, panel.y + panel.height - 54.0f, 92.0f, 38.0f};
-}
-
-Rectangle GetRollDiceButtonBounds(void)
-{
-    const Rectangle panel = GetTurnPanelBounds();
-    return (Rectangle){panel.x + 16.0f, panel.y + 176.0f, panel.width - 32.0f, 42.0f};
-}
-
-Rectangle GetEndTurnButtonBounds(void)
-{
-    const Rectangle panel = GetTurnPanelBounds();
-    return (Rectangle){panel.x + 16.0f, panel.y + 226.0f, panel.width - 32.0f, 42.0f};
-}
-
-Rectangle GetVictoryOverlayBounds(void)
-{
-    const float panelWidth = 500.0f;
-    const float panelHeight = 316.0f;
-    return (Rectangle){
-        (float)GetScreenWidth() * 0.5f - panelWidth * 0.5f,
-        (float)GetScreenHeight() * 0.5f - panelHeight * 0.5f,
-        panelWidth,
-        panelHeight};
-}
-
-Rectangle GetVictoryOverlayRestartButtonBounds(void)
-{
-    const Rectangle panel = GetVictoryOverlayBounds();
-    return (Rectangle){panel.x + 34.0f, panel.y + panel.height - 62.0f, 196.0f, 42.0f};
-}
-
-Rectangle GetVictoryOverlayMenuButtonBounds(void)
-{
-    const Rectangle panel = GetVictoryOverlayBounds();
-    return (Rectangle){panel.x + panel.width - 230.0f, panel.y + panel.height - 62.0f, 196.0f, 42.0f};
-}
-
-static void DrawDie(Rectangle bounds, int value, float tilt, float alpha)
-{
-    const Color body = Fade((Color){246, 240, 225, 255}, alpha);
-    const Color edge = Fade((Color){118, 88, 56, 255}, alpha);
-    const Color pip = Fade((Color){54, 39, 29, 255}, alpha);
-    const Vector2 center = {bounds.x + bounds.width * 0.5f, bounds.y + bounds.height * 0.5f};
-    const float dx = bounds.width * 0.22f;
-    const float dy = bounds.height * 0.22f;
-    const float r = bounds.width * 0.075f;
-    const Vector2 pips[7] = {
-        center,
-        {center.x - dx, center.y - dy},
-        {center.x + dx, center.y + dy},
-        {center.x + dx, center.y - dy},
-        {center.x - dx, center.y + dy},
-        {center.x - dx, center.y},
-        {center.x + dx, center.y}};
-
-    DrawRectanglePro((Rectangle){bounds.x + 3.0f, bounds.y + 4.0f, bounds.width, bounds.height}, (Vector2){bounds.width * 0.5f, bounds.height * 0.5f}, tilt, Fade(BLACK, 0.10f * alpha));
-    DrawRectangleRounded((Rectangle){bounds.x, bounds.y, bounds.width, bounds.height}, 0.18f, 8, body);
-    DrawRectangleRoundedLinesEx(bounds, 0.18f, 8, 2.0f, edge);
-
-    switch (value)
-    {
-    case 1:
-        DrawCircleV(pips[0], r, pip);
-        break;
-    case 2:
-        DrawCircleV(pips[1], r, pip);
-        DrawCircleV(pips[2], r, pip);
-        break;
-    case 3:
-        DrawCircleV(pips[1], r, pip);
-        DrawCircleV(pips[0], r, pip);
-        DrawCircleV(pips[2], r, pip);
-        break;
-    case 4:
-        DrawCircleV(pips[1], r, pip);
-        DrawCircleV(pips[2], r, pip);
-        DrawCircleV(pips[3], r, pip);
-        DrawCircleV(pips[4], r, pip);
-        break;
-    case 5:
-        DrawCircleV(pips[1], r, pip);
-        DrawCircleV(pips[2], r, pip);
-        DrawCircleV(pips[3], r, pip);
-        DrawCircleV(pips[4], r, pip);
-        DrawCircleV(pips[0], r, pip);
-        break;
-    case 6:
-        DrawCircleV(pips[1], r, pip);
-        DrawCircleV(pips[4], r, pip);
-        DrawCircleV(pips[5], r, pip);
-        DrawCircleV(pips[6], r, pip);
-        DrawCircleV(pips[3], r, pip);
-        DrawCircleV(pips[2], r, pip);
-        break;
-    default:
-        break;
-    }
-}
-
-static const struct PlayerState *CurrentPlayerState(const struct Map *map)
-{
-    enum PlayerType displayedPlayer = PLAYER_NONE;
-
-    if (map == NULL)
-    {
-        return NULL;
-    }
-
-    if (IsPrivateInfoPinnedToLocalHuman(map))
-    {
-        displayedPlayer = LocalHumanPlayer(map);
-    }
-    else
-    {
-        displayedPlayer = map->currentPlayer;
-    }
-
-    if (displayedPlayer < PLAYER_RED || displayedPlayer > PLAYER_BLACK)
-    {
-        return NULL;
-    }
-
-    return &map->players[displayedPlayer];
-}
-
-static enum PlayerType LocalHumanPlayer(const struct Map *map)
-{
-    const struct MatchSession *session = matchSessionGetActive();
-    enum PlayerType humanPlayer = PLAYER_NONE;
-    int humanCount = 0;
-    int aiCount = 0;
-
-    if (map == NULL)
-    {
-        return PLAYER_NONE;
-    }
-
-    if (session != NULL && session->localPlayer >= PLAYER_RED && session->localPlayer <= PLAYER_BLACK)
-    {
-        return session->localPlayer;
-    }
-
-    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
-    {
-        if (map->players[player].controlMode == PLAYER_CONTROL_AI)
-        {
-            aiCount++;
-        }
-        else
-        {
-            humanPlayer = (enum PlayerType)player;
-            humanCount++;
-        }
-    }
-
-    return aiCount > 0 && humanCount == 1 ? humanPlayer : PLAYER_NONE;
-}
-
-static bool IsPrivateInfoPinnedToLocalHuman(const struct Map *map)
-{
-    const enum PlayerType localHuman = LocalHumanPlayer(map);
-    return localHuman != PLAYER_NONE && map != NULL && map->currentPlayer != localHuman;
-}
-
-static const char *PlayerName(enum PlayerType player)
-{
-    return locPlayerName(player);
-}
-
-static const char *ResourceName(enum ResourceType resource)
-{
-    return locResourceName(resource);
-}
-
-static int BuildDevelopmentHandLayout(const struct Map *map, struct DevelopmentHandCard cards[DEVELOPMENT_CARD_COUNT])
-{
-    const struct PlayerState *player = CurrentPlayerState(map);
-    int cardCount = 0;
-
-    if (player == NULL || cards == NULL)
-    {
-        return 0;
-    }
-
-    for (int type = 0; type < DEVELOPMENT_CARD_COUNT; type++)
-    {
-        const int owned = gameGetDevelopmentCardCount(map, player->type, (enum DevelopmentCardType)type);
-        if (owned > 0 && cardCount < DEVELOPMENT_CARD_COUNT)
-        {
-            cards[cardCount].type = (enum DevelopmentCardType)type;
-            cards[cardCount].count = owned;
-            cards[cardCount].playable = gameCanPlayDevelopmentCard(map, (enum DevelopmentCardType)type);
-            cardCount++;
-        }
-    }
-
-    if (cardCount <= 0)
-    {
-        return 0;
-    }
-
-    const float safeLeft = 56.0f;
-    const float safeRight = (float)GetScreenWidth() - 56.0f;
-    const float availableWidth = safeRight - safeLeft;
-    if (availableWidth <= 120.0f)
-    {
-        return 0;
-    }
-
-    float cardWidth = cardCount >= 4 ? 146.0f : 156.0f;
-    const float cardHeight = 202.0f;
-    if (cardWidth > availableWidth - 12.0f)
-    {
-        cardWidth = availableWidth - 12.0f;
-    }
-
-    float step = cardCount > 1 ? (availableWidth - cardWidth) / (float)(cardCount - 1) : 0.0f;
-    if (step < 70.0f)
-    {
-        step = 70.0f;
-    }
-    if (step > 82.0f)
-    {
-        step = 82.0f;
-    }
-    if (cardCount > 1 && cardWidth + step * (float)(cardCount - 1) > availableWidth)
-    {
-        step = (availableWidth - cardWidth) / (float)(cardCount - 1);
-    }
-
-    const float totalWidth = cardWidth + step * (float)(cardCount - 1);
-    const float centerX = (float)GetScreenWidth() * 0.5f;
-    const float startX = centerX - totalWidth * 0.5f + cardWidth * 0.5f;
-    const float baseBottom = (float)GetScreenHeight() + 82.0f;
-
-    for (int i = 0; i < cardCount; i++)
-    {
-        const float mid = (float)(cardCount - 1) * 0.5f;
-        const float offset = (float)i - mid;
-        const float normalized = mid > 0.0f ? offset / mid : 0.0f;
-        const float arcLift = (1.0f - fabsf(normalized)) * 8.0f + (cardCount == 1 ? 8.0f : 0.0f);
-
-        cards[i].rotation = 0.0f;
-        cards[i].bounds = (Rectangle){
-            startX + offset * step - cardWidth * 0.5f,
-            baseBottom - cardHeight - arcLift,
-            cardWidth,
-            cardHeight};
-    }
-
-    return cardCount;
-}
-
-static Rectangle DevelopmentHandHitBounds(Rectangle bounds)
-{
-    return (Rectangle){
-        bounds.x,
-        bounds.y - 34.0f,
-        bounds.width,
-        bounds.height + 34.0f};
-}
-
-static void DrawAwardCard(Rectangle bounds, const char *title, const char *subtitle, const char *detail, enum PlayerType owner, Color accent)
-{
-    const Color parchment = (Color){245, 236, 217, 248};
-    const Color border = (Color){118, 88, 56, 255};
-    const Color textColor = (Color){54, 39, 29, 255};
-    const Color mutedText = (Color){88, 68, 50, 255};
-    const Color detailText = (Color){48, 35, 24, 255};
-    const Rectangle ribbon = {bounds.x + 14.0f, bounds.y + 14.0f, bounds.width - 28.0f, 26.0f};
-    const Rectangle detailPanel = {bounds.x + 16.0f, bounds.y + 102.0f, bounds.width - 32.0f, 30.0f};
-    const Rectangle ownerChip = {bounds.x + 16.0f, bounds.y + bounds.height - 34.0f, bounds.width - 32.0f, 22.0f};
-    const bool claimed = owner >= PLAYER_RED && owner <= PLAYER_BLACK;
-    const Color chipFill = claimed ? Fade(PlayerColor(owner), 0.92f) : (Color){221, 212, 194, 255};
-    const Color chipText = claimed ? RAYWHITE : mutedText;
-    const char *ownerLabel = claimed ? PlayerName(owner) : loc("Unclaimed");
-    const int titleWidth = MeasureUiText(title, 22);
-    const int subtitleWidth = MeasureUiText(subtitle, 13);
-    const int detailWidth = MeasureUiText(detail, 15);
-    const int ownerWidth = MeasureUiText(ownerLabel, 14);
-
-    DrawRectangleRounded((Rectangle){bounds.x + 6.0f, bounds.y + 8.0f, bounds.width, bounds.height}, 0.10f, 8, Fade(BLACK, 0.10f));
-    DrawRectangleRounded(bounds, 0.10f, 8, parchment);
-    DrawRectangleLinesEx(bounds, 2.0f, border);
-    DrawRectangleRounded(ribbon, 0.16f, 8, Fade(accent, 0.96f));
-    DrawRectangleLinesEx(ribbon, 1.4f, Fade(border, 0.80f));
-    DrawRectangleRounded(detailPanel, 0.28f, 8, (Color){249, 243, 232, 255});
-    DrawRectangleLinesEx(detailPanel, 1.5f, Fade(border, 0.54f));
-
-    DrawUiText(title, bounds.x + bounds.width * 0.5f - titleWidth * 0.5f, bounds.y + 52.0f, 22, textColor);
-    DrawUiText(subtitle, bounds.x + bounds.width * 0.5f - subtitleWidth * 0.5f, bounds.y + 84.0f, 13, mutedText);
-    DrawUiText(detail, detailPanel.x + detailPanel.width * 0.5f - detailWidth * 0.5f, detailPanel.y + 7.0f, 15, Fade((Color){255, 255, 255, 255}, 0.32f));
-    DrawUiText(detail, detailPanel.x + detailPanel.width * 0.5f - detailWidth * 0.5f - 0.6f, detailPanel.y + 6.0f, 15, detailText);
-    DrawUiText(detail, detailPanel.x + detailPanel.width * 0.5f - detailWidth * 0.5f, detailPanel.y + 6.0f, 15, detailText);
-
-    DrawRectangleRounded(ownerChip, 0.40f, 8, chipFill);
-    DrawRectangleLinesEx(ownerChip, 1.4f, claimed ? Fade(border, 0.64f) : (Color){154, 132, 108, 255});
-    DrawUiText(ownerLabel, ownerChip.x + ownerChip.width * 0.5f - ownerWidth * 0.5f, ownerChip.y + 3.0f, 14, chipText);
-}
-
-static const char *DevelopmentCardTitle(enum DevelopmentCardType type)
-{
-    return locDevelopmentCardTitle(type);
-}
-
-static const char *DevelopmentCardDescription(enum DevelopmentCardType type)
-{
-    return locDevelopmentCardDescription(type);
-}
-
-static Color DevelopmentCardAccent(enum DevelopmentCardType type)
-{
-    switch (type)
-    {
-    case DEVELOPMENT_CARD_KNIGHT:
-        return (Color){92, 108, 126, 255};
-    case DEVELOPMENT_CARD_VICTORY_POINT:
-        return (Color){188, 145, 53, 255};
-    case DEVELOPMENT_CARD_ROAD_BUILDING:
-        return (Color){156, 86, 58, 255};
-    case DEVELOPMENT_CARD_YEAR_OF_PLENTY:
-        return (Color){108, 142, 74, 255};
-    case DEVELOPMENT_CARD_MONOPOLY:
-        return (Color){57, 116, 122, 255};
-    default:
-        return (Color){118, 88, 56, 255};
-    }
-}
-
-static float Clamp01(float value)
-{
-    if (value < 0.0f)
-    {
-        return 0.0f;
-    }
-    if (value > 1.0f)
-    {
-        return 1.0f;
-    }
-    return value;
-}
-
-static float LerpFloat(float a, float b, float t)
-{
-    return a + (b - a) * t;
-}
-
-static Rectangle LerpRectangle(Rectangle a, Rectangle b, float t)
-{
-    return (Rectangle){
-        LerpFloat(a.x, b.x, t),
-        LerpFloat(a.y, b.y, t),
-        LerpFloat(a.width, b.width, t),
-        LerpFloat(a.height, b.height, t)};
-}
-
-static float EaseOutCubic(float t)
-{
-    t = Clamp01(t);
-    return 1.0f - powf(1.0f - t, 3.0f);
-}
-
-static float EaseInOutCubic(float t)
-{
-    t = Clamp01(t);
-    if (t < 0.5f)
-    {
-        return 4.0f * t * t * t;
-    }
-    return 1.0f - powf(-2.0f * t + 2.0f, 3.0f) * 0.5f;
-}
-
-static void DrawDevelopmentCardVisual(Font font, Rectangle card, float rotation, enum DevelopmentCardType type, int count, float alpha, bool emphasized)
-{
-    const Rectangle shadow = {
-        card.x + 7.0f,
-        card.y + 10.0f,
-        card.width,
-        card.height
-    };
-    const Rectangle border = {
-        card.x - 2.0f,
-        card.y - 2.0f,
-        card.width + 4.0f,
-        card.height + 4.0f
-    };
-    const Rectangle ribbon = {
-        card.x + 12.0f,
-        card.y + 14.0f,
-        card.width - 24.0f,
-        34.0f
-    };
-    const Rectangle textPanel = {
-        card.x + 12.0f,
-        card.y + 58.0f,
-        card.width - 24.0f,
-        card.height - 78.0f
-    };
-    const Rectangle badge = {
-        card.x + card.width - 48.0f,
-        card.y + 14.0f,
-        28.0f,
-        22.0f
-    };
-    const Color accent = emphasized ? ColorBrightness(DevelopmentCardAccent(type), 0.08f) : DevelopmentCardAccent(type);
-    const Color body = emphasized ? ColorBrightness((Color){246, 239, 223, 255}, 0.04f) : (Color){246, 239, 223, 255};
-    const Color bodyShade = (Color){233, 223, 204, 255};
-    const Color borderColor = (Color){111, 83, 55, 255};
-
-    DrawRotatedCardLayer(shadow, rotation, Fade(BLACK, (emphasized ? 0.24f : 0.16f) * alpha));
-    DrawRotatedCardLayer(border, rotation, Fade(borderColor, 0.96f * alpha));
-    DrawRotatedCardLayer(card, rotation, Fade(body, alpha));
-    DrawRotatedCardLayer((Rectangle){card.x + 6.0f, card.y + 8.0f, card.width - 12.0f, 12.0f}, rotation, Fade(RAYWHITE, 0.30f * alpha));
-    DrawRotatedCardLayer((Rectangle){card.x + 7.0f, card.y + 45.0f, card.width - 14.0f, card.height - 52.0f}, rotation, Fade(bodyShade, alpha));
-    DrawRotatedCardLayer(ribbon, rotation, Fade(accent, alpha));
-    DrawRotatedCardLayer(textPanel, rotation, Fade(RAYWHITE, (emphasized ? 0.54f : 0.44f) * alpha));
-    DrawRotatedCardLayer((Rectangle){textPanel.x + 8.0f, textPanel.y + 8.0f, textPanel.width - 16.0f, 2.0f}, rotation, Fade(body, 0.90f * alpha));
-
-    DrawCardText(font, card, rotation, (Vector2){18.0f, 22.0f}, DevelopmentCardTitle(type), 17, Fade(RAYWHITE, alpha));
-    DrawCardText(font, card, rotation, (Vector2){18.0f, 74.0f}, DevelopmentCardDescription(type), 14, Fade((Color){62, 46, 34, 255}, alpha));
-
-    if (count > 1)
-    {
-        const char *countLabel = TextFormat("x%d", count);
-        const int countFontSize = 13;
-        const float countSpacing = (float)countFontSize * 0.04f;
-        const Vector2 countSize = MeasureTextEx(font, countLabel, (float)countFontSize, countSpacing);
-        DrawRotatedCardLayer(badge, rotation, Fade((Color){72, 53, 34, 255}, 0.88f * alpha));
-        DrawTextPro(
-            font,
-            countLabel,
-            TransformCardPoint(card, rotation, (Vector2){badge.x - card.x + badge.width * 0.5f - countSize.x * 0.5f, badge.y - card.y + 4.0f}),
-            (Vector2){0.0f, 0.0f},
-            rotation,
-            (float)countFontSize,
-            countSpacing,
-            Fade(RAYWHITE, alpha));
-    }
-}
-
-static void DrawRotatedCardLayer(Rectangle bounds, float rotationDegrees, Color color)
-{
-    if (fabsf(rotationDegrees) < 0.01f)
-    {
-        DrawRectangleRec(bounds, color);
-        return;
-    }
-
-    DrawRectanglePro(
-        (Rectangle){
-            bounds.x + bounds.width * 0.5f,
-            bounds.y + bounds.height * 0.5f,
-            bounds.width,
-            bounds.height},
-        (Vector2){bounds.width * 0.5f, bounds.height * 0.5f},
-        rotationDegrees,
-        color);
-}
-
-static bool PointInRotatedRectangle(Vector2 point, Rectangle bounds, float rotationDegrees)
-{
-    const Vector2 center = {
-        bounds.x + bounds.width * 0.5f,
-        bounds.y + bounds.height * 0.5f};
-    const Vector2 local = RotateVector(
-        (Vector2){point.x - center.x, point.y - center.y},
-        -rotationDegrees * DEG2RAD);
-
-    return fabsf(local.x) <= bounds.width * 0.5f &&
-           fabsf(local.y) <= bounds.height * 0.5f;
-}
-
-static Vector2 RotateVector(Vector2 v, float radians)
-{
-    const float c = cosf(radians);
-    const float s = sinf(radians);
-    return (Vector2){
-        v.x * c - v.y * s,
-        v.x * s + v.y * c};
-}
-
-static Vector2 TransformCardPoint(Rectangle bounds, float rotationDegrees, Vector2 localPoint)
-{
-    const float radians = rotationDegrees * DEG2RAD;
-    const Vector2 center = {
-        bounds.x + bounds.width * 0.5f,
-        bounds.y + bounds.height * 0.5f};
-    const Vector2 offset = {
-        localPoint.x - bounds.width * 0.5f,
-        localPoint.y - bounds.height * 0.5f};
-    const Vector2 rotated = RotateVector(offset, radians);
-    return (Vector2){
-        center.x + rotated.x,
-        center.y + rotated.y};
-}
-
-static void DrawCardText(Font font, Rectangle bounds, float rotationDegrees, Vector2 localPoint, const char *text, int fontSize, Color color)
-{
-    char line[128];
-    const float maxWidth = bounds.width - localPoint.x * 2.0f;
-    const char *cursor = text;
-    float y = localPoint.y;
-
-    if (text == NULL || text[0] == '\0')
-    {
-        return;
-    }
-
-    while (*cursor != '\0')
-    {
-        size_t lineLength = 0;
-        int lineFontSize = fontSize;
-        float spacing = (float)lineFontSize * 0.04f;
-
-        while (cursor[lineLength] != '\0' && cursor[lineLength] != '\n' && lineLength < sizeof(line) - 1)
-        {
-            lineLength++;
-        }
-
-        memcpy(line, cursor, lineLength);
-        line[lineLength] = '\0';
-
-        while (lineFontSize > 10 && MeasureTextEx(font, line, (float)lineFontSize, spacing).x > maxWidth)
-        {
-            lineFontSize--;
-            spacing = (float)lineFontSize * 0.04f;
-        }
-
-        DrawTextPro(
-            font,
-            line,
-            TransformCardPoint(bounds, rotationDegrees, (Vector2){localPoint.x, y}),
-            (Vector2){0.0f, 0.0f},
-            rotationDegrees,
-            (float)lineFontSize,
-            spacing,
-            color);
-
-        y += (float)lineFontSize * 1.20f;
-        cursor += lineLength;
-        if (*cursor == '\n')
-        {
-            cursor++;
-        }
-    }
-}
+/* Bounds helpers are grouped separately because both rendering and input depend on them. */
+#include "renderer_ui_bounds.inc"
+
+/* Development-card, award-card, and private-info helpers stay renderer-ui-local here. */
+#include "renderer_ui_helpers.inc"

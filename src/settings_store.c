@@ -10,10 +10,12 @@
 
 static char *trim_whitespace(char *text);
 static bool parse_theme(const char *value, enum UiTheme *theme);
+static bool parse_window_mode(const char *value, enum UiWindowMode *mode);
 static bool parse_language(const char *value, enum UiLanguage *language);
 static bool parse_difficulty(const char *value, enum AiDifficulty *difficulty);
 static bool parse_player_color(const char *value, enum PlayerType *player);
 static const char *theme_label(enum UiTheme theme);
+static const char *window_mode_label(enum UiWindowMode mode);
 static const char *language_label(enum UiLanguage language);
 static const char *difficulty_label(enum AiDifficulty difficulty);
 static const char *player_color_label(enum PlayerType player);
@@ -26,6 +28,7 @@ void settingsStoreLoadDefaults(struct PersistedSettings *settings)
     }
 
     settings->theme = UI_THEME_LIGHT;
+    settings->windowMode = UI_WINDOW_MODE_WINDOWED;
     settings->language = UI_LANGUAGE_ENGLISH;
     settings->aiSpeed = 3;
     settings->aiDifficulty = AI_DIFFICULTY_MEDIUM;
@@ -126,6 +129,10 @@ bool settingsStoreLoad(struct PersistedSettings *settings)
         {
             loaded |= parse_theme(value, &settings->theme);
         }
+        else if (strcmp(key, "window_mode") == 0)
+        {
+            loaded |= parse_window_mode(value, &settings->windowMode);
+        }
         else if (strcmp(key, "language") == 0)
         {
             loaded |= parse_language(value, &settings->language);
@@ -214,6 +221,7 @@ bool settingsStoreSave(const struct PersistedSettings *settings)
     }
 
     fprintf(file, "theme=%s\n", theme_label(settings->theme));
+    fprintf(file, "window_mode=%s\n", window_mode_label(settings->windowMode));
     fprintf(file, "language=%s\n", language_label(settings->language));
     fprintf(file, "ai_speed=%d\n", settings->aiSpeed);
     fprintf(file, "ai_difficulty=%s\n", difficulty_label(settings->aiDifficulty));
@@ -233,6 +241,7 @@ bool settingsStoreSaveCurrent(void)
     struct PersistedSettings settings;
 
     settings.theme = uiGetTheme();
+    settings.windowMode = uiGetWindowMode();
     settings.language = locGetLanguage();
     settings.aiSpeed = uiGetAiSpeedSetting();
     settings.aiDifficulty = MainMenuGetAiDifficulty();
@@ -288,6 +297,27 @@ static bool parse_theme(const char *value, enum UiTheme *theme)
     if (strcmp(value, "light") == 0)
     {
         *theme = UI_THEME_LIGHT;
+        return true;
+    }
+
+    return false;
+}
+
+static bool parse_window_mode(const char *value, enum UiWindowMode *mode)
+{
+    if (value == NULL || mode == NULL)
+    {
+        return false;
+    }
+
+    if (strcmp(value, "windowed") == 0)
+    {
+        *mode = UI_WINDOW_MODE_WINDOWED;
+        return true;
+    }
+    if (strcmp(value, "fullscreen") == 0)
+    {
+        *mode = UI_WINDOW_MODE_FULLSCREEN;
         return true;
     }
 
@@ -359,6 +389,11 @@ static bool parse_player_color(const char *value, enum PlayerType *player)
 static const char *theme_label(enum UiTheme theme)
 {
     return theme == UI_THEME_DARK ? "dark" : "light";
+}
+
+static const char *window_mode_label(enum UiWindowMode mode)
+{
+    return mode == UI_WINDOW_MODE_FULLSCREEN ? "fullscreen" : "windowed";
 }
 
 static const char *language_label(enum UiLanguage language)

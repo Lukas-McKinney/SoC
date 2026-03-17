@@ -253,7 +253,7 @@ void DrawMap(const struct Map *map)
             DrawThief(center, animatedRadius);
         }
 
-        if (gameCanMoveThiefToTile(map, tile->id))
+        if (showPlacementPreviews && gameCanMoveThiefToTile(map, tile->id))
         {
             const bool hovered = tile->id == gHoveredTileId;
             DrawPolyLinesEx(center, HEX_CORNERS, animatedRadius * 0.93f, -30.0f, hovered ? 5.0f : 3.0f, hovered ? (Color){236, 194, 65, 255} : Fade((Color){236, 194, 65, 255}, 0.55f));
@@ -411,6 +411,7 @@ static void EnsureUiLayerRenderTexture(void)
 static void DrawMapUiLayer(const struct Map *map)
 {
     DrawOpponentVictoryBar(map);
+    DrawTurnBanner(map);
     DrawAwardCards(map);
     DrawPlayerPanel(map);
     DrawDevelopmentHand(map);

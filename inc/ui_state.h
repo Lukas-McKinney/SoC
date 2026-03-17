@@ -10,6 +10,11 @@ enum UiTheme {
     UI_THEME_DARK
 };
 
+enum UiWindowMode {
+    UI_WINDOW_MODE_WINDOWED,
+    UI_WINDOW_MODE_FULLSCREEN
+};
+
 enum UiNotificationTone {
     UI_NOTIFICATION_NEUTRAL,
     UI_NOTIFICATION_POSITIVE,
@@ -48,11 +53,15 @@ const char *uiGetCenteredWarningText(void);
 float uiGetCenteredWarningAlpha(void);
 float uiGetCenteredWarningVerticalOffset(void);
 void uiShowCenteredStatus(const char *text, enum UiNotificationTone tone);
+void uiShowCenteredStatusForPlayer(const char *text, enum UiNotificationTone tone, enum PlayerType player);
 bool uiHasCenteredStatus(void);
 const char *uiGetCenteredStatusText(void);
 enum UiNotificationTone uiGetCenteredStatusTone(void);
+enum PlayerType uiGetCenteredStatusPlayer(void);
 float uiGetCenteredStatusAlpha(void);
 float uiGetCenteredStatusVerticalOffset(void);
+float uiGetCenteredStatusEmphasis(void);
+float uiGetTurnAnnouncementEmphasis(void);
 
 void uiToggleTradeMenu(void);
 void uiSetTradeMenuOpen(bool open);
@@ -67,11 +76,15 @@ void uiToggleSettingsMenu(void);
 void uiSetSettingsMenuOpen(bool open);
 bool uiIsSettingsMenuOpen(void);
 float uiGetSettingsMenuOpenAmount(void);
+void uiSetSettingsSubmenuOpen(bool open);
+bool uiIsSettingsSubmenuOpen(void);
 void uiToggleSettingsMultiplayerInfoExpanded(void);
 void uiSetSettingsMultiplayerInfoExpanded(bool expanded);
 bool uiIsSettingsMultiplayerInfoExpanded(void);
 void uiSetTheme(enum UiTheme theme);
 enum UiTheme uiGetTheme(void);
+void uiSetWindowMode(enum UiWindowMode mode);
+enum UiWindowMode uiGetWindowMode(void);
 void uiSetAiSpeedSetting(int speed);
 int uiGetAiSpeedSetting(void);
 void uiSetSettingsConfirmAction(enum UiSettingsConfirmAction action);

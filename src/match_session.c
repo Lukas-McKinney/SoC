@@ -26,7 +26,16 @@ static bool submit_client_action(struct MatchSession *session,
                                  const struct GameAction *action,
                                  const struct GameActionContext *context,
                                  struct GameActionResult *result);
-static void apply_client_authoritative_result(const struct GameAction *action, const struct GameActionResult *result);
+static void apply_client_authoritative_result(const struct MatchSession *session,
+                                              const struct GameAction *action,
+                                              const struct GameActionResult *result);
+static void init_action_result(struct GameActionResult *result);
+static enum DevelopmentCardType development_card_for_action(enum GameActionType type);
+static bool action_actor_is_local_viewer(const struct MatchSession *session, enum PlayerType actor);
+static void show_action_feedback(const struct MatchSession *session,
+                                 enum PlayerType actor,
+                                 const struct GameAction *action,
+                                 const struct GameActionResult *result);
 static bool broadcast_host_snapshot(struct MatchSession *session);
 static void handle_netplay_event(struct MatchSession *session, const struct NetplayEvent *event);
 static void reset_client_transient_ui(void);
@@ -63,6 +72,207 @@ static bool actions_match(const struct GameAction *a, const struct GameAction *b
            a->resourceB == b->resourceB &&
            a->amountA == b->amountA &&
            a->amountB == b->amountB;
+}
+
+static void init_action_result(struct GameActionResult *result)
+{
+    if (result == NULL)
+    {
+        return;
+    }
+
+    memset(result, 0, sizeof(*result));
+    result->drawnCard = DEVELOPMENT_CARD_COUNT;
+    result->stolenResource = RESOURCE_WOOD;
+}
+
+static enum DevelopmentCardType development_card_for_action(enum GameActionType type)
+{
+    switch (type)
+    {
+    case GAME_ACTION_PLAY_KNIGHT:
+        return DEVELOPMENT_CARD_KNIGHT;
+    case GAME_ACTION_PLAY_ROAD_BUILDING:
+        return DEVELOPMENT_CARD_ROAD_BUILDING;
+    case GAME_ACTION_PLAY_YEAR_OF_PLENTY:
+        return DEVELOPMENT_CARD_YEAR_OF_PLENTY;
+    case GAME_ACTION_PLAY_MONOPOLY:
+        return DEVELOPMENT_CARD_MONOPOLY;
+    default:
+        return DEVELOPMENT_CARD_COUNT;
+    }
+}
+
+static bool action_actor_is_local_viewer(const struct MatchSession *session, enum PlayerType actor)
+{
+    if (session == NULL || actor < PLAYER_RED || actor > PLAYER_BLACK)
+    {
+        return false;
+    }
+
+    if (session->map.players[actor].controlMode == PLAYER_CONTROL_AI)
+    {
+        return false;
+    }
+
+    return session->seatAuthority[actor] == MATCH_SEAT_LOCAL;
+}
+
+static void show_action_feedback(const struct MatchSession *session,
+                                 enum PlayerType actor,
+                                 const struct GameAction *action,
+                                 const struct GameActionResult *result)
+{
+    char message[160];
+    const bool actorIsLocal = action_actor_is_local_viewer(session, actor);
+    const char *actorLabel = actor >= PLAYER_RED && actor <= PLAYER_BLACK ? locPlayerName(actor) : loc("A player");
+    const char *targetLabel = action != NULL && action->player >= PLAYER_RED && action->player <= PLAYER_BLACK
+                                  ? locPlayerName(action->player)
+                                  : loc("A player");
+    enum DevelopmentCardType cardType = DEVELOPMENT_CARD_COUNT;
+    const int rolledTotal = result != NULL && result->diceRoll >= 2 && result->diceRoll <= 12
+                                ? result->diceRoll
+                                : (action != NULL ? action->diceRoll : 0);
+
+    if (action == NULL)
+    {
+        return;
+    }
+
+    switch (action->type)
+    {
+    case GAME_ACTION_ROLL_DICE:
+        if (!actorIsLocal && rolledTotal >= 2 && rolledTotal <= 12)
+        {
+            snprintf(message, sizeof(message), loc("%s rolled %d."), actorLabel, rolledTotal);
+            uiShowCenteredStatusForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
+        }
+        return;
+    case GAME_ACTION_PLACE_ROAD:
+        if (actorIsLocal)
+        {
+            uiShowCenteredStatus(loc("Road placed."), UI_NOTIFICATION_POSITIVE);
+        }
+        else
+        {
+            snprintf(message, sizeof(message), loc("%s built a road."), actorLabel);
+            uiShowCenteredStatusForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
+        }
+        return;
+    case GAME_ACTION_PLACE_SETTLEMENT:
+        if (actorIsLocal)
+        {
+            uiShowCenteredStatus(loc("Settlement placed."), UI_NOTIFICATION_POSITIVE);
+        }
+        else
+        {
+            snprintf(message, sizeof(message), loc("%s built a settlement."), actorLabel);
+            uiShowCenteredStatusForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
+        }
+        return;
+    case GAME_ACTION_PLACE_CITY:
+        if (actorIsLocal)
+        {
+            uiShowCenteredStatus(loc("City built."), UI_NOTIFICATION_POSITIVE);
+        }
+        else
+        {
+            snprintf(message, sizeof(message), loc("%s built a city."), actorLabel);
+            uiShowCenteredStatusForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
+        }
+        return;
+    case GAME_ACTION_SUBMIT_DISCARD:
+        if (actorIsLocal)
+        {
+            uiShowCenteredStatus(loc("Cards discarded."), UI_NOTIFICATION_NEUTRAL);
+        }
+        else
+        {
+            snprintf(message, sizeof(message), loc("%s discarded cards."), actorLabel);
+            uiShowCenteredStatusForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
+        }
+        return;
+    case GAME_ACTION_MOVE_THIEF:
+        if (actorIsLocal)
+        {
+            uiShowCenteredStatus(loc("Thief moved."), UI_NOTIFICATION_NEUTRAL);
+        }
+        else
+        {
+            snprintf(message, sizeof(message), loc("%s moved the thief."), actorLabel);
+            uiShowCenteredStatusForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
+        }
+        return;
+    case GAME_ACTION_STEAL_RANDOM_RESOURCE:
+        if (!actorIsLocal)
+        {
+            snprintf(message, sizeof(message), loc("%s stole from %s."), actorLabel, targetLabel);
+            uiShowCenteredStatusForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
+        }
+        return;
+    case GAME_ACTION_BUY_DEVELOPMENT:
+        if (actorIsLocal)
+        {
+            if (result != NULL &&
+                result->drawnCard >= DEVELOPMENT_CARD_KNIGHT &&
+                result->drawnCard < DEVELOPMENT_CARD_COUNT)
+            {
+                snprintf(message, sizeof(message), loc("Bought %s."), locDevelopmentCardTitle(result->drawnCard));
+                uiShowCenteredStatus(message, UI_NOTIFICATION_POSITIVE);
+            }
+            else
+            {
+                uiShowCenteredStatus(loc("Development card bought."), UI_NOTIFICATION_POSITIVE);
+            }
+        }
+        else
+        {
+            snprintf(message, sizeof(message), loc("%s bought a development card."), actorLabel);
+            uiShowCenteredStatusForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
+        }
+        return;
+    case GAME_ACTION_PLAY_KNIGHT:
+    case GAME_ACTION_PLAY_ROAD_BUILDING:
+    case GAME_ACTION_PLAY_YEAR_OF_PLENTY:
+    case GAME_ACTION_PLAY_MONOPOLY:
+        cardType = development_card_for_action(action->type);
+        if (cardType >= DEVELOPMENT_CARD_KNIGHT && cardType < DEVELOPMENT_CARD_COUNT)
+        {
+            if (actorIsLocal)
+            {
+                snprintf(message, sizeof(message), loc("Played %s."), locDevelopmentCardTitle(cardType));
+                uiShowCenteredStatus(message, UI_NOTIFICATION_NEUTRAL);
+            }
+            else
+            {
+                snprintf(message, sizeof(message), loc("%s played %s."), actorLabel, locDevelopmentCardTitle(cardType));
+                uiShowCenteredStatusForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
+            }
+        }
+        return;
+    case GAME_ACTION_TRADE_MARITIME:
+        if (actorIsLocal)
+        {
+            uiShowCenteredStatus(loc("Trade completed."), UI_NOTIFICATION_POSITIVE);
+        }
+        else
+        {
+            snprintf(message, sizeof(message), loc("%s traded with the bank."), actorLabel);
+            uiShowCenteredStatusForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
+        }
+        return;
+    case GAME_ACTION_TRADE_WITH_PLAYER:
+        if (!actorIsLocal)
+        {
+            snprintf(message, sizeof(message), loc("%s traded with %s."), actorLabel, targetLabel);
+            uiShowCenteredStatusForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
+        }
+        return;
+    case GAME_ACTION_NONE:
+    case GAME_ACTION_END_TURN:
+    default:
+        return;
+    }
 }
 
 static enum PlayerType active_decision_player(const struct MatchSession *session)
@@ -415,11 +625,20 @@ bool matchSessionLocalCanActOnCurrentDecision(const struct MatchSession *session
     return matchSessionLocalControlsPlayer(session, active_decision_player(session));
 }
 
-static void apply_client_authoritative_result(const struct GameAction *action, const struct GameActionResult *result)
+static void apply_client_authoritative_result(const struct MatchSession *session,
+                                              const struct GameAction *action,
+                                              const struct GameActionResult *result)
 {
+    const enum PlayerType actor = active_decision_player(session);
+
     if (action == NULL || result == NULL)
     {
         return;
+    }
+
+    if (!action_actor_is_local_viewer(session, actor) || is_authoritative_only_action(action->type))
+    {
+        show_action_feedback(session, actor, action, result);
     }
 
     if (action->type == GAME_ACTION_ROLL_DICE && result->diceRoll >= 2 && result->diceRoll <= 12)
@@ -441,6 +660,9 @@ static bool submit_client_action(struct MatchSession *session,
                                  struct GameActionResult *result)
 {
     struct GameAction outboundAction;
+    struct GameActionResult localResult;
+    struct GameActionResult *applyResult = result;
+    const enum PlayerType actor = active_decision_player(session);
     bool appliedLocally = false;
     const bool remoteHumanTrade = action != NULL &&
                                   action->type == GAME_ACTION_TRADE_WITH_PLAYER &&
@@ -462,8 +684,7 @@ static bool submit_client_action(struct MatchSession *session,
         struct Map simulatedMap = session->map;
         struct GameActionResult simulatedResult;
 
-        memset(&simulatedResult, 0, sizeof(simulatedResult));
-        simulatedResult.drawnCard = DEVELOPMENT_CARD_COUNT;
+        init_action_result(&simulatedResult);
         if (!gameApplyAction(&simulatedMap, action, context, &simulatedResult))
         {
             return false;
@@ -477,17 +698,23 @@ static bool submit_client_action(struct MatchSession *session,
 
     if (!is_authoritative_only_action(action->type) && !remoteHumanTrade)
     {
-        appliedLocally = gameApplyAction(&session->map, action, context, result);
+        if (applyResult == NULL)
+        {
+            init_action_result(&localResult);
+            applyResult = &localResult;
+        }
+
+        appliedLocally = gameApplyAction(&session->map, action, context, applyResult);
         if (!appliedLocally)
         {
             return false;
         }
         matchSessionRefreshStateHash(session);
+        show_action_feedback(session, actor, action, applyResult);
     }
     else if (result != NULL)
     {
-        memset(result, 0, sizeof(*result));
-        result->drawnCard = DEVELOPMENT_CARD_COUNT;
+        init_action_result(result);
     }
 
     if (remoteHumanTrade)
@@ -554,8 +781,7 @@ bool matchSessionRespondToPendingTradeOffer(struct MatchSession *session, bool a
         return false;
     }
 
-    memset(&actionResult, 0, sizeof(actionResult));
-    actionResult.drawnCard = DEVELOPMENT_CARD_COUNT;
+    init_action_result(&actionResult);
     if (accept)
     {
         applied = gameApplyAction(&session->map, &session->pendingTradeOffer, NULL, &actionResult);
@@ -584,8 +810,10 @@ bool matchSessionSubmitAction(struct MatchSession *session,
                               struct GameActionResult *result)
 {
     bool applied = false;
+    struct GameActionResult localResult;
     struct GameActionResult authoritativeResult;
     struct GameActionResult *authoritativeResultPtr = result;
+    const enum PlayerType actor = active_decision_player(session);
 
     if (session == NULL || action == NULL)
     {
@@ -594,10 +822,17 @@ bool matchSessionSubmitAction(struct MatchSession *session,
 
     if (!matchSessionIsNetplay(session))
     {
-        applied = gameApplyAction(&session->map, action, context, result);
+        if (authoritativeResultPtr == NULL)
+        {
+            init_action_result(&localResult);
+            authoritativeResultPtr = &localResult;
+        }
+
+        applied = gameApplyAction(&session->map, action, context, authoritativeResultPtr);
         if (applied)
         {
             matchSessionRefreshStateHash(session);
+            show_action_feedback(session, actor, action, authoritativeResultPtr);
         }
         return applied;
     }
@@ -633,16 +868,14 @@ bool matchSessionSubmitAction(struct MatchSession *session,
         uiShowCenteredStatus(loc("Trade offer sent to remote player."), UI_NOTIFICATION_NEUTRAL);
         if (result != NULL)
         {
-            memset(result, 0, sizeof(*result));
-            result->drawnCard = DEVELOPMENT_CARD_COUNT;
+            init_action_result(result);
         }
         return true;
     }
 
     if (authoritativeResultPtr == NULL)
     {
-        memset(&authoritativeResult, 0, sizeof(authoritativeResult));
-        authoritativeResult.drawnCard = DEVELOPMENT_CARD_COUNT;
+        init_action_result(&authoritativeResult);
         authoritativeResultPtr = &authoritativeResult;
     }
 
@@ -653,6 +886,7 @@ bool matchSessionSubmitAction(struct MatchSession *session,
     }
 
     matchSessionRefreshStateHash(session);
+    show_action_feedback(session, actor, action, authoritativeResultPtr);
     if (session->netplay != NULL && netplayIsConnected(session->netplay))
     {
         netplayQueueActionResult(session->netplay, action, authoritativeResultPtr, session->stateHash);
@@ -800,6 +1034,7 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
         {
             struct GameAction authoritativeAction = event->action;
             struct GameActionResult actionResult;
+            const enum PlayerType actor = active_decision_player(session);
 
             if (authoritativeAction.type == GAME_ACTION_ROLL_DICE)
             {
@@ -827,11 +1062,11 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
                 break;
             }
 
-            memset(&actionResult, 0, sizeof(actionResult));
-            actionResult.drawnCard = DEVELOPMENT_CARD_COUNT;
+            init_action_result(&actionResult);
             if (gameApplyAction(&session->map, &authoritativeAction, NULL, &actionResult))
             {
                 matchSessionRefreshStateHash(session);
+                show_action_feedback(session, actor, &authoritativeAction, &actionResult);
                 if (session->netplay != NULL)
                 {
                     netplayQueueActionResult(session->netplay, &authoritativeAction, &actionResult, session->stateHash);
@@ -853,7 +1088,7 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
 
     case NETPLAY_EVENT_ACTION_RESULT:
         session->awaitingAuthoritativeUpdate = false;
-        apply_client_authoritative_result(&event->action, &event->result);
+        apply_client_authoritative_result(session, &event->action, &event->result);
         break;
 
     case NETPLAY_EVENT_ACTION_REJECT:
@@ -885,8 +1120,7 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
                 if (event->accepted)
                 {
                     struct GameActionResult actionResult;
-                    memset(&actionResult, 0, sizeof(actionResult));
-                    actionResult.drawnCard = DEVELOPMENT_CARD_COUNT;
+                    init_action_result(&actionResult);
                     if (gameApplyAction(&session->map, &session->pendingTradeOffer, NULL, &actionResult))
                     {
                         matchSessionRefreshStateHash(session);

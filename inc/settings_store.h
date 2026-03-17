@@ -10,6 +10,7 @@
 struct PersistedSettings
 {
     enum UiTheme theme;
+    enum UiWindowMode windowMode;
     enum UiLanguage language;
     int aiSpeed;
     enum AiDifficulty aiDifficulty;
