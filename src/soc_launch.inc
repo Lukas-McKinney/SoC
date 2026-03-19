@@ -122,6 +122,7 @@ static void LoadPersistedSettings(void)
     uiSetAiSpeedSetting(settings.aiSpeed);
     MainMenuSetAiDifficulty(settings.aiDifficulty);
     MainMenuSetHumanColor(settings.humanColor);
+    uiSetProfileName(settings.profileName);
     MainMenuSetMultiplayerHostAddress(settings.multiplayerHostAddress);
     MainMenuSetMultiplayerPort(settings.multiplayerPort);
     uiSetPersistedTotalPlaytimeSeconds(settings.totalPlaytimeSeconds);

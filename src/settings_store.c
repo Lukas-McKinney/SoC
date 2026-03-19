@@ -36,6 +36,7 @@ void settingsStoreLoadDefaults(struct PersistedSettings *settings)
     settings->totalPlaytimeSeconds = 0ULL;
     settings->totalWins = 0ULL;
     settings->totalLosses = 0ULL;
+    snprintf(settings->profileName, sizeof(settings->profileName), "%s", "Player");
     snprintf(settings->multiplayerHostAddress, sizeof(settings->multiplayerHostAddress), "%s", "127.0.0.1");
     settings->multiplayerPort = 24680u;
 }
@@ -181,6 +182,14 @@ bool settingsStoreLoad(struct PersistedSettings *settings)
                 loaded = true;
             }
         }
+        else if (strcmp(key, "profile_name") == 0)
+        {
+            snprintf(settings->profileName,
+                     sizeof(settings->profileName),
+                     "%s",
+                     value[0] != '\0' ? value : "Player");
+            loaded = true;
+        }
         else if (strcmp(key, "multiplayer_host") == 0)
         {
             snprintf(settings->multiplayerHostAddress,
@@ -229,6 +238,7 @@ bool settingsStoreSave(const struct PersistedSettings *settings)
     fprintf(file, "total_playtime_seconds=%llu\n", settings->totalPlaytimeSeconds);
     fprintf(file, "total_wins=%llu\n", settings->totalWins);
     fprintf(file, "total_losses=%llu\n", settings->totalLosses);
+    fprintf(file, "profile_name=%s\n", settings->profileName);
     fprintf(file, "multiplayer_host=%s\n", settings->multiplayerHostAddress);
     fprintf(file, "multiplayer_port=%u\n", (unsigned int)settings->multiplayerPort);
 
@@ -249,6 +259,10 @@ bool settingsStoreSaveCurrent(void)
     settings.totalPlaytimeSeconds = uiGetTotalPlaytimeSeconds();
     settings.totalWins = uiGetTotalWins();
     settings.totalLosses = uiGetTotalLosses();
+    snprintf(settings.profileName,
+             sizeof(settings.profileName),
+             "%s",
+             uiGetProfileName());
     snprintf(settings.multiplayerHostAddress,
              sizeof(settings.multiplayerHostAddress),
              "%s",

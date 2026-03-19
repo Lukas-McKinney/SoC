@@ -13,6 +13,7 @@
 #define NETPLAY_MAX_PAYLOAD_SIZE 65536u
 #define NETPLAY_MAX_STATUS_TEXT 96
 #define NETPLAY_MAX_PEER_ADDRESS 63
+#define NETPLAY_MAX_HOST_REMOTE_PLAYERS 3
 
 #define NETPLAY_CAPABILITY_HEARTBEAT 0x00000001u
 #define NETPLAY_CAPABILITY_SNAPSHOT_RESYNC 0x00000002u
@@ -51,7 +52,9 @@ enum NetplayEventType
     NETPLAY_EVENT_TRADE_OFFER,
     NETPLAY_EVENT_TRADE_RESPONSE,
     NETPLAY_EVENT_CAPABILITIES,
-    NETPLAY_EVENT_RESYNC_REQUEST
+    NETPLAY_EVENT_RESYNC_REQUEST,
+    NETPLAY_EVENT_ADDITIONAL_CLIENT_CONNECTED,
+    NETPLAY_EVENT_ADDITIONAL_CLIENT_DISCONNECTED
 };
 
 struct NetplayLobbyStateInfo
@@ -77,6 +80,7 @@ struct NetplayHelloInfo
 struct NetplayEvent
 {
     enum NetplayEventType type;
+    int peerId;
     struct NetplayHelloInfo hello;
     struct NetplayLobbyStateInfo lobbyState;
     struct NetplayMatchInitInfo matchInit;
@@ -106,7 +110,15 @@ bool netplayQueueHello(struct NetplayState *state,
                        enum PlayerType assignedPlayer,
                        enum PlayerType hostPlayer,
                        const int seatAuthority[MAX_PLAYERS]);
+bool netplayQueueHelloForHostPeer(struct NetplayState *state,
+                                  int peerId,
+                                  enum PlayerType assignedPlayer,
+                                  enum PlayerType hostPlayer,
+                                  const int seatAuthority[MAX_PLAYERS]);
 bool netplayQueueLobbyState(struct NetplayState *state, const struct NetplayLobbyStateInfo *info);
+bool netplayQueueLobbyStateForHostPeer(struct NetplayState *state,
+                                       int peerId,
+                                       const struct NetplayLobbyStateInfo *info);
 bool netplayQueueMatchInit(struct NetplayState *state, const struct NetplayMatchInitInfo *info);
 bool netplayQueueSnapshot(struct NetplayState *state, const unsigned char *payload, size_t payloadSize);
 bool netplayQueueActionRequest(struct NetplayState *state, const struct GameAction *action);
@@ -116,10 +128,18 @@ bool netplayQueueActionResult(struct NetplayState *state,
                               uint32_t stateHash);
 bool netplayQueueActionReject(struct NetplayState *state, const char *message, uint32_t stateHash);
 bool netplayQueueTradeOffer(struct NetplayState *state, const struct GameAction *offerAction);
+bool netplayQueueTradeOfferForHostPeer(struct NetplayState *state,
+                                       int peerId,
+                                       const struct GameAction *offerAction);
 bool netplayQueueTradeResponse(struct NetplayState *state,
                                const struct GameAction *offerAction,
                                bool accepted,
                                uint32_t stateHash);
+bool netplayQueueTradeResponseForHostPeer(struct NetplayState *state,
+                                          int peerId,
+                                          const struct GameAction *offerAction,
+                                          bool accepted,
+                                          uint32_t stateHash);
 bool netplayQueueCapabilities(struct NetplayState *state,
                               uint32_t capabilityFlags,
                               uint32_t protocolMinVersion,
@@ -133,5 +153,6 @@ const char *netplayGetLastError(const struct NetplayState *state);
 const char *netplayGetPeerAddress(const struct NetplayState *state);
 const char *netplayGetLocalAddress(const struct NetplayState *state);
 unsigned short netplayGetPort(const struct NetplayState *state);
+int netplayGetTrackedHostPeerCount(const struct NetplayState *state);
 
 #endif

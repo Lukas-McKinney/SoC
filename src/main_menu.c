@@ -63,6 +63,7 @@ static Rectangle GetSettingsPopupBounds(void);
 static Rectangle GetSettingsPopupThemeButtonBounds(void);
 static Rectangle GetSettingsPopupDisplayButtonBounds(void);
 static Rectangle GetSettingsPopupLanguageButtonBounds(void);
+static Rectangle GetSettingsPopupProfileNameFieldBounds(void);
 static Rectangle GetSettingsPopupAiSpeedTrackBounds(void);
 static Rectangle GetSettingsPopupCloseButtonBounds(void);
 static struct LocalLobbyLayout BuildLocalLobbyLayout(void);
@@ -92,6 +93,11 @@ static void HandleMultiplayerKeyboardInput(void);
 static void AppendMultiplayerFieldChar(char *buffer, size_t bufferSize, int codepoint);
 static void RemoveMultiplayerFieldChar(char *buffer);
 static bool ValidateMultiplayerConfig(char *message, size_t messageSize);
+static void TrimMultiplayerHostAddress(void);
+static const char *MultiplayerJoinDiagnosis(const char *errorMessage);
+static void HandleProfileNameKeyboardInput(void);
+static void AppendProfileNameChar(char *buffer, size_t bufferSize, int codepoint);
+static void ApplyProfileNameFromBuffer(void);
 
 static enum AiDifficulty gMainMenuAiDifficulty = AI_DIFFICULTY_MEDIUM;
 static enum PlayerType gMainMenuHumanColor = PLAYER_RED;
@@ -113,6 +119,8 @@ static enum AiDifficulty gMainMenuMultiplayerAiDifficulty = AI_DIFFICULTY_MEDIUM
 static char gMainMenuMultiplayerHostAddress[64] = "127.0.0.1";
 static char gMainMenuMultiplayerPortText[8] = "24680";
 static char gMainMenuMultiplayerError[96] = {0};
+static bool gMainMenuProfileNameEditing = false;
+static char gMainMenuProfileNameBuffer[32] = "Player";
 
 void DrawMainMenu(void)
 {
@@ -266,11 +274,18 @@ enum MainMenuAction HandleMainMenuInput(void)
         const Rectangle themeButton = GetSettingsPopupThemeButtonBounds();
         const Rectangle displayButton = GetSettingsPopupDisplayButtonBounds();
         const Rectangle languageButton = GetSettingsPopupLanguageButtonBounds();
+        const Rectangle profileNameField = GetSettingsPopupProfileNameFieldBounds();
         const Rectangle aiSpeedTrack = GetSettingsPopupAiSpeedTrackBounds();
         const Rectangle closeButton = GetSettingsPopupCloseButtonBounds();
 
+        if (gMainMenuProfileNameEditing)
+        {
+            HandleProfileNameKeyboardInput();
+        }
+
         if (IsKeyPressed(KEY_ESCAPE))
         {
+            gMainMenuProfileNameEditing = false;
             gMainMenuSettingsOpen = false;
             return MAIN_MENU_ACTION_NONE;
         }
@@ -294,8 +309,19 @@ enum MainMenuAction HandleMainMenuInput(void)
 
         if (!CheckCollisionPointRec(mouse, settingsPanel) || CheckCollisionPointRec(mouse, closeButton))
         {
+            if (gMainMenuProfileNameEditing)
+            {
+                ApplyProfileNameFromBuffer();
+            }
+            gMainMenuProfileNameEditing = false;
             gMainMenuSettingsOpen = false;
             return MAIN_MENU_ACTION_NONE;
+        }
+
+        if (gMainMenuProfileNameEditing && !CheckCollisionPointRec(mouse, profileNameField))
+        {
+            ApplyProfileNameFromBuffer();
+            gMainMenuProfileNameEditing = false;
         }
 
         if (CheckCollisionPointRec(mouse, themeButton))
@@ -312,9 +338,25 @@ enum MainMenuAction HandleMainMenuInput(void)
         }
         if (CheckCollisionPointRec(mouse, languageButton))
         {
+            gMainMenuProfileNameEditing = false;
             locSetLanguage((enum UiLanguage)((locGetLanguage() + 1) % UI_LANGUAGE_COUNT));
             settingsStoreSaveCurrent();
             return MAIN_MENU_ACTION_NONE;
+        }
+        if (CheckCollisionPointRec(mouse, profileNameField))
+        {
+            snprintf(gMainMenuProfileNameBuffer,
+                     sizeof(gMainMenuProfileNameBuffer),
+                     "%s",
+                     uiGetProfileName());
+            gMainMenuProfileNameEditing = true;
+            return MAIN_MENU_ACTION_NONE;
+        }
+
+        if (gMainMenuProfileNameEditing)
+        {
+            ApplyProfileNameFromBuffer();
+            gMainMenuProfileNameEditing = false;
         }
 
         return MAIN_MENU_ACTION_NONE;
@@ -438,6 +480,11 @@ enum MainMenuAction HandleMainMenuInput(void)
     if (CheckCollisionPointRec(mouse, GetMainMenuSettingsButtonBounds()))
     {
         gMainMenuSettingsOpen = true;
+        gMainMenuProfileNameEditing = false;
+        snprintf(gMainMenuProfileNameBuffer,
+                 sizeof(gMainMenuProfileNameBuffer),
+                 "%s",
+                 uiGetProfileName());
         gMainMenuPopupStartAction = MAIN_MENU_ACTION_NONE;
         gMainMenuStatisticsOpen = false;
         gMainMenuMultiplayerOpen = false;
@@ -673,7 +720,7 @@ static Rectangle GetStatisticsPopupCloseButtonBounds(void)
 static Rectangle GetSettingsPopupBounds(void)
 {
     const float panelWidth = 408.0f;
-    const float panelHeight = 404.0f;
+    const float panelHeight = 468.0f;
     return (Rectangle){
         (float)GetScreenWidth() * 0.5f - panelWidth * 0.5f,
         (float)GetScreenHeight() * 0.5f - panelHeight * 0.5f,
@@ -699,10 +746,16 @@ static Rectangle GetSettingsPopupLanguageButtonBounds(void)
     return (Rectangle){panel.x + 28.0f, panel.y + 196.0f, panel.width - 56.0f, 42.0f};
 }
 
+static Rectangle GetSettingsPopupProfileNameFieldBounds(void)
+{
+    const Rectangle panel = GetSettingsPopupBounds();
+    return (Rectangle){panel.x + 28.0f, panel.y + 250.0f, panel.width - 56.0f, 42.0f};
+}
+
 static Rectangle GetSettingsPopupAiSpeedTrackBounds(void)
 {
     const Rectangle panel = GetSettingsPopupBounds();
-    return (Rectangle){panel.x + 36.0f, panel.y + 288.0f, panel.width - 72.0f, 10.0f};
+    return (Rectangle){panel.x + 36.0f, panel.y + 350.0f, panel.width - 72.0f, 10.0f};
 }
 
 static Rectangle GetSettingsPopupCloseButtonBounds(void)
@@ -863,6 +916,7 @@ static void DrawLocalLobbyPopup(void)
 {
     char difficultyLabel[40];
     char seatLabel[48];
+    char profileLine[96];
     struct LocalLobbyLayout layout;
     const Vector2 mouse = GetMousePosition();
     const bool darkTheme = uiGetTheme() == UI_THEME_DARK;
@@ -892,6 +946,8 @@ static void DrawLocalLobbyPopup(void)
     DrawUiText(loc("Lobby"), layout.panel.x + 26.0f, layout.panel.y + 24.0f, 30, textColor);
     DrawUiText(loc("See all four seats before the match starts."), layout.panel.x + 26.0f, layout.panel.y + 60.0f, 18, bodyColor);
     DrawUiText(loc("Click a seat to toggle Human or AI."), layout.panel.x + 26.0f, layout.panel.y + 86.0f, 16, bodyColor);
+    snprintf(profileLine, sizeof(profileLine), loc("Profile: %s"), uiGetProfileName());
+    DrawUiText(profileLine, layout.panel.x + 26.0f, layout.panel.y + 106.0f, 15, bodyColor);
 
     for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
     {
@@ -1016,6 +1072,7 @@ static void DrawSettingsPopup(void)
     const Rectangle themeButton = GetSettingsPopupThemeButtonBounds();
     const Rectangle displayButton = GetSettingsPopupDisplayButtonBounds();
     const Rectangle languageButton = GetSettingsPopupLanguageButtonBounds();
+    const Rectangle profileNameField = GetSettingsPopupProfileNameFieldBounds();
     const Rectangle aiSpeedTrack = GetSettingsPopupAiSpeedTrackBounds();
     const Rectangle closeButton = GetSettingsPopupCloseButtonBounds();
     const Color panelColor = darkTheme ? (Color){35, 43, 55, 252} : (Color){245, 237, 217, 252};
@@ -1030,6 +1087,7 @@ static void DrawSettingsPopup(void)
     char themeLabel[48];
     char displayLabel[48];
     char languageLabel[64];
+    char profileLabel[64];
 
     if (!gMainMenuSettingsOpen)
     {
@@ -1049,6 +1107,10 @@ static void DrawSettingsPopup(void)
              sizeof(languageLabel),
              loc("Language: %s"),
              locLanguageDisplayName(locGetLanguage()));
+    snprintf(profileLabel,
+             sizeof(profileLabel),
+             loc("Profile: %s"),
+             uiGetProfileName());
 
     DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, darkTheme ? 0.46f : 0.28f));
     DrawRectangleRounded((Rectangle){panel.x + 8.0f, panel.y + 10.0f, panel.width, panel.height}, 0.08f, 8, Fade(BLACK, 0.16f));
@@ -1060,8 +1122,18 @@ static void DrawSettingsPopup(void)
     DrawMenuButton(themeButton, themeLabel, sectionFill, borderColor, textColor, false);
     DrawMenuButton(displayButton, displayLabel, sectionFill, borderColor, textColor, false);
     DrawMenuButton(languageButton, languageLabel, sectionFill, borderColor, textColor, false);
+    DrawTextField(profileNameField,
+                  loc("Profile Name"),
+                  gMainMenuProfileNameEditing ? gMainMenuProfileNameBuffer : uiGetProfileName(),
+                  loc("Player"),
+                  gMainMenuProfileNameEditing,
+                  darkTheme ? (Color){51, 63, 79, 255} : (Color){236, 229, 210, 255},
+                  borderColor,
+                  textColor,
+                  bodyColor);
 
-    DrawUiText(loc("AI Speed"), panel.x + 28.0f, panel.y + 246.0f, 18, bodyColor);
+    DrawUiText(profileLabel, panel.x + 28.0f, panel.y + 300.0f, 15, bodyColor);
+    DrawUiText(loc("AI Speed"), panel.x + 28.0f, panel.y + 324.0f, 18, bodyColor);
     DrawUiText(loc("0 slow"), aiSpeedTrack.x, aiSpeedTrack.y + 16.0f, 14, bodyColor);
     DrawUiText(loc("10 instant"), aiSpeedTrack.x + aiSpeedTrack.width - MeasureUiText(loc("10 instant"), 14), aiSpeedTrack.y + 16.0f, 14, bodyColor);
     DrawRectangleRounded(aiSpeedTrack, 0.45f, 8, darkTheme ? (Color){51, 63, 79, 255} : (Color){224, 216, 198, 255});
@@ -1087,6 +1159,7 @@ static void DrawMultiplayerPopup(void)
     const Color bodyColor = darkTheme ? (Color){194, 205, 216, 255} : (Color){92, 70, 50, 255};
     const Color accentColor = darkTheme ? (Color){188, 135, 83, 255} : (Color){171, 82, 54, 255};
     const Color sectionFill = darkTheme ? (Color){63, 77, 95, 255} : (Color){233, 226, 207, 255};
+    const char *joinDiagnosis = NULL;
 
     if (!gMainMenuMultiplayerOpen)
     {
@@ -1107,7 +1180,7 @@ static void DrawMultiplayerPopup(void)
     DrawRectangleLinesEx(layout.panel, 2.0f, borderColor);
 
     DrawUiText(loc("Multiplayer"), layout.panel.x + 26.0f, layout.panel.y + 24.0f, 30, textColor);
-    DrawUiText(loc("Private multiplayer currently supports 2 humans and AI."), layout.panel.x + 26.0f, layout.panel.y + 60.0f, 17, bodyColor);
+    DrawUiText(loc("Private multiplayer supports up to 4 humans and AI."), layout.panel.x + 26.0f, layout.panel.y + 60.0f, 17, bodyColor);
     DrawUiText(loc("Mode"), layout.panel.x + 26.0f, layout.panel.y + 82.0f, 16, bodyColor);
     DrawMenuButton(layout.hostModeButton, loc("Host"),
                    gMainMenuMultiplayerMode == MAIN_MENU_MULTIPLAYER_HOST ? accentColor : sectionFill,
@@ -1141,6 +1214,7 @@ static void DrawMultiplayerPopup(void)
                       borderColor,
                       textColor,
                       bodyColor);
+        DrawUiText(loc("Press Ctrl+V to paste."), layout.panel.x + 26.0f, layout.hostAddressField.y + layout.hostAddressField.height + 8.0f, 15, bodyColor);
     }
     else
     {
@@ -1160,6 +1234,15 @@ static void DrawMultiplayerPopup(void)
     if (gMainMenuMultiplayerError[0] != '\0')
     {
         DrawUiText(gMainMenuMultiplayerError, layout.panel.x + 26.0f, layout.confirmButton.y - 34.0f, 16, (Color){171, 82, 54, 255});
+        if (joinMode)
+        {
+            joinDiagnosis = MultiplayerJoinDiagnosis(gMainMenuMultiplayerError);
+            DrawUiText(joinDiagnosis, layout.panel.x + 26.0f, layout.confirmButton.y - 14.0f, 15, bodyColor);
+            DrawUiText(loc("Quick checks:"), layout.panel.x + 26.0f, layout.confirmButton.y + 4.0f, 15, bodyColor);
+            DrawUiText(loc("1) Host clicked Open Lobby."), layout.panel.x + 34.0f, layout.confirmButton.y + 20.0f, 14, bodyColor);
+            DrawUiText(loc("2) Use host LAN IP on same network."), layout.panel.x + 34.0f, layout.confirmButton.y + 36.0f, 14, bodyColor);
+            DrawUiText(loc("3) Allow app through host firewall."), layout.panel.x + 34.0f, layout.confirmButton.y + 52.0f, 14, bodyColor);
+        }
     }
 
     DrawMenuButton(layout.confirmButton,
@@ -1337,6 +1420,31 @@ static void HandleMultiplayerKeyboardInput(void)
         return;
     }
 
+    if (gMainMenuMultiplayerField == MAIN_MENU_MULTIPLAYER_FIELD_HOST_ADDRESS &&
+        (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)) &&
+        IsKeyPressed(KEY_V))
+    {
+        const char *clipboardText = GetClipboardText();
+        if (clipboardText != NULL)
+        {
+            size_t writeIndex = 0u;
+            for (size_t i = 0u; clipboardText[i] != '\0' && writeIndex + 1u < activeBufferSize; i++)
+            {
+                const int c = (unsigned char)clipboardText[i];
+                if ((c >= '0' && c <= '9') ||
+                    (c >= 'A' && c <= 'Z') ||
+                    (c >= 'a' && c <= 'z') ||
+                    c == '.' || c == '-' || c == ':')
+                {
+                    activeBuffer[writeIndex++] = (char)c;
+                }
+            }
+            activeBuffer[writeIndex] = '\0';
+            gMainMenuMultiplayerError[0] = '\0';
+            TrimMultiplayerHostAddress();
+        }
+    }
+
     if (IsKeyPressed(KEY_BACKSPACE))
     {
         RemoveMultiplayerFieldChar(activeBuffer);
@@ -1398,12 +1506,77 @@ static void RemoveMultiplayerFieldChar(char *buffer)
     }
 }
 
+static void HandleProfileNameKeyboardInput(void)
+{
+    int codepoint = 0;
+
+    if (!gMainMenuSettingsOpen || !gMainMenuProfileNameEditing)
+    {
+        return;
+    }
+
+    if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER))
+    {
+        ApplyProfileNameFromBuffer();
+        gMainMenuProfileNameEditing = false;
+        return;
+    }
+
+    if (IsKeyPressed(KEY_BACKSPACE))
+    {
+        const size_t length = strlen(gMainMenuProfileNameBuffer);
+        if (length > 0u)
+        {
+            gMainMenuProfileNameBuffer[length - 1u] = '\0';
+        }
+    }
+
+    codepoint = GetCharPressed();
+    while (codepoint > 0)
+    {
+        AppendProfileNameChar(gMainMenuProfileNameBuffer,
+                              sizeof(gMainMenuProfileNameBuffer),
+                              codepoint);
+        codepoint = GetCharPressed();
+    }
+}
+
+static void AppendProfileNameChar(char *buffer, size_t bufferSize, int codepoint)
+{
+    const size_t length = buffer != NULL ? strlen(buffer) : 0u;
+
+    if (buffer == NULL || length + 1u >= bufferSize)
+    {
+        return;
+    }
+
+    if ((codepoint >= '0' && codepoint <= '9') ||
+        (codepoint >= 'A' && codepoint <= 'Z') ||
+        (codepoint >= 'a' && codepoint <= 'z') ||
+        codepoint == ' ' || codepoint == '_' || codepoint == '-' || codepoint == '.')
+    {
+        buffer[length] = (char)codepoint;
+        buffer[length + 1u] = '\0';
+    }
+}
+
+static void ApplyProfileNameFromBuffer(void)
+{
+    uiSetProfileName(gMainMenuProfileNameBuffer);
+    snprintf(gMainMenuProfileNameBuffer,
+             sizeof(gMainMenuProfileNameBuffer),
+             "%s",
+             uiGetProfileName());
+    settingsStoreSaveCurrent();
+}
+
 static bool ValidateMultiplayerConfig(char *message, size_t messageSize)
 {
     char *end = NULL;
     long parsedPort = 0L;
 
     NormalizeMultiplayerSelection();
+    TrimMultiplayerHostAddress();
 
     if (gMainMenuMultiplayerLocalColor == gMainMenuMultiplayerRemoteColor)
     {
@@ -1428,9 +1601,91 @@ static bool ValidateMultiplayerConfig(char *message, size_t messageSize)
         return false;
     }
 
+    if (gMainMenuMultiplayerMode == MAIN_MENU_MULTIPLAYER_JOIN)
+    {
+        const size_t hostLength = strlen(gMainMenuMultiplayerHostAddress);
+        if (hostLength > 63u)
+        {
+            snprintf(message, messageSize, "%s", loc("Host address is too long."));
+            return false;
+        }
+    }
+
     if (message != NULL && messageSize > 0u)
     {
         message[0] = '\0';
     }
     return true;
+}
+
+static const char *MultiplayerJoinDiagnosis(const char *errorMessage)
+{
+    char lowered[128];
+    size_t writeIndex = 0u;
+
+    if (errorMessage == NULL || errorMessage[0] == '\0')
+    {
+        return loc("Likely issue: check address, port, and firewall.");
+    }
+
+    for (size_t i = 0u; errorMessage[i] != '\0' && writeIndex + 1u < sizeof(lowered); i++)
+    {
+        lowered[writeIndex++] = (char)tolower((unsigned char)errorMessage[i]);
+    }
+    lowered[writeIndex] = '\0';
+
+    if (strstr(lowered, "protocol mismatch") != NULL || strstr(lowered, "version") != NULL)
+    {
+        return loc("Likely issue: version mismatch between host and client.");
+    }
+    if (strstr(lowered, "lan ip") != NULL || strstr(lowered, "localhost") != NULL || strstr(lowered, "127.0.0.1") != NULL)
+    {
+        return loc("Likely issue: use host LAN IP, not localhost.");
+    }
+    if (strstr(lowered, "timed out") != NULL)
+    {
+        return loc("Likely issue: blocked by firewall or network.");
+    }
+    if (strstr(lowered, "connect failed") != NULL || strstr(lowered, "refused") != NULL)
+    {
+        return loc("Likely issue: host address or port is incorrect.");
+    }
+    if (strstr(lowered, "not connected") != NULL || strstr(lowered, "disconnected") != NULL)
+    {
+        return loc("Likely issue: host is unavailable.");
+    }
+
+    return loc("Likely issue: check address, port, and firewall.");
+}
+
+static void TrimMultiplayerHostAddress(void)
+{
+    size_t start = 0u;
+    size_t end = 0u;
+    size_t length = 0u;
+
+    if (gMainMenuMultiplayerHostAddress[0] == '\0')
+    {
+        return;
+    }
+
+    length = strlen(gMainMenuMultiplayerHostAddress);
+    while (start < length && isspace((unsigned char)gMainMenuMultiplayerHostAddress[start]))
+    {
+        start++;
+    }
+
+    end = length;
+    while (end > start && isspace((unsigned char)gMainMenuMultiplayerHostAddress[end - 1u]))
+    {
+        end--;
+    }
+
+    if (start > 0u)
+    {
+        memmove(gMainMenuMultiplayerHostAddress,
+                gMainMenuMultiplayerHostAddress + start,
+                end - start);
+    }
+    gMainMenuMultiplayerHostAddress[end - start] = '\0';
 }

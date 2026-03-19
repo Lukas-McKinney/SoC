@@ -19,8 +19,16 @@
 enum AppScreen
 {
     APP_SCREEN_MAIN_MENU,
+    APP_SCREEN_LOCAL_LOBBY,
     APP_SCREEN_NETPLAY_LOBBY,
     APP_SCREEN_GAME
+};
+
+enum LocalLobbyAction
+{
+    LOCAL_LOBBY_ACTION_NONE,
+    LOCAL_LOBBY_ACTION_RETURN_TO_MENU,
+    LOCAL_LOBBY_ACTION_START_MATCH
 };
 
 enum NetplayLobbyAction
@@ -42,11 +50,25 @@ struct LaunchOptions
 };
 
 static void DrawSceneBackground(void);
+static void DrawLocalLobby(const struct MatchSession *session);
+static enum LocalLobbyAction HandleLocalLobbyInput(struct MatchSession *session,
+                                                   struct MainMenuLobbyConfig *config,
+                                                   enum AiDifficulty *aiDifficulty);
 static void DrawNetplayLobby(const struct MatchSession *session);
 static enum NetplayLobbyAction HandleNetplayLobbyInput(struct MatchSession *session);
 static void DrawLobbyButton(Rectangle bounds, const char *label, Color fill, Color border, Color text, bool emphasized, bool enabled);
 static const char *NetplayLobbyStatusLabel(const struct MatchSession *session);
 static const char *NetplayLobbySeatRoleLabel(const struct MatchSession *session, enum PlayerType player);
+static void DrawProfileBadge(void);
+static int LocalLobbyCountHumanSeats(const struct MainMenuLobbyConfig *config);
+static enum PlayerType LocalLobbyFirstHumanSeat(const struct MainMenuLobbyConfig *config);
+static void ToggleLocalLobbySeat(struct MatchSession *session,
+                                 struct MainMenuLobbyConfig *config,
+                                 enum PlayerType player,
+                                 enum AiDifficulty *aiDifficulty);
+static void CycleLocalLobbyDifficulty(struct MatchSession *session,
+                                      struct MainMenuLobbyConfig *config,
+                                      enum AiDifficulty *aiDifficulty);
 static void ConfigureLocalMatch(struct MatchSession *session, const struct MainMenuLobbyConfig *config);
 static void ConfigurePrivateMatch(struct MatchSession *session,
                                   enum PlayerType hostPlayer,
@@ -152,9 +174,7 @@ int main(int argc, char **argv)
                 aiDifficulty = localLobbyConfig.aiDifficulty;
                 ConfigureLocalMatch(&session, &localLobbyConfig);
                 aiResetController();
-                uiResetForNewGame();
-                uiBeginMatch();
-                appScreen = APP_SCREEN_GAME;
+                appScreen = APP_SCREEN_LOCAL_LOBBY;
                 break;
             case MAIN_MENU_ACTION_START_PRIVATE_HOST:
                 setupMap(&session.map);
@@ -213,6 +233,30 @@ int main(int argc, char **argv)
                 shouldQuit = true;
                 continue;
             case MAIN_MENU_ACTION_NONE:
+            default:
+                break;
+            }
+        }
+        else if (appScreen == APP_SCREEN_LOCAL_LOBBY)
+        {
+            switch (HandleLocalLobbyInput(&session, &localLobbyConfig, &aiDifficulty))
+            {
+            case LOCAL_LOBBY_ACTION_RETURN_TO_MENU:
+                matchSessionShutdown(&session);
+                setupMap(&session.map);
+                matchSessionConfigureHotseat(&session);
+                aiResetController();
+                uiResetForNewGame();
+                settingsStoreSaveCurrent();
+                appScreen = APP_SCREEN_MAIN_MENU;
+                break;
+            case LOCAL_LOBBY_ACTION_START_MATCH:
+                aiResetController();
+                uiResetForNewGame();
+                uiBeginMatch();
+                appScreen = APP_SCREEN_GAME;
+                break;
+            case LOCAL_LOBBY_ACTION_NONE:
             default:
                 break;
             }
@@ -411,6 +455,10 @@ int main(int argc, char **argv)
         {
             DrawMainMenu();
         }
+        else if (appScreen == APP_SCREEN_LOCAL_LOBBY)
+        {
+            DrawLocalLobby(&session);
+        }
         else if (appScreen == APP_SCREEN_NETPLAY_LOBBY)
         {
             DrawNetplayLobby(&session);
@@ -419,6 +467,8 @@ int main(int argc, char **argv)
         {
             DrawMap(&session.map);
         }
+
+        DrawProfileBadge();
 
         EndDrawing();
     }
@@ -430,6 +480,308 @@ int main(int argc, char **argv)
     return 0;
 }
 
+static enum LocalLobbyAction HandleLocalLobbyInput(struct MatchSession *session,
+                                                   struct MainMenuLobbyConfig *config,
+                                                   enum AiDifficulty *aiDifficulty)
+{
+    const Vector2 mouse = GetMousePosition();
+    const Rectangle panel = {
+        (float)GetScreenWidth() * 0.5f - 760.0f * 0.5f,
+        (float)GetScreenHeight() * 0.5f - 540.0f * 0.5f,
+        760.0f,
+        540.0f};
+    const float gutter = 18.0f;
+    const float cardWidth = (panel.width - 52.0f - gutter) * 0.5f;
+    const float cardHeight = 98.0f;
+    const float startX = panel.x + 26.0f;
+    const float startY = panel.y + 136.0f;
+    const Rectangle aiDifficultyButton = {panel.x + 26.0f, panel.y + panel.height - 116.0f, panel.width - 52.0f, 42.0f};
+    const Rectangle primaryButton = {panel.x + 26.0f, panel.y + panel.height - 58.0f, panel.width - 168.0f, 40.0f};
+    const Rectangle secondaryButton = {panel.x + panel.width - 122.0f, panel.y + panel.height - 58.0f, 96.0f, 40.0f};
+
+    if (IsKeyPressed(KEY_ESCAPE))
+    {
+        return LOCAL_LOBBY_ACTION_RETURN_TO_MENU;
+    }
+
+    if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER))
+    {
+        return LOCAL_LOBBY_ACTION_START_MATCH;
+    }
+
+    if (IsKeyPressed(KEY_D) && session != NULL && config != NULL)
+    {
+        CycleLocalLobbyDifficulty(session, config, aiDifficulty);
+    }
+
+    if (!IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+    {
+        return LOCAL_LOBBY_ACTION_NONE;
+    }
+
+    if (CheckCollisionPointRec(mouse, secondaryButton))
+    {
+        return LOCAL_LOBBY_ACTION_RETURN_TO_MENU;
+    }
+
+    if (session != NULL &&
+        config != NULL &&
+        LocalLobbyCountHumanSeats(config) < MAX_PLAYERS &&
+        CheckCollisionPointRec(mouse, aiDifficultyButton))
+    {
+        CycleLocalLobbyDifficulty(session, config, aiDifficulty);
+        return LOCAL_LOBBY_ACTION_NONE;
+    }
+
+    if (session != NULL && config != NULL)
+    {
+        for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+        {
+            const int column = player % 2;
+            const int row = player / 2;
+            const Rectangle card = {
+                startX + column * (cardWidth + gutter),
+                startY + row * (cardHeight + 18.0f),
+                cardWidth,
+                cardHeight};
+
+            if (CheckCollisionPointRec(mouse, card))
+            {
+                ToggleLocalLobbySeat(session, config, (enum PlayerType)player, aiDifficulty);
+                return LOCAL_LOBBY_ACTION_NONE;
+            }
+        }
+    }
+
+    if (CheckCollisionPointRec(mouse, primaryButton))
+    {
+        return LOCAL_LOBBY_ACTION_START_MATCH;
+    }
+
+    return LOCAL_LOBBY_ACTION_NONE;
+}
+
+static void DrawLocalLobby(const struct MatchSession *session)
+{
+    char detailLine[96];
+    char difficultyLabel[48];
+    char profileLine[96];
+    const bool darkTheme = uiGetTheme() == UI_THEME_DARK;
+    const Rectangle panel = {
+        (float)GetScreenWidth() * 0.5f - 760.0f * 0.5f,
+        (float)GetScreenHeight() * 0.5f - 540.0f * 0.5f,
+        760.0f,
+        540.0f};
+    const Rectangle primaryButton = {panel.x + 26.0f, panel.y + panel.height - 58.0f, panel.width - 168.0f, 40.0f};
+    const Rectangle secondaryButton = {panel.x + panel.width - 122.0f, panel.y + panel.height - 58.0f, 96.0f, 40.0f};
+    const Rectangle aiDifficultyButton = {panel.x + 26.0f, panel.y + panel.height - 116.0f, panel.width - 52.0f, 42.0f};
+    const float gutter = 18.0f;
+    const float cardWidth = (panel.width - 52.0f - gutter) * 0.5f;
+    const float cardHeight = 98.0f;
+    const float startX = panel.x + 26.0f;
+    const float startY = panel.y + 136.0f;
+    const Color panelColor = darkTheme ? (Color){35, 43, 55, 252} : (Color){245, 237, 217, 252};
+    const Color borderColor = darkTheme ? (Color){132, 151, 176, 255} : (Color){118, 88, 56, 255};
+    const Color textColor = darkTheme ? (Color){236, 241, 246, 255} : (Color){54, 39, 29, 255};
+    const Color bodyColor = darkTheme ? (Color){194, 205, 216, 255} : (Color){92, 70, 50, 255};
+    const Color accentColor = darkTheme ? (Color){188, 135, 83, 255} : (Color){171, 82, 54, 255};
+    const Color sectionFill = darkTheme ? (Color){63, 77, 95, 255} : (Color){233, 226, 207, 255};
+    int humanSeats = 0;
+    enum AiDifficulty displayedDifficulty = AI_DIFFICULTY_MEDIUM;
+
+    if (session != NULL)
+    {
+        for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+        {
+            if (session->map.players[player].controlMode != PLAYER_CONTROL_AI)
+            {
+                humanSeats++;
+            }
+            else
+            {
+                displayedDifficulty = session->map.players[player].aiDifficulty;
+            }
+        }
+    }
+
+    DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, darkTheme ? 0.46f : 0.28f));
+    DrawRectangleRounded((Rectangle){panel.x + 8.0f, panel.y + 10.0f, panel.width, panel.height}, 0.08f, 8, Fade(BLACK, 0.16f));
+    DrawRectangleRounded(panel, 0.08f, 8, panelColor);
+    DrawRectangleLinesEx(panel, 2.0f, borderColor);
+
+    DrawUiText(loc("Lobby"), panel.x + 26.0f, panel.y + 24.0f, 30, textColor);
+    DrawUiText(loc("See all four seats before the match starts."), panel.x + 26.0f, panel.y + 60.0f, 17, bodyColor);
+    DrawUiText(loc("Press Enter or click Start Match when ready."), panel.x + 26.0f, panel.y + 86.0f, 18, accentColor);
+    DrawUiText(loc("Click a seat to toggle Human or AI."), panel.x + 26.0f, panel.y + 108.0f, 16, bodyColor);
+    snprintf(profileLine, sizeof(profileLine), loc("Profile: %s"), uiGetProfileName());
+    DrawUiText(profileLine, panel.x + 26.0f, panel.y + 124.0f, 15, bodyColor);
+
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        const int column = player % 2;
+        const int row = player / 2;
+        const Rectangle card = {
+            startX + column * (cardWidth + gutter),
+            startY + row * (cardHeight + 18.0f),
+            cardWidth,
+            cardHeight};
+        const bool aiSeat = session != NULL && session->map.players[player].controlMode == PLAYER_CONTROL_AI;
+        const Color playerColor = PlayerColor((enum PlayerType)player);
+        const Color fillColor = aiSeat
+                                    ? sectionFill
+                                    : Fade(playerColor, darkTheme ? 0.18f : 0.14f);
+        const Color border = aiSeat ? Fade(borderColor, 0.95f) : Fade(playerColor, 0.95f);
+        const char *roleLabel = aiSeat
+                                    ? loc("AI")
+                                    : (session != NULL &&
+                                       matchSessionGetLocalPlayer(session) == (enum PlayerType)player &&
+                                       matchSessionGetLocalPlayer(session) != PLAYER_NONE)
+                                          ? loc("You")
+                                          : loc("Human");
+        const Rectangle badge = {card.x + card.width - 112.0f, card.y + 14.0f, 92.0f, 24.0f};
+
+        if (aiSeat)
+        {
+            snprintf(detailLine, sizeof(detailLine), "%s", aiDifficultyLabel(session->map.players[player].aiDifficulty));
+        }
+        else if (session != NULL && matchSessionGetLocalPlayer(session) == player)
+        {
+            snprintf(detailLine, sizeof(detailLine), "%s", uiGetProfileName());
+        }
+        else
+        {
+            snprintf(detailLine, sizeof(detailLine), "%s", loc("Ready"));
+        }
+
+        DrawRectangleRounded((Rectangle){card.x + 4.0f, card.y + 6.0f, card.width, card.height}, 0.18f, 8, Fade(BLACK, 0.12f));
+        DrawRectangleRounded(card, 0.18f, 8, fillColor);
+        DrawRectangleLinesEx(card, 1.9f, border);
+        DrawCircleV((Vector2){card.x + 22.0f, card.y + 24.0f}, 7.0f, playerColor);
+        DrawUiText(locPlayerName((enum PlayerType)player), card.x + 38.0f, card.y + 12.0f, 24, playerColor);
+        DrawRectangleRounded(badge, 0.40f, 8, aiSeat ? sectionFill : Fade(playerColor, 0.92f));
+        DrawRectangleLinesEx(badge, 1.4f, aiSeat ? Fade(borderColor, 0.95f) : Fade(playerColor, 0.98f));
+        DrawUiText(roleLabel,
+                   badge.x + badge.width * 0.5f - MeasureUiText(roleLabel, 16) * 0.5f,
+                   badge.y + 4.0f,
+                   16,
+                   aiSeat ? textColor : RAYWHITE);
+        DrawUiText(detailLine, card.x + 18.0f, card.y + 56.0f, 18, textColor);
+    }
+
+    snprintf(difficultyLabel,
+             sizeof(difficultyLabel),
+             loc("AI Difficulty: %s"),
+             aiDifficultyLabel(displayedDifficulty));
+    DrawLobbyButton(aiDifficultyButton,
+                    difficultyLabel,
+                    humanSeats < MAX_PLAYERS ? sectionFill : Fade(sectionFill, 0.60f),
+                    borderColor,
+                    humanSeats < MAX_PLAYERS ? textColor : Fade(textColor, 0.60f),
+                    false,
+                    humanSeats < MAX_PLAYERS);
+
+    DrawLobbyButton(primaryButton,
+                    loc("Start Match"),
+                    accentColor,
+                    borderColor,
+                    RAYWHITE,
+                    true,
+                    true);
+    DrawLobbyButton(secondaryButton, loc("Back to Menu"), sectionFill, borderColor, textColor, false, true);
+}
+
+static int LocalLobbyCountHumanSeats(const struct MainMenuLobbyConfig *config)
+{
+    int humans = 0;
+
+    if (config == NULL)
+    {
+        return 0;
+    }
+
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        if (config->seatControl[player] != PLAYER_CONTROL_AI)
+        {
+            humans++;
+        }
+    }
+
+    return humans;
+}
+
+static enum PlayerType LocalLobbyFirstHumanSeat(const struct MainMenuLobbyConfig *config)
+{
+    if (config == NULL)
+    {
+        return PLAYER_NONE;
+    }
+
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        if (config->seatControl[player] != PLAYER_CONTROL_AI)
+        {
+            return (enum PlayerType)player;
+        }
+    }
+
+    return PLAYER_NONE;
+}
+
+static void ToggleLocalLobbySeat(struct MatchSession *session,
+                                 struct MainMenuLobbyConfig *config,
+                                 enum PlayerType player,
+                                 enum AiDifficulty *aiDifficulty)
+{
+    if (session == NULL || config == NULL || player < PLAYER_RED || player > PLAYER_BLACK)
+    {
+        return;
+    }
+
+    if (config->seatControl[player] == PLAYER_CONTROL_AI)
+    {
+        config->seatControl[player] = PLAYER_CONTROL_HUMAN;
+        config->primaryHumanColor = player;
+    }
+    else
+    {
+        if (LocalLobbyCountHumanSeats(config) <= 1)
+        {
+            uiShowCenteredWarning(loc("At least one human player is required."));
+            return;
+        }
+
+        config->seatControl[player] = PLAYER_CONTROL_AI;
+        if (config->primaryHumanColor == player)
+        {
+            config->primaryHumanColor = LocalLobbyFirstHumanSeat(config);
+        }
+    }
+
+    ConfigureLocalMatch(session, config);
+    if (aiDifficulty != NULL)
+    {
+        *aiDifficulty = config->aiDifficulty;
+    }
+}
+
+static void CycleLocalLobbyDifficulty(struct MatchSession *session,
+                                      struct MainMenuLobbyConfig *config,
+                                      enum AiDifficulty *aiDifficulty)
+{
+    if (session == NULL || config == NULL)
+    {
+        return;
+    }
+
+    config->aiDifficulty = (enum AiDifficulty)(((int)config->aiDifficulty + 1) % 3);
+    ConfigureLocalMatch(session, config);
+    if (aiDifficulty != NULL)
+    {
+        *aiDifficulty = config->aiDifficulty;
+    }
+}
+
 static enum NetplayLobbyAction HandleNetplayLobbyInput(struct MatchSession *session)
 {
     const Vector2 mouse = GetMousePosition();
@@ -438,7 +790,14 @@ static enum NetplayLobbyAction HandleNetplayLobbyInput(struct MatchSession *sess
         (float)GetScreenHeight() * 0.5f - 540.0f * 0.5f,
         760.0f,
         540.0f};
+    const float gutter = 18.0f;
+    const float cardWidth = (panel.width - 52.0f - gutter) * 0.5f;
+    const float cardHeight = 98.0f;
+    const float startX = panel.x + 26.0f;
+    const float startY = panel.y + 136.0f;
+    const Rectangle aiDifficultyButton = {panel.x + 26.0f, panel.y + panel.height - 116.0f, panel.width - 52.0f, 42.0f};
     const Rectangle endpointButton = {panel.x + panel.width - 96.0f, panel.y + 100.0f, 70.0f, 26.0f};
+    const Rectangle copyButton = {panel.x + panel.width - 174.0f, panel.y + 100.0f, 70.0f, 26.0f};
     const Rectangle primaryButton = {panel.x + 26.0f, panel.y + panel.height - 58.0f, panel.width - 168.0f, 40.0f};
     const Rectangle secondaryButton = {panel.x + panel.width - 122.0f, panel.y + panel.height - 58.0f, 96.0f, 40.0f};
 
@@ -455,6 +814,55 @@ static enum NetplayLobbyAction HandleNetplayLobbyInput(struct MatchSession *sess
     if (CheckCollisionPointRec(mouse, secondaryButton))
     {
         return NETPLAY_LOBBY_ACTION_RETURN_TO_MENU;
+    }
+
+    if (session != NULL &&
+        matchSessionIsHost(session) &&
+        !matchSessionHasStarted(session) &&
+        CheckCollisionPointRec(mouse, aiDifficultyButton))
+    {
+        (void)matchSessionHostCycleNetplayLobbyAiDifficulty(session);
+        return NETPLAY_LOBBY_ACTION_NONE;
+    }
+
+    if (session != NULL &&
+        matchSessionIsHost(session) &&
+        !matchSessionHasStarted(session))
+    {
+        for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+        {
+            const int column = player % 2;
+            const int row = player / 2;
+            const Rectangle card = {
+                startX + column * (cardWidth + gutter),
+                startY + row * (cardHeight + 18.0f),
+                cardWidth,
+                cardHeight};
+
+            if (CheckCollisionPointRec(mouse, card))
+            {
+                (void)matchSessionHostToggleNetplayLobbySeat(session, (enum PlayerType)player);
+                return NETPLAY_LOBBY_ACTION_NONE;
+            }
+        }
+    }
+
+    if (session != NULL &&
+        session->netplay != NULL &&
+        CheckCollisionPointRec(mouse, copyButton))
+    {
+        char endpoint[96];
+        const char *address = matchSessionIsHost(session)
+                                  ? netplayGetLocalAddress(session->netplay)
+                                  : netplayGetPeerAddress(session->netplay);
+        snprintf(endpoint,
+                 sizeof(endpoint),
+                 "%s:%u",
+                 (address != NULL && address[0] != '\0') ? address : "127.0.0.1",
+                 (unsigned int)netplayGetPort(session->netplay));
+        SetClipboardText(endpoint);
+        uiShowCenteredStatus(loc("Endpoint copied to clipboard."), UI_NOTIFICATION_POSITIVE);
+        return NETPLAY_LOBBY_ACTION_NONE;
     }
 
     if (session != NULL &&
@@ -491,6 +899,29 @@ static void DrawLobbyButton(Rectangle bounds, const char *label, Color fill, Col
     DrawRectangleRounded(button, 0.18f, 8, drawFill);
     DrawRectangleLinesEx(button, emphasized ? 2.2f : 1.8f, drawBorder);
     DrawUiText(label, button.x + button.width * 0.5f - labelWidth * 0.5f, button.y + button.height * 0.5f - (float)fontSize * 0.5f - 1.0f, fontSize, drawText);
+}
+
+static void DrawProfileBadge(void)
+{
+    const char *name = uiGetProfileName();
+    const char *label = TextFormat(loc("Profile: %s"), (name != NULL && name[0] != '\0') ? name : loc("Player"));
+    const int fontSize = 16;
+    const int labelWidth = MeasureUiText(label, fontSize);
+    const Rectangle badge = {16.0f, 12.0f, (float)labelWidth + 26.0f, 30.0f};
+    const Color fill = uiGetTheme() == UI_THEME_DARK
+                           ? (Color){42, 54, 70, 236}
+                           : (Color){248, 240, 223, 236};
+    const Color border = uiGetTheme() == UI_THEME_DARK
+                             ? (Color){133, 151, 176, 255}
+                             : (Color){118, 88, 56, 255};
+    const Color text = uiGetTheme() == UI_THEME_DARK
+                           ? (Color){234, 241, 246, 255}
+                           : (Color){54, 39, 29, 255};
+
+    DrawRectangleRounded((Rectangle){badge.x + 3.0f, badge.y + 4.0f, badge.width, badge.height}, 0.28f, 8, Fade(BLACK, 0.11f));
+    DrawRectangleRounded(badge, 0.28f, 8, fill);
+    DrawRectangleLinesEx(badge, 1.6f, border);
+    DrawUiText(label, badge.x + 12.0f, badge.y + 7.0f, fontSize, text);
 }
 
 static const char *NetplayLobbyStatusLabel(const struct MatchSession *session)
@@ -556,6 +987,8 @@ static void DrawNetplayLobby(const struct MatchSession *session)
     char endpointLine[128];
     char detailLine[96];
     char endpointValue[96];
+    char difficultyLabel[48];
+    char profileLine[96];
     const char *connectionError = session != NULL ? matchSessionGetConnectionError(session) : "";
     const bool darkTheme = uiGetTheme() == UI_THEME_DARK;
     const Rectangle panel = {
@@ -564,6 +997,8 @@ static void DrawNetplayLobby(const struct MatchSession *session)
         760.0f,
         540.0f};
     const Rectangle endpointButton = {panel.x + panel.width - 96.0f, panel.y + 100.0f, 70.0f, 26.0f};
+    const Rectangle copyButton = {panel.x + panel.width - 174.0f, panel.y + 100.0f, 70.0f, 26.0f};
+    const Rectangle aiDifficultyButton = {panel.x + 26.0f, panel.y + panel.height - 116.0f, panel.width - 52.0f, 42.0f};
     const Rectangle primaryButton = {panel.x + 26.0f, panel.y + panel.height - 58.0f, panel.width - 168.0f, 40.0f};
     const Rectangle secondaryButton = {panel.x + panel.width - 122.0f, panel.y + panel.height - 58.0f, 96.0f, 40.0f};
     const float gutter = 18.0f;
@@ -579,6 +1014,8 @@ static void DrawNetplayLobby(const struct MatchSession *session)
     const Color errorColor = darkTheme ? (Color){242, 126, 116, 255} : (Color){171, 82, 54, 255};
     const Color sectionFill = darkTheme ? (Color){63, 77, 95, 255} : (Color){233, 226, 207, 255};
     const bool hostCanStart = matchSessionCanStartNetplayMatch(session);
+    int aiSeatCount = 0;
+    enum AiDifficulty displayedDifficulty = AI_DIFFICULTY_MEDIUM;
 
     endpointLine[0] = '\0';
     if (session != NULL && session->netplay != NULL)
@@ -615,11 +1052,27 @@ static void DrawNetplayLobby(const struct MatchSession *session)
     DrawRectangleLinesEx(panel, 2.0f, borderColor);
 
     DrawUiText(loc("Lobby"), panel.x + 26.0f, panel.y + 24.0f, 30, textColor);
-    DrawUiText(loc("Private multiplayer currently supports 2 humans and AI."), panel.x + 26.0f, panel.y + 60.0f, 17, bodyColor);
+    DrawUiText(loc("Private multiplayer supports up to 4 humans and AI."), panel.x + 26.0f, panel.y + 60.0f, 17, bodyColor);
     DrawUiText(NetplayLobbyStatusLabel(session), panel.x + 26.0f, panel.y + 86.0f, 18, accentColor);
+    snprintf(profileLine, sizeof(profileLine), loc("Profile: %s"), uiGetProfileName());
+    DrawUiText(profileLine, panel.x + 26.0f, panel.y + 124.0f, 15, bodyColor);
+    DrawUiText(matchSessionIsHost(session)
+                   ? loc("Click a seat to toggle Human or AI.")
+                   : loc("Waiting for host to start the match."),
+               panel.x + 26.0f,
+               panel.y + 108.0f,
+               16,
+               bodyColor);
     if (endpointLine[0] != '\0')
     {
         DrawUiText(endpointLine, panel.x + 26.0f, panel.y + 108.0f, 16, bodyColor);
+        DrawLobbyButton(copyButton,
+                        loc("Copy"),
+                        sectionFill,
+                        borderColor,
+                        textColor,
+                        false,
+                        true);
         DrawLobbyButton(endpointButton,
                         gNetplayLobbyRevealEndpoint ? loc("Hide") : loc("Show"),
                         sectionFill,
@@ -649,6 +1102,8 @@ static void DrawNetplayLobby(const struct MatchSession *session)
 
         if (aiSeat)
         {
+            aiSeatCount++;
+            displayedDifficulty = session->map.players[player].aiDifficulty;
             snprintf(detailLine, sizeof(detailLine), "%s", aiDifficultyLabel(session->map.players[player].aiDifficulty));
         }
         else if (matchSessionGetConnectionStatus(session) != MATCH_CONNECTION_CONNECTED)
@@ -664,7 +1119,7 @@ static void DrawNetplayLobby(const struct MatchSession *session)
         }
         else if (matchSessionGetLocalPlayer(session) == player)
         {
-            snprintf(detailLine, sizeof(detailLine), "%s", matchSessionIsHost(session) ? loc("Host") : loc("Connected"));
+            snprintf(detailLine, sizeof(detailLine), "%s", uiGetProfileName());
         }
         else
         {
@@ -685,6 +1140,18 @@ static void DrawNetplayLobby(const struct MatchSession *session)
                    aiSeat ? textColor : RAYWHITE);
         DrawUiText(detailLine, card.x + 18.0f, card.y + 56.0f, 18, textColor);
     }
+
+    snprintf(difficultyLabel,
+             sizeof(difficultyLabel),
+             loc("AI Difficulty: %s"),
+             aiDifficultyLabel(displayedDifficulty));
+    DrawLobbyButton(aiDifficultyButton,
+                    difficultyLabel,
+                    aiSeatCount > 0 ? sectionFill : Fade(sectionFill, 0.60f),
+                    borderColor,
+                    aiSeatCount > 0 ? textColor : Fade(textColor, 0.60f),
+                    false,
+                    matchSessionIsHost(session) && !matchSessionHasStarted(session) && aiSeatCount > 0);
 
     if (session != NULL && !matchSessionIsHost(session))
     {

@@ -26,7 +26,6 @@ static void build_lobby_state_info(const struct MatchSession *session, struct Ne
 static void apply_lobby_state_info(struct MatchSession *session, const struct NetplayLobbyStateInfo *info);
 static bool build_match_init_info(const struct MatchSession *session, struct NetplayMatchInitInfo *info);
 static bool apply_match_init_info(struct MatchSession *session, const struct NetplayMatchInitInfo *info);
-static bool send_lobby_state(struct MatchSession *session);
 static bool send_match_init(struct MatchSession *session);
 static bool submit_client_action(struct MatchSession *session,
                                  const struct GameAction *action,
@@ -56,6 +55,13 @@ static void schedule_client_reconnect(struct MatchSession *session, double delay
 static void attempt_client_reconnect(struct MatchSession *session);
 static bool queue_local_capabilities(struct MatchSession *session);
 static void request_snapshot_resync(struct MatchSession *session, const char *reason);
+static void reset_remote_peer_assignments(struct MatchSession *session);
+static void clear_remote_peer_assignment_for_peer(struct MatchSession *session, int peerId);
+static enum PlayerType find_assigned_remote_player_for_peer(const struct MatchSession *session, int peerId);
+static enum PlayerType assign_remote_player_to_peer(struct MatchSession *session, int peerId);
+static bool send_hello_to_peer(struct MatchSession *session, int peerId, enum PlayerType assignedPlayer);
+static bool send_lobby_state_to_peer(struct MatchSession *session, int peerId);
+static bool broadcast_lobby_state(struct MatchSession *session);
 
 #define CLIENT_RECONNECT_DELAY_SECONDS 2.5
 #define CLIENT_RECONNECT_MAX_ATTEMPTS 20
@@ -74,6 +80,7 @@ static void clear_pending_trade_offer(struct MatchSession *session)
     session->pendingTradeOfferActive = false;
     session->pendingTradeAwaitingLocalResponse = false;
     session->pendingTradeRequestedByRemote = false;
+    session->pendingTradePeerId = -1;
     memset(&session->pendingTradeOffer, 0, sizeof(session->pendingTradeOffer));
 }
 
@@ -293,7 +300,122 @@ static bool apply_match_init_info(struct MatchSession *session, const struct Net
     return true;
 }
 
-static bool send_lobby_state(struct MatchSession *session)
+static void reset_remote_peer_assignments(struct MatchSession *session)
+{
+    if (session == NULL)
+    {
+        return;
+    }
+
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        session->remotePeerForPlayer[player] = -1;
+    }
+}
+
+static void clear_remote_peer_assignment_for_peer(struct MatchSession *session, int peerId)
+{
+    if (session == NULL || peerId < 0)
+    {
+        return;
+    }
+
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        if (session->remotePeerForPlayer[player] == peerId)
+        {
+            session->remotePeerForPlayer[player] = -1;
+            if (session->isHost &&
+                session->networkMode == MATCH_NETWORK_PRIVATE_HOST &&
+                session->seatAuthority[player] == MATCH_SEAT_REMOTE)
+            {
+                session->seatAuthority[player] = MATCH_SEAT_AI;
+                session->map.players[player].controlMode = PLAYER_CONTROL_AI;
+            }
+        }
+    }
+}
+
+static enum PlayerType find_assigned_remote_player_for_peer(const struct MatchSession *session, int peerId)
+{
+    if (session == NULL || peerId < 0)
+    {
+        return PLAYER_NONE;
+    }
+
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        if (session->remotePeerForPlayer[player] == peerId)
+        {
+            return (enum PlayerType)player;
+        }
+    }
+
+    return PLAYER_NONE;
+}
+
+static enum PlayerType assign_remote_player_to_peer(struct MatchSession *session, int peerId)
+{
+    enum PlayerType alreadyAssigned = PLAYER_NONE;
+
+    if (session == NULL || peerId < 0)
+    {
+        return PLAYER_NONE;
+    }
+
+    alreadyAssigned = find_assigned_remote_player_for_peer(session, peerId);
+    if (alreadyAssigned != PLAYER_NONE)
+    {
+        return alreadyAssigned;
+    }
+
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        if (session->seatAuthority[player] == MATCH_SEAT_REMOTE && session->remotePeerForPlayer[player] < 0)
+        {
+            session->remotePeerForPlayer[player] = peerId;
+            session->map.players[player].controlMode = PLAYER_CONTROL_HUMAN;
+            return (enum PlayerType)player;
+        }
+    }
+
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        if (session->seatAuthority[player] == MATCH_SEAT_AI)
+        {
+            session->seatAuthority[player] = MATCH_SEAT_REMOTE;
+            session->remotePeerForPlayer[player] = peerId;
+            session->map.players[player].controlMode = PLAYER_CONTROL_HUMAN;
+            session->map.players[player].aiDifficulty = AI_DIFFICULTY_EASY;
+            return (enum PlayerType)player;
+        }
+    }
+
+    return PLAYER_NONE;
+}
+
+static bool send_hello_to_peer(struct MatchSession *session, int peerId, enum PlayerType assignedPlayer)
+{
+    int authorities[MAX_PLAYERS] = {0};
+
+    if (session == NULL || session->netplay == NULL)
+    {
+        return false;
+    }
+
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        authorities[player] = session->seatAuthority[player];
+    }
+
+    return netplayQueueHelloForHostPeer(session->netplay,
+                                        peerId,
+                                        assignedPlayer,
+                                        session->localPlayer,
+                                        authorities);
+}
+
+static bool send_lobby_state_to_peer(struct MatchSession *session, int peerId)
 {
     struct NetplayLobbyStateInfo info;
 
@@ -303,7 +425,12 @@ static bool send_lobby_state(struct MatchSession *session)
     }
 
     build_lobby_state_info(session, &info);
-    return netplayQueueLobbyState(session->netplay, &info);
+    return netplayQueueLobbyStateForHostPeer(session->netplay, peerId, &info);
+}
+
+static bool broadcast_lobby_state(struct MatchSession *session)
+{
+    return send_lobby_state_to_peer(session, -1);
 }
 
 static bool send_match_init(struct MatchSession *session)
@@ -603,7 +730,7 @@ static bool configure_default_private_host_seats(struct MatchSession *session)
         }
     }
 
-    return remoteSeatCount == 1;
+    return remoteSeatCount >= 1 && remoteSeatCount <= NETPLAY_MAX_HOST_REMOTE_PLAYERS;
 }
 
 static bool is_authoritative_only_action(enum GameActionType type)
@@ -655,6 +782,7 @@ void matchSessionInit(struct MatchSession *session)
     session->peerProtocolMinVersion = 0u;
     session->peerProtocolMaxVersion = 0u;
     session->peerCapabilitiesReceived = false;
+    reset_remote_peer_assignments(session);
     reset_reconnect_state(session);
     matchSessionConfigureHotseat(session);
 }
@@ -685,6 +813,7 @@ void matchSessionShutdown(struct MatchSession *session)
     session->peerProtocolMinVersion = 0u;
     session->peerProtocolMaxVersion = 0u;
     session->peerCapabilitiesReceived = false;
+    reset_remote_peer_assignments(session);
     reset_reconnect_state(session);
 }
 
@@ -859,6 +988,10 @@ void matchSessionSetSeatAuthority(struct MatchSession *session, enum PlayerType 
     }
 
     session->seatAuthority[player] = authority;
+    if (authority != MATCH_SEAT_REMOTE)
+    {
+        session->remotePeerForPlayer[player] = -1;
+    }
 }
 
 enum MatchSeatAuthority matchSessionGetSeatAuthority(const struct MatchSession *session, enum PlayerType player)
@@ -936,6 +1069,100 @@ bool matchSessionRestartNetplayMatch(struct MatchSession *session)
     }
 
     return send_match_init(session);
+}
+
+bool matchSessionHostToggleNetplayLobbySeat(struct MatchSession *session, enum PlayerType player)
+{
+    enum AiDifficulty appliedDifficulty = AI_DIFFICULTY_MEDIUM;
+
+    if (session == NULL ||
+        !matchSessionIsNetplay(session) ||
+        !session->isHost ||
+        session->networkMode != MATCH_NETWORK_PRIVATE_HOST ||
+        session->matchStarted ||
+        player < PLAYER_RED ||
+        player > PLAYER_BLACK ||
+        session->seatAuthority[player] == MATCH_SEAT_LOCAL)
+    {
+        return false;
+    }
+
+    if (session->seatAuthority[player] == MATCH_SEAT_REMOTE)
+    {
+        if (session->remotePeerForPlayer[player] >= 0)
+        {
+            return false;
+        }
+
+        session->seatAuthority[player] = MATCH_SEAT_AI;
+        session->remotePeerForPlayer[player] = -1;
+        session->map.players[player].controlMode = PLAYER_CONTROL_AI;
+
+        for (int i = PLAYER_RED; i <= PLAYER_BLACK; i++)
+        {
+            if (session->seatAuthority[i] == MATCH_SEAT_AI)
+            {
+                appliedDifficulty = session->map.players[i].aiDifficulty;
+                break;
+            }
+        }
+        session->map.players[player].aiDifficulty = appliedDifficulty;
+        broadcast_lobby_state(session);
+        return true;
+    }
+
+    if (session->seatAuthority[player] == MATCH_SEAT_AI)
+    {
+        session->seatAuthority[player] = MATCH_SEAT_REMOTE;
+        session->remotePeerForPlayer[player] = -1;
+        session->map.players[player].controlMode = PLAYER_CONTROL_HUMAN;
+        session->map.players[player].aiDifficulty = AI_DIFFICULTY_EASY;
+        broadcast_lobby_state(session);
+        return true;
+    }
+
+    return false;
+}
+
+bool matchSessionHostCycleNetplayLobbyAiDifficulty(struct MatchSession *session)
+{
+    enum AiDifficulty nextDifficulty = AI_DIFFICULTY_MEDIUM;
+    bool foundAiSeat = false;
+
+    if (session == NULL ||
+        !matchSessionIsNetplay(session) ||
+        !session->isHost ||
+        session->networkMode != MATCH_NETWORK_PRIVATE_HOST ||
+        session->matchStarted)
+    {
+        return false;
+    }
+
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        if (session->seatAuthority[player] == MATCH_SEAT_AI)
+        {
+            nextDifficulty = (enum AiDifficulty)(((int)session->map.players[player].aiDifficulty + 1) % 3);
+            foundAiSeat = true;
+            break;
+        }
+    }
+
+    if (!foundAiSeat)
+    {
+        return false;
+    }
+
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        if (session->seatAuthority[player] == MATCH_SEAT_AI)
+        {
+            session->map.players[player].aiDifficulty = nextDifficulty;
+        }
+    }
+
+    broadcast_lobby_state(session);
+    return true;
 }
 
 bool matchSessionShouldAnimateLocalRoll(const struct MatchSession *session)
@@ -1230,7 +1457,18 @@ bool matchSessionRespondToPendingTradeOffer(struct MatchSession *session, bool a
 
     if (session->pendingTradeRequestedByRemote)
     {
-        netplayQueueTradeResponse(session->netplay, &session->pendingTradeOffer, applied, session->stateHash);
+        if (session->pendingTradePeerId >= 0)
+        {
+            netplayQueueTradeResponseForHostPeer(session->netplay,
+                                                 session->pendingTradePeerId,
+                                                 &session->pendingTradeOffer,
+                                                 applied,
+                                                 session->stateHash);
+        }
+        else
+        {
+            netplayQueueTradeResponse(session->netplay, &session->pendingTradeOffer, applied, session->stateHash);
+        }
     }
 
     clear_pending_trade_offer(session);
@@ -1283,12 +1521,20 @@ bool matchSessionSubmitAction(struct MatchSession *session,
     if (action->type == GAME_ACTION_TRADE_WITH_PLAYER &&
         matchSessionGetSeatAuthority(session, action->player) == MATCH_SEAT_REMOTE)
     {
+        const int targetPeerId = (action->player >= PLAYER_RED && action->player <= PLAYER_BLACK)
+                                     ? session->remotePeerForPlayer[action->player]
+                                     : -1;
         if (session->pendingTradeOfferActive || session->netplay == NULL || !netplayIsConnected(session->netplay))
         {
             return false;
         }
 
-        if (!netplayQueueTradeOffer(session->netplay, action))
+        if (targetPeerId < 0)
+        {
+            return false;
+        }
+
+        if (!netplayQueueTradeOfferForHostPeer(session->netplay, targetPeerId, action))
         {
             return false;
         }
@@ -1296,6 +1542,7 @@ bool matchSessionSubmitAction(struct MatchSession *session,
         session->pendingTradeOfferActive = true;
         session->pendingTradeAwaitingLocalResponse = false;
         session->pendingTradeRequestedByRemote = false;
+        session->pendingTradePeerId = targetPeerId;
         session->pendingTradeOffer = *action;
         session->awaitingAuthoritativeUpdate = true;
         uiShowCenteredStatus(loc("Trade offer sent to remote player."), UI_NOTIFICATION_NEUTRAL);
@@ -1338,30 +1585,47 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
     {
     case NETPLAY_EVENT_CLIENT_CONNECTED:
         {
-            enum PlayerType remotePlayer = PLAYER_NONE;
-            int authorities[MAX_PLAYERS] = {0};
-
-            for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
-            {
-                authorities[player] = session->seatAuthority[player];
-                if (session->seatAuthority[player] == MATCH_SEAT_REMOTE)
-                {
-                    remotePlayer = (enum PlayerType)player;
-                }
-            }
+            const int peerId = event->peerId >= 0 ? event->peerId : 0;
+            const enum PlayerType remotePlayer = assign_remote_player_to_peer(session, peerId);
 
             session->connectionStatus = MATCH_CONNECTION_CONNECTED;
             session->ready = true;
             session->matchStarted = false;
             clear_connection_error(session);
-            debugLog("NET", "remote client connected (local=%d remote=%d)", (int)session->localPlayer, (int)remotePlayer);
+            debugLog("NET",
+                     "remote client connected (peer=%d local=%d remote=%d)",
+                     peerId,
+                     (int)session->localPlayer,
+                     (int)remotePlayer);
             uiShowCenteredStatus(loc("Remote player connected."), UI_NOTIFICATION_POSITIVE);
             if (session->netplay != NULL)
             {
-                netplayQueueHello(session->netplay, remotePlayer, session->localPlayer, authorities);
+                send_hello_to_peer(session, peerId, remotePlayer);
                 queue_local_capabilities(session);
-                send_lobby_state(session);
+                broadcast_lobby_state(session);
             }
+        }
+        break;
+
+    case NETPLAY_EVENT_ADDITIONAL_CLIENT_CONNECTED:
+        if (session->isHost)
+        {
+            const enum PlayerType remotePlayer = assign_remote_player_to_peer(session, event->peerId);
+
+            debugLog("NET",
+                     "additional remote connected (peer=%d remote=%d)",
+                     event->peerId,
+                     (int)remotePlayer);
+            if (remotePlayer == PLAYER_NONE)
+            {
+                uiShowCenteredWarning(loc("Remote connection accepted, but no free remote seat is available."));
+                break;
+            }
+
+            uiShowCenteredStatus(loc("Remote player connected."), UI_NOTIFICATION_POSITIVE);
+            send_hello_to_peer(session, event->peerId, remotePlayer);
+            queue_local_capabilities(session);
+            broadcast_lobby_state(session);
         }
         break;
 
@@ -1384,6 +1648,7 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
         session->peerProtocolMinVersion = 0u;
         session->peerProtocolMaxVersion = 0u;
         session->peerCapabilitiesReceived = false;
+        reset_remote_peer_assignments(session);
         session->connectionStatus = session->networkMode == MATCH_NETWORK_PRIVATE_HOST
                                         ? MATCH_CONNECTION_WAITING_FOR_PLAYER
                                         : MATCH_CONNECTION_DISCONNECTED;
@@ -1391,9 +1656,31 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
         reset_client_transient_ui();
         debugLog("NET", "disconnected event: %s", event->message);
         uiShowCenteredWarning(loc("Remote player disconnected."));
+        if (session->networkMode == MATCH_NETWORK_PRIVATE_HOST)
+        {
+            for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+            {
+                if (session->seatAuthority[player] == MATCH_SEAT_REMOTE)
+                {
+                    session->seatAuthority[player] = MATCH_SEAT_AI;
+                    session->map.players[player].controlMode = PLAYER_CONTROL_AI;
+                }
+            }
+            broadcast_lobby_state(session);
+        }
         if (session->networkMode == MATCH_NETWORK_PRIVATE_CLIENT)
         {
             schedule_client_reconnect(session, CLIENT_RECONNECT_DELAY_SECONDS);
+        }
+        break;
+
+    case NETPLAY_EVENT_ADDITIONAL_CLIENT_DISCONNECTED:
+        if (session->isHost)
+        {
+            clear_remote_peer_assignment_for_peer(session, event->peerId);
+            broadcast_lobby_state(session);
+            debugLog("NET", "additional remote disconnected (peer=%d: %s)", event->peerId, event->message);
+            uiShowCenteredWarning(loc("Remote player disconnected."));
         }
         break;
 
@@ -1515,6 +1802,18 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
             struct GameAction authoritativeAction = event->action;
             struct GameActionResult actionResult;
             const enum PlayerType actor = active_decision_player(session);
+            const int expectedPeerId = (actor >= PLAYER_RED && actor <= PLAYER_BLACK)
+                                           ? session->remotePeerForPlayer[actor]
+                                           : -1;
+
+            if (expectedPeerId >= 0 && event->peerId >= 0 && event->peerId != expectedPeerId)
+            {
+                if (session->netplay != NULL)
+                {
+                    netplayQueueActionReject(session->netplay, "action submitted by wrong remote peer", session->stateHash);
+                }
+                break;
+            }
 
             if (authoritativeAction.type == GAME_ACTION_ROLL_DICE)
             {
@@ -1531,6 +1830,7 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
                         session->pendingTradeOfferActive = true;
                         session->pendingTradeAwaitingLocalResponse = true;
                         session->pendingTradeRequestedByRemote = true;
+                        session->pendingTradePeerId = event->peerId;
                         session->pendingTradeOffer = authoritativeAction;
                         uiShowCenteredStatus(loc("Remote trade offer received."), UI_NOTIFICATION_NEUTRAL);
                     }
@@ -1608,6 +1908,7 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
             if (session->pendingTradeOfferActive &&
                 !session->pendingTradeAwaitingLocalResponse &&
                 !session->pendingTradeRequestedByRemote &&
+                (session->pendingTradePeerId < 0 || session->pendingTradePeerId == event->peerId) &&
                 actions_match(&session->pendingTradeOffer, &event->action))
             {
                 if (event->accepted)

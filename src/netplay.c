@@ -157,6 +157,7 @@ struct NetplayResyncRequestWire
 
 struct NetplayQueuedPacket
 {
+    int peerId;
     size_t length;
     size_t offset;
     unsigned char bytes[sizeof(struct NetplayPacketHeader) + NETPLAY_MAX_PAYLOAD_SIZE];
@@ -184,6 +185,11 @@ struct NetplayState
     uint64_t lastSendMs;
     uint64_t lastReceiveMs;
     uint64_t lastHeartbeatSentMs;
+    NetSocket trackedHostPeers[NETPLAY_MAX_HOST_REMOTE_PLAYERS - 1];
+    char trackedHostPeerAddress[NETPLAY_MAX_HOST_REMOTE_PLAYERS - 1][NETPLAY_MAX_PEER_ADDRESS + 1];
+    unsigned char trackedHostPeerRecvBuffer[NETPLAY_MAX_HOST_REMOTE_PLAYERS - 1][NETPLAY_RECV_BUFFER_SIZE];
+    size_t trackedHostPeerRecvLength[NETPLAY_MAX_HOST_REMOTE_PLAYERS - 1];
+    uint64_t trackedHostPeerLastReceiveMs[NETPLAY_MAX_HOST_REMOTE_PLAYERS - 1];
 };
 
 #ifdef _WIN32
@@ -199,18 +205,30 @@ static void set_last_error(struct NetplayState *state, const char *message);
 static bool set_socket_nonblocking(NetSocket socketHandle);
 static void set_socket_nodelay(NetSocket socketHandle);
 static void close_socket_if_open(NetSocket *socketHandle);
+static NetSocket get_host_peer_socket_by_id(const struct NetplayState *state, int peerId);
 static bool socket_is_writable(NetSocket socketHandle);
 static void reset_connection_buffers(struct NetplayState *state);
 static bool push_event(struct NetplayState *state, const struct NetplayEvent *event);
+static bool queue_packet_to_peer(struct NetplayState *state, int peerId, enum NetplayPacketType type, const void *payload, size_t payloadSize);
+static bool queue_packet_to_all_host_peers(struct NetplayState *state, enum NetplayPacketType type, const void *payload, size_t payloadSize);
 static bool queue_packet(struct NetplayState *state, enum NetplayPacketType type, const void *payload, size_t payloadSize);
 static void flush_send_queue(struct NetplayState *state);
 static void accept_pending_client(struct NetplayState *state);
 static void advance_pending_connect(struct NetplayState *state);
 static void read_from_peer(struct NetplayState *state);
+static void read_from_additional_host_peers(struct NetplayState *state);
 static void parse_incoming_packets(struct NetplayState *state);
+static bool parse_incoming_packets_for_peer(struct NetplayState *state,
+                                            int peerId,
+                                            unsigned char *recvBuffer,
+                                            size_t *recvLength,
+                                            char *failureReason,
+                                            size_t failureReasonSize);
 static void process_connection_health(struct NetplayState *state);
+static void poll_tracked_host_peers(struct NetplayState *state);
+static void disconnect_additional_host_peer(struct NetplayState *state, int trackedPeerIndex, const char *message);
 static void disconnect_peer(struct NetplayState *state, bool keepListening, const char *message);
-static bool decode_packet(struct NetplayState *state, enum NetplayPacketType type, const unsigned char *payload, size_t payloadSize);
+static bool decode_packet(struct NetplayState *state, int peerId, enum NetplayPacketType type, const unsigned char *payload, size_t payloadSize);
 static void encode_lobby_state(const struct NetplayLobbyStateInfo *info, struct NetplayLobbyStateWire *wireInfo);
 static void decode_lobby_state(struct NetplayLobbyStateInfo *info, const struct NetplayLobbyStateWire *wireInfo);
 static void encode_match_init(const struct NetplayMatchInitInfo *info, struct NetplayMatchInitWire *wireInfo);
@@ -227,10 +245,100 @@ static uint32_t encode_bool(bool value);
 static uint32_t decode_u32(uint32_t value);
 static int decode_i32(uint32_t value);
 static bool decode_bool(uint32_t value);
+static void init_tracked_host_peers(struct NetplayState *state);
+static void close_tracked_host_peers(struct NetplayState *state);
+static int count_tracked_host_peers(const struct NetplayState *state);
+static bool try_track_additional_host_peer(struct NetplayState *state, NetSocket socketHandle, const char *addressText);
 
 static uint32_t encode_u32(uint32_t value)
 {
     return htonl(value);
+}
+
+static void init_tracked_host_peers(struct NetplayState *state)
+{
+    if (state == NULL)
+    {
+        return;
+    }
+
+    for (int i = 0; i < NETPLAY_MAX_HOST_REMOTE_PLAYERS - 1; i++)
+    {
+        state->trackedHostPeers[i] = NET_INVALID_SOCKET;
+        state->trackedHostPeerAddress[i][0] = '\0';
+        state->trackedHostPeerRecvLength[i] = 0u;
+        state->trackedHostPeerLastReceiveMs[i] = 0u;
+    }
+}
+
+static void close_tracked_host_peers(struct NetplayState *state)
+{
+    if (state == NULL)
+    {
+        return;
+    }
+
+    for (int i = 0; i < NETPLAY_MAX_HOST_REMOTE_PLAYERS - 1; i++)
+    {
+        close_socket_if_open(&state->trackedHostPeers[i]);
+        state->trackedHostPeerAddress[i][0] = '\0';
+        state->trackedHostPeerRecvLength[i] = 0u;
+        state->trackedHostPeerLastReceiveMs[i] = 0u;
+    }
+}
+
+static int count_tracked_host_peers(const struct NetplayState *state)
+{
+    int count = 0;
+
+    if (state == NULL)
+    {
+        return 0;
+    }
+
+    if (state->peerSocket != NET_INVALID_SOCKET)
+    {
+        count++;
+    }
+
+    for (int i = 0; i < NETPLAY_MAX_HOST_REMOTE_PLAYERS - 1; i++)
+    {
+        if (state->trackedHostPeers[i] != NET_INVALID_SOCKET)
+        {
+            count++;
+        }
+    }
+
+    return count;
+}
+
+static bool try_track_additional_host_peer(struct NetplayState *state, NetSocket socketHandle, const char *addressText)
+{
+    if (state == NULL || socketHandle == NET_INVALID_SOCKET)
+    {
+        return false;
+    }
+
+    for (int i = 0; i < NETPLAY_MAX_HOST_REMOTE_PLAYERS - 1; i++)
+    {
+        if (state->trackedHostPeers[i] == NET_INVALID_SOCKET)
+        {
+            struct NetplayEvent event;
+            state->trackedHostPeers[i] = socketHandle;
+            snprintf(state->trackedHostPeerAddress[i], sizeof(state->trackedHostPeerAddress[i]), "%s", addressText == NULL ? "" : addressText);
+            state->trackedHostPeerRecvLength[i] = 0u;
+            state->trackedHostPeerLastReceiveMs[i] = 0u;
+
+            memset(&event, 0, sizeof(event));
+            event.type = NETPLAY_EVENT_ADDITIONAL_CLIENT_CONNECTED;
+            event.peerId = i + 1;
+            snprintf(event.message, sizeof(event.message), "%s", state->trackedHostPeerAddress[i]);
+            push_event(state, &event);
+            return true;
+        }
+    }
+
+    return false;
 }
 
 static uint32_t encode_i32(int value)
@@ -477,6 +585,21 @@ static void close_socket_if_open(NetSocket *socketHandle)
     *socketHandle = NET_INVALID_SOCKET;
 }
 
+static NetSocket get_host_peer_socket_by_id(const struct NetplayState *state, int peerId)
+{
+    if (state == NULL || peerId < 0 || peerId >= NETPLAY_MAX_HOST_REMOTE_PLAYERS)
+    {
+        return NET_INVALID_SOCKET;
+    }
+
+    if (peerId == 0)
+    {
+        return state->peerSocket;
+    }
+
+    return state->trackedHostPeers[peerId - 1];
+}
+
 static bool socket_is_writable(NetSocket socketHandle)
 {
     fd_set writeSet;
@@ -502,6 +625,12 @@ static void reset_connection_buffers(struct NetplayState *state)
     state->lastSendMs = 0u;
     state->lastReceiveMs = 0u;
     state->lastHeartbeatSentMs = 0u;
+
+    for (int i = 0; i < NETPLAY_MAX_HOST_REMOTE_PLAYERS - 1; i++)
+    {
+        state->trackedHostPeerRecvLength[i] = 0u;
+        state->trackedHostPeerLastReceiveMs[i] = 0u;
+    }
 }
 
 static bool push_event(struct NetplayState *state, const struct NetplayEvent *event)
@@ -520,19 +649,39 @@ static bool push_event(struct NetplayState *state, const struct NetplayEvent *ev
     return true;
 }
 
-static bool queue_packet(struct NetplayState *state, enum NetplayPacketType type, const void *payload, size_t payloadSize)
+static bool queue_packet_to_peer(struct NetplayState *state,
+                                 int peerId,
+                                 enum NetplayPacketType type,
+                                 const void *payload,
+                                 size_t payloadSize)
 {
     struct NetplayQueuedPacket *packet = NULL;
     struct NetplayPacketHeader header;
+    NetSocket peerSocket = NET_INVALID_SOCKET;
 
-    if (state == NULL || payloadSize > NETPLAY_MAX_PAYLOAD_SIZE)
+    if (state == NULL || payloadSize > NETPLAY_MAX_PAYLOAD_SIZE || peerId < 0)
     {
         return false;
     }
 
-    if (state->connectionState != NETPLAY_CONNECTION_CONNECTED || state->peerSocket == NET_INVALID_SOCKET)
+    if (state->connectionState != NETPLAY_CONNECTION_CONNECTED)
     {
         set_last_error(state, "queue failed: not connected");
+        return false;
+    }
+
+    if (state->mode == NETPLAY_MODE_HOST)
+    {
+        peerSocket = get_host_peer_socket_by_id(state, peerId);
+    }
+    else
+    {
+        peerSocket = (peerId == 0) ? state->peerSocket : NET_INVALID_SOCKET;
+    }
+
+    if (peerSocket == NET_INVALID_SOCKET)
+    {
+        set_last_error(state, "queue failed: peer unavailable");
         return false;
     }
 
@@ -545,6 +694,7 @@ static bool queue_packet(struct NetplayState *state, enum NetplayPacketType type
     {
         const int writeIndex = (state->sendHead + state->sendCount) % NETPLAY_SEND_QUEUE_CAPACITY;
         packet = &state->sendQueue[writeIndex];
+        packet->peerId = peerId;
         header.magic[0] = NETPLAY_PACKET_MAGIC[0];
         header.magic[1] = NETPLAY_PACKET_MAGIC[1];
         header.magic[2] = NETPLAY_PACKET_MAGIC[2];
@@ -565,6 +715,40 @@ static bool queue_packet(struct NetplayState *state, enum NetplayPacketType type
     return true;
 }
 
+static bool queue_packet_to_all_host_peers(struct NetplayState *state,
+                                           enum NetplayPacketType type,
+                                           const void *payload,
+                                           size_t payloadSize)
+{
+    bool queuedAtLeastOne = false;
+
+    if (state == NULL)
+    {
+        return false;
+    }
+
+    for (int peerId = 0; peerId < NETPLAY_MAX_HOST_REMOTE_PLAYERS; peerId++)
+    {
+        if (get_host_peer_socket_by_id(state, peerId) == NET_INVALID_SOCKET)
+        {
+            continue;
+        }
+
+        if (!queue_packet_to_peer(state, peerId, type, payload, payloadSize))
+        {
+            return false;
+        }
+        queuedAtLeastOne = true;
+    }
+
+    return queuedAtLeastOne;
+}
+
+static bool queue_packet(struct NetplayState *state, enum NetplayPacketType type, const void *payload, size_t payloadSize)
+{
+    return queue_packet_to_peer(state, 0, type, payload, payloadSize);
+}
+
 static void disconnect_peer(struct NetplayState *state, bool keepListening, const char *message)
 {
     struct NetplayEvent event;
@@ -575,6 +759,7 @@ static void disconnect_peer(struct NetplayState *state, bool keepListening, cons
     }
 
     close_socket_if_open(&state->peerSocket);
+    close_tracked_host_peers(state);
     reset_connection_buffers(state);
     state->connectStartedMs = 0u;
     state->peerAddress[0] = '\0';
@@ -593,16 +778,96 @@ static void disconnect_peer(struct NetplayState *state, bool keepListening, cons
     push_event(state, &event);
 }
 
+static void disconnect_additional_host_peer(struct NetplayState *state, int trackedPeerIndex, const char *message)
+{
+    struct NetplayEvent event;
+
+    if (state == NULL || trackedPeerIndex < 0 || trackedPeerIndex >= NETPLAY_MAX_HOST_REMOTE_PLAYERS - 1)
+    {
+        return;
+    }
+
+    if (state->trackedHostPeers[trackedPeerIndex] == NET_INVALID_SOCKET)
+    {
+        return;
+    }
+
+    close_socket_if_open(&state->trackedHostPeers[trackedPeerIndex]);
+    memset(&event, 0, sizeof(event));
+    event.type = NETPLAY_EVENT_ADDITIONAL_CLIENT_DISCONNECTED;
+    event.peerId = trackedPeerIndex + 1;
+    snprintf(event.message,
+             sizeof(event.message),
+             "%s",
+             (message != NULL && message[0] != '\0') ? message : state->trackedHostPeerAddress[trackedPeerIndex]);
+    state->trackedHostPeerAddress[trackedPeerIndex][0] = '\0';
+    state->trackedHostPeerRecvLength[trackedPeerIndex] = 0u;
+    state->trackedHostPeerLastReceiveMs[trackedPeerIndex] = 0u;
+    push_event(state, &event);
+}
+
+static void poll_tracked_host_peers(struct NetplayState *state)
+{
+    if (state == NULL || state->mode != NETPLAY_MODE_HOST)
+    {
+        return;
+    }
+
+    for (int i = 0; i < NETPLAY_MAX_HOST_REMOTE_PLAYERS - 1; i++)
+    {
+        if (state->trackedHostPeers[i] != NET_INVALID_SOCKET)
+        {
+            unsigned char peekByte = 0u;
+            const int received = recv(state->trackedHostPeers[i], (char *)&peekByte, 1, MSG_PEEK);
+            if (received == 0)
+            {
+                disconnect_additional_host_peer(state, i, NULL);
+            }
+            else if (received == NET_SOCKET_ERROR)
+            {
+                const int errorCode = net_last_error_code();
+                if (!NET_WOULD_BLOCK(errorCode))
+                {
+                    disconnect_additional_host_peer(state, i, NULL);
+                }
+            }
+        }
+    }
+}
+
 static void flush_send_queue(struct NetplayState *state)
 {
     while (state != NULL &&
-           state->peerSocket != NET_INVALID_SOCKET &&
            state->connectionState == NETPLAY_CONNECTION_CONNECTED &&
            state->sendCount > 0)
     {
         struct NetplayQueuedPacket *packet = &state->sendQueue[state->sendHead];
+        NetSocket targetSocket = NET_INVALID_SOCKET;
         const int remaining = (int)(packet->length - packet->offset);
-        const int sent = send(state->peerSocket,
+        int sent = 0;
+
+        if (state->mode == NETPLAY_MODE_HOST)
+        {
+            targetSocket = get_host_peer_socket_by_id(state, packet->peerId);
+            if (targetSocket == NET_INVALID_SOCKET)
+            {
+                packet->offset = packet->length;
+                state->sendHead = (state->sendHead + 1) % NETPLAY_SEND_QUEUE_CAPACITY;
+                state->sendCount--;
+                continue;
+            }
+        }
+        else
+        {
+            targetSocket = state->peerSocket;
+            if (targetSocket == NET_INVALID_SOCKET)
+            {
+                disconnect_peer(state, false, "peer unavailable");
+                return;
+            }
+        }
+
+        sent = send(targetSocket,
                               (const char *)(packet->bytes + packet->offset),
                               remaining,
                               0);
@@ -614,12 +879,30 @@ static void flush_send_queue(struct NetplayState *state)
                 return;
             }
 
+            if (state->mode == NETPLAY_MODE_HOST && packet->peerId > 0)
+            {
+                disconnect_additional_host_peer(state, packet->peerId - 1, "send failed");
+                packet->offset = packet->length;
+                state->sendHead = (state->sendHead + 1) % NETPLAY_SEND_QUEUE_CAPACITY;
+                state->sendCount--;
+                continue;
+            }
+
             disconnect_peer(state, state->mode == NETPLAY_MODE_HOST, "send failed");
             return;
         }
 
         if (sent <= 0)
         {
+            if (state->mode == NETPLAY_MODE_HOST && packet->peerId > 0)
+            {
+                disconnect_additional_host_peer(state, packet->peerId - 1, "peer closed");
+                packet->offset = packet->length;
+                state->sendHead = (state->sendHead + 1) % NETPLAY_SEND_QUEUE_CAPACITY;
+                state->sendCount--;
+                continue;
+            }
+
             disconnect_peer(state, state->mode == NETPLAY_MODE_HOST, "peer closed");
             return;
         }
@@ -644,7 +927,7 @@ static void accept_pending_client(struct NetplayState *state)
 #endif
     NetSocket accepted = NET_INVALID_SOCKET;
 
-    if (state == NULL || state->mode != NETPLAY_MODE_HOST || state->listenSocket == NET_INVALID_SOCKET || state->peerSocket != NET_INVALID_SOCKET)
+    if (state == NULL || state->mode != NETPLAY_MODE_HOST || state->listenSocket == NET_INVALID_SOCKET)
     {
         return;
     }
@@ -669,17 +952,25 @@ static void accept_pending_client(struct NetplayState *state)
     }
 
     set_socket_nodelay(accepted);
-    state->peerSocket = accepted;
-    state->connectionState = NETPLAY_CONNECTION_CONNECTED;
-    state->connectStartedMs = 0u;
-    snprintf(state->peerAddress, sizeof(state->peerAddress), "%s", inet_ntoa(address.sin_addr));
-    clear_last_error(state);
-
+    if (state->peerSocket == NET_INVALID_SOCKET)
     {
-        struct NetplayEvent event;
-        memset(&event, 0, sizeof(event));
-        event.type = NETPLAY_EVENT_CLIENT_CONNECTED;
-        push_event(state, &event);
+        state->peerSocket = accepted;
+        state->connectionState = NETPLAY_CONNECTION_CONNECTED;
+        state->connectStartedMs = 0u;
+        snprintf(state->peerAddress, sizeof(state->peerAddress), "%s", inet_ntoa(address.sin_addr));
+        clear_last_error(state);
+
+        {
+            struct NetplayEvent event;
+            memset(&event, 0, sizeof(event));
+            event.type = NETPLAY_EVENT_CLIENT_CONNECTED;
+            event.peerId = 0;
+            push_event(state, &event);
+        }
+    }
+    else if (!try_track_additional_host_peer(state, accepted, inet_ntoa(address.sin_addr)))
+    {
+        net_close_socket(accepted);
     }
 }
 
@@ -744,6 +1035,7 @@ static void advance_pending_connect(struct NetplayState *state)
         struct NetplayEvent event;
         memset(&event, 0, sizeof(event));
         event.type = NETPLAY_EVENT_CONNECTED;
+        event.peerId = 0;
         push_event(state, &event);
     }
 }
@@ -915,7 +1207,11 @@ static bool action_result_is_sane(const struct GameActionResult *result)
            result->stolenResource <= RESOURCE_STONE;
 }
 
-static bool decode_packet(struct NetplayState *state, enum NetplayPacketType type, const unsigned char *payload, size_t payloadSize)
+static bool decode_packet(struct NetplayState *state,
+                          int peerId,
+                          enum NetplayPacketType type,
+                          const unsigned char *payload,
+                          size_t payloadSize)
 {
     struct NetplayEvent event;
 
@@ -925,6 +1221,7 @@ static bool decode_packet(struct NetplayState *state, enum NetplayPacketType typ
     }
 
     memset(&event, 0, sizeof(event));
+    event.peerId = peerId;
     switch (type)
     {
     case NETPLAY_PACKET_HELLO:
@@ -1092,55 +1389,174 @@ static bool decode_packet(struct NetplayState *state, enum NetplayPacketType typ
 
 static void parse_incoming_packets(struct NetplayState *state)
 {
-    if (state != NULL &&
-        state->eventCount >= NETPLAY_EVENT_QUEUE_CAPACITY &&
-        state->recvLength >= sizeof(struct NetplayPacketHeader))
+    char failureReason[NETPLAY_MAX_STATUS_TEXT];
+
+    if (state == NULL)
     {
-        disconnect_peer(state, state->mode == NETPLAY_MODE_HOST, "event queue overflow");
         return;
     }
 
-    while (state != NULL &&
-           state->recvLength >= sizeof(struct NetplayPacketHeader) &&
-           state->eventCount < NETPLAY_EVENT_QUEUE_CAPACITY)
+    if (!parse_incoming_packets_for_peer(state,
+                                         0,
+                                         state->recvBuffer,
+                                         &state->recvLength,
+                                         failureReason,
+                                         sizeof(failureReason)))
+    {
+        disconnect_peer(state, state->mode == NETPLAY_MODE_HOST, failureReason);
+    }
+}
+
+static bool parse_incoming_packets_for_peer(struct NetplayState *state,
+                                            int peerId,
+                                            unsigned char *recvBuffer,
+                                            size_t *recvLength,
+                                            char *failureReason,
+                                            size_t failureReasonSize)
+{
+    if (state == NULL || recvBuffer == NULL || recvLength == NULL)
+    {
+        return false;
+    }
+
+    if (failureReason != NULL && failureReasonSize > 0u)
+    {
+        failureReason[0] = '\0';
+    }
+
+    if (state->eventCount >= NETPLAY_EVENT_QUEUE_CAPACITY && *recvLength >= sizeof(struct NetplayPacketHeader))
+    {
+        if (failureReason != NULL && failureReasonSize > 0u)
+        {
+            snprintf(failureReason, failureReasonSize, "%s", "event queue overflow");
+        }
+        return false;
+    }
+
+    while (*recvLength >= sizeof(struct NetplayPacketHeader) && state->eventCount < NETPLAY_EVENT_QUEUE_CAPACITY)
     {
         struct NetplayPacketHeader header;
         size_t payloadSize = 0u;
         enum NetplayPacketType type = NETPLAY_PACKET_HELLO;
 
-        memcpy(&header, state->recvBuffer, sizeof(header));
+        memcpy(&header, recvBuffer, sizeof(header));
         payloadSize = (size_t)decode_u32(header.payloadSize);
         type = (enum NetplayPacketType)decode_u32(header.type);
         if (memcmp(header.magic, NETPLAY_PACKET_MAGIC, sizeof(header.magic)) != 0 ||
             payloadSize > NETPLAY_MAX_PAYLOAD_SIZE)
         {
-            disconnect_peer(state, state->mode == NETPLAY_MODE_HOST, "invalid packet");
-            return;
+            if (failureReason != NULL && failureReasonSize > 0u)
+            {
+                snprintf(failureReason, failureReasonSize, "%s", "invalid packet");
+            }
+            return false;
         }
 
         if (decode_u32(header.version) != NETPLAY_PROTOCOL_VERSION)
         {
-            disconnect_peer(state, state->mode == NETPLAY_MODE_HOST, "protocol mismatch");
-            return;
+            if (failureReason != NULL && failureReasonSize > 0u)
+            {
+                snprintf(failureReason, failureReasonSize, "%s", "protocol mismatch");
+            }
+            return false;
         }
 
         {
             const size_t fullPacketLength = sizeof(header) + payloadSize;
             const unsigned char *payload = NULL;
-            if (state->recvLength < fullPacketLength)
+            if (*recvLength < fullPacketLength)
             {
-                return;
+                return true;
             }
 
-            payload = state->recvBuffer + sizeof(header);
-            if (!decode_packet(state, type, payload, payloadSize))
+            payload = recvBuffer + sizeof(header);
+            if (!decode_packet(state, peerId, type, payload, payloadSize))
             {
-                disconnect_peer(state, state->mode == NETPLAY_MODE_HOST, "packet decode failed");
-                return;
+                if (failureReason != NULL && failureReasonSize > 0u)
+                {
+                    snprintf(failureReason, failureReasonSize, "%s", "packet decode failed");
+                }
+                return false;
             }
 
-            memmove(state->recvBuffer, state->recvBuffer + fullPacketLength, state->recvLength - fullPacketLength);
-            state->recvLength -= fullPacketLength;
+            memmove(recvBuffer, recvBuffer + fullPacketLength, *recvLength - fullPacketLength);
+            *recvLength -= fullPacketLength;
+        }
+    }
+
+    return true;
+}
+
+static void read_from_additional_host_peers(struct NetplayState *state)
+{
+    if (state == NULL || state->mode != NETPLAY_MODE_HOST || state->connectionState != NETPLAY_CONNECTION_CONNECTED)
+    {
+        return;
+    }
+
+    for (int i = 0; i < NETPLAY_MAX_HOST_REMOTE_PLAYERS - 1; i++)
+    {
+        NetSocket peerSocket = state->trackedHostPeers[i];
+        char failureReason[NETPLAY_MAX_STATUS_TEXT];
+
+        if (peerSocket == NET_INVALID_SOCKET)
+        {
+            continue;
+        }
+
+        while (true)
+        {
+            const int remainingCapacity = (int)(NETPLAY_RECV_BUFFER_SIZE - state->trackedHostPeerRecvLength[i]);
+            const int received = recv(peerSocket,
+                                      (char *)(state->trackedHostPeerRecvBuffer[i] + state->trackedHostPeerRecvLength[i]),
+                                      remainingCapacity,
+                                      0);
+
+            if (received == 0)
+            {
+                disconnect_additional_host_peer(state, i, "peer disconnected");
+                break;
+            }
+
+            if (received == NET_SOCKET_ERROR)
+            {
+                const int errorCode = net_last_error_code();
+                if (NET_WOULD_BLOCK(errorCode))
+                {
+                    break;
+                }
+
+                disconnect_additional_host_peer(state, i, "receive failed");
+                break;
+            }
+
+            if (received < 0)
+            {
+                break;
+            }
+
+            state->trackedHostPeerRecvLength[i] += (size_t)received;
+            state->trackedHostPeerLastReceiveMs[i] = netplay_now_ms();
+            if (state->trackedHostPeerRecvLength[i] >= NETPLAY_RECV_BUFFER_SIZE)
+            {
+                disconnect_additional_host_peer(state, i, "receive buffer overflow");
+                break;
+            }
+        }
+
+        if (state->trackedHostPeers[i] == NET_INVALID_SOCKET)
+        {
+            continue;
+        }
+
+        if (!parse_incoming_packets_for_peer(state,
+                                             i + 1,
+                                             state->trackedHostPeerRecvBuffer[i],
+                                             &state->trackedHostPeerRecvLength[i],
+                                             failureReason,
+                                             sizeof(failureReason)))
+        {
+            disconnect_additional_host_peer(state, i, failureReason);
         }
     }
 }
@@ -1160,10 +1576,26 @@ static void process_connection_health(struct NetplayState *state)
         return;
     }
 
+    if (state->mode == NETPLAY_MODE_HOST)
+    {
+        for (int i = 0; i < NETPLAY_MAX_HOST_REMOTE_PLAYERS - 1; i++)
+        {
+            if (state->trackedHostPeers[i] != NET_INVALID_SOCKET &&
+                state->trackedHostPeerLastReceiveMs[i] > 0u &&
+                nowMs - state->trackedHostPeerLastReceiveMs[i] > NETPLAY_STALE_TIMEOUT_MS)
+            {
+                disconnect_additional_host_peer(state, i, "connection timed out");
+            }
+        }
+    }
+
     if ((state->lastHeartbeatSentMs == 0u || nowMs - state->lastHeartbeatSentMs >= NETPLAY_HEARTBEAT_INTERVAL_MS) &&
         state->sendCount < NETPLAY_SEND_QUEUE_CAPACITY)
     {
-        if (queue_packet(state, NETPLAY_PACKET_HEARTBEAT, NULL, 0u))
+        const bool queued = state->mode == NETPLAY_MODE_HOST
+                                ? queue_packet_to_all_host_peers(state, NETPLAY_PACKET_HEARTBEAT, NULL, 0u)
+                                : queue_packet(state, NETPLAY_PACKET_HEARTBEAT, NULL, 0u);
+        if (queued)
         {
             state->lastHeartbeatSentMs = nowMs;
         }
@@ -1187,6 +1619,7 @@ struct NetplayState *netplayCreate(void)
 
     state->listenSocket = NET_INVALID_SOCKET;
     state->peerSocket = NET_INVALID_SOCKET;
+    init_tracked_host_peers(state);
     state->connectionState = NETPLAY_CONNECTION_IDLE;
     state->connectStartedMs = 0u;
     return state;
@@ -1200,6 +1633,7 @@ void netplayDestroy(struct NetplayState *state)
     }
 
     close_socket_if_open(&state->peerSocket);
+    close_tracked_host_peers(state);
     close_socket_if_open(&state->listenSocket);
     free(state);
 }
@@ -1215,6 +1649,7 @@ bool netplayStartHost(struct NetplayState *state, unsigned short port)
     }
 
     close_socket_if_open(&state->peerSocket);
+    close_tracked_host_peers(state);
     close_socket_if_open(&state->listenSocket);
     reset_connection_buffers(state);
     state->eventHead = 0;
@@ -1244,7 +1679,7 @@ bool netplayStartHost(struct NetplayState *state, unsigned short port)
         return false;
     }
 
-    if (listen(state->listenSocket, 1) == NET_SOCKET_ERROR || !set_socket_nonblocking(state->listenSocket))
+    if (listen(state->listenSocket, NETPLAY_MAX_HOST_REMOTE_PLAYERS) == NET_SOCKET_ERROR || !set_socket_nonblocking(state->listenSocket))
     {
         close_socket_if_open(&state->listenSocket);
         set_last_error(state, "listen failed");
@@ -1271,6 +1706,7 @@ bool netplayStartClient(struct NetplayState *state, const char *hostAddress, uns
     }
 
     close_socket_if_open(&state->peerSocket);
+    close_tracked_host_peers(state);
     close_socket_if_open(&state->listenSocket);
     reset_connection_buffers(state);
     state->eventHead = 0;
@@ -1325,6 +1761,7 @@ bool netplayStartClient(struct NetplayState *state, const char *hostAddress, uns
                 struct NetplayEvent event;
                 memset(&event, 0, sizeof(event));
                 event.type = NETPLAY_EVENT_CONNECTED;
+                event.peerId = 0;
                 push_event(state, &event);
             }
             freeaddrinfo(results);
@@ -1371,7 +1808,9 @@ void netplayUpdate(struct NetplayState *state)
     advance_pending_connect(state);
     flush_send_queue(state);
     read_from_peer(state);
+    read_from_additional_host_peers(state);
     parse_incoming_packets(state);
+    poll_tracked_host_peers(state);
     process_connection_health(state);
 }
 
@@ -1393,6 +1832,15 @@ bool netplayQueueHello(struct NetplayState *state,
                        enum PlayerType hostPlayer,
                        const int seatAuthority[MAX_PLAYERS])
 {
+    return netplayQueueHelloForHostPeer(state, 0, assignedPlayer, hostPlayer, seatAuthority);
+}
+
+bool netplayQueueHelloForHostPeer(struct NetplayState *state,
+                                  int peerId,
+                                  enum PlayerType assignedPlayer,
+                                  enum PlayerType hostPlayer,
+                                  const int seatAuthority[MAX_PLAYERS])
+{
     struct NetplayHelloWire wireHello;
 
     if (state == NULL || seatAuthority == NULL)
@@ -1407,10 +1855,27 @@ bool netplayQueueHello(struct NetplayState *state,
         wireHello.seatAuthority[player] = encode_i32(seatAuthority[player]);
     }
 
+    if (state->mode == NETPLAY_MODE_HOST)
+    {
+        return queue_packet_to_peer(state, peerId, NETPLAY_PACKET_HELLO, &wireHello, sizeof(wireHello));
+    }
+
     return queue_packet(state, NETPLAY_PACKET_HELLO, &wireHello, sizeof(wireHello));
 }
 
 bool netplayQueueLobbyState(struct NetplayState *state, const struct NetplayLobbyStateInfo *info)
+{
+    if (state != NULL && state->mode == NETPLAY_MODE_HOST)
+    {
+        return netplayQueueLobbyStateForHostPeer(state, -1, info);
+    }
+
+    return netplayQueueLobbyStateForHostPeer(state, 0, info);
+}
+
+bool netplayQueueLobbyStateForHostPeer(struct NetplayState *state,
+                                       int peerId,
+                                       const struct NetplayLobbyStateInfo *info)
 {
     struct NetplayLobbyStateWire wireInfo;
 
@@ -1421,6 +1886,16 @@ bool netplayQueueLobbyState(struct NetplayState *state, const struct NetplayLobb
 
     memset(&wireInfo, 0, sizeof(wireInfo));
     encode_lobby_state(info, &wireInfo);
+
+    if (state->mode == NETPLAY_MODE_HOST)
+    {
+        if (peerId < 0)
+        {
+            return queue_packet_to_all_host_peers(state, NETPLAY_PACKET_LOBBY_STATE, &wireInfo, sizeof(wireInfo));
+        }
+        return queue_packet_to_peer(state, peerId, NETPLAY_PACKET_LOBBY_STATE, &wireInfo, sizeof(wireInfo));
+    }
+
     return queue_packet(state, NETPLAY_PACKET_LOBBY_STATE, &wireInfo, sizeof(wireInfo));
 }
 
@@ -1434,6 +1909,11 @@ bool netplayQueueMatchInit(struct NetplayState *state, const struct NetplayMatch
     }
 
     encode_match_init(info, &wireInfo);
+    if (state->mode == NETPLAY_MODE_HOST)
+    {
+        return queue_packet_to_all_host_peers(state, NETPLAY_PACKET_MATCH_INIT, &wireInfo, sizeof(wireInfo));
+    }
+
     return queue_packet(state, NETPLAY_PACKET_MATCH_INIT, &wireInfo, sizeof(wireInfo));
 }
 
@@ -1442,6 +1922,11 @@ bool netplayQueueSnapshot(struct NetplayState *state, const unsigned char *paylo
     if (state == NULL || payload == NULL || payloadSize == 0u)
     {
         return false;
+    }
+
+    if (state->mode == NETPLAY_MODE_HOST)
+    {
+        return queue_packet_to_all_host_peers(state, NETPLAY_PACKET_SNAPSHOT, payload, payloadSize);
     }
 
     return queue_packet(state, NETPLAY_PACKET_SNAPSHOT, payload, payloadSize);
@@ -1477,6 +1962,11 @@ bool netplayQueueActionResult(struct NetplayState *state,
     encode_action(action, &wireOutcome.action);
     encode_action_result(result, &wireOutcome.result);
     wireOutcome.stateHash = encode_u32(stateHash);
+    if (state->mode == NETPLAY_MODE_HOST)
+    {
+        return queue_packet_to_all_host_peers(state, NETPLAY_PACKET_ACTION_RESULT, &wireOutcome, sizeof(wireOutcome));
+    }
+
     return queue_packet(state, NETPLAY_PACKET_ACTION_RESULT, &wireOutcome, sizeof(wireOutcome));
 }
 
@@ -1492,10 +1982,22 @@ bool netplayQueueActionReject(struct NetplayState *state, const char *message, u
     memset(&wireReject, 0, sizeof(wireReject));
     wireReject.stateHash = encode_u32(stateHash);
     snprintf(wireReject.message, sizeof(wireReject.message), "%s", message == NULL ? "" : message);
+    if (state->mode == NETPLAY_MODE_HOST)
+    {
+        return queue_packet_to_all_host_peers(state, NETPLAY_PACKET_ACTION_REJECT, &wireReject, sizeof(wireReject));
+    }
+
     return queue_packet(state, NETPLAY_PACKET_ACTION_REJECT, &wireReject, sizeof(wireReject));
 }
 
 bool netplayQueueTradeOffer(struct NetplayState *state, const struct GameAction *offerAction)
+{
+    return netplayQueueTradeOfferForHostPeer(state, 0, offerAction);
+}
+
+bool netplayQueueTradeOfferForHostPeer(struct NetplayState *state,
+                                       int peerId,
+                                       const struct GameAction *offerAction)
 {
     struct NetplayActionWire wireAction;
 
@@ -1506,6 +2008,12 @@ bool netplayQueueTradeOffer(struct NetplayState *state, const struct GameAction 
 
     memset(&wireAction, 0, sizeof(wireAction));
     encode_action(offerAction, &wireAction);
+
+    if (state->mode == NETPLAY_MODE_HOST)
+    {
+        return queue_packet_to_peer(state, peerId, NETPLAY_PACKET_TRADE_OFFER, &wireAction, sizeof(wireAction));
+    }
+
     return queue_packet(state, NETPLAY_PACKET_TRADE_OFFER, &wireAction, sizeof(wireAction));
 }
 
@@ -1513,6 +2021,15 @@ bool netplayQueueTradeResponse(struct NetplayState *state,
                                const struct GameAction *offerAction,
                                bool accepted,
                                uint32_t stateHash)
+{
+    return netplayQueueTradeResponseForHostPeer(state, 0, offerAction, accepted, stateHash);
+}
+
+bool netplayQueueTradeResponseForHostPeer(struct NetplayState *state,
+                                          int peerId,
+                                          const struct GameAction *offerAction,
+                                          bool accepted,
+                                          uint32_t stateHash)
 {
     struct NetplayTradeResponseWire wireResponse;
 
@@ -1525,6 +2042,12 @@ bool netplayQueueTradeResponse(struct NetplayState *state,
     encode_action(offerAction, &wireResponse.action);
     wireResponse.accepted = encode_bool(accepted);
     wireResponse.stateHash = encode_u32(stateHash);
+
+    if (state->mode == NETPLAY_MODE_HOST)
+    {
+        return queue_packet_to_peer(state, peerId, NETPLAY_PACKET_TRADE_RESPONSE, &wireResponse, sizeof(wireResponse));
+    }
+
     return queue_packet(state, NETPLAY_PACKET_TRADE_RESPONSE, &wireResponse, sizeof(wireResponse));
 }
 
@@ -1544,6 +2067,11 @@ bool netplayQueueCapabilities(struct NetplayState *state,
     wireCapabilities.capabilityFlags = encode_u32(capabilityFlags);
     wireCapabilities.protocolMinVersion = encode_u32(protocolMinVersion);
     wireCapabilities.protocolMaxVersion = encode_u32(protocolMaxVersion);
+    if (state->mode == NETPLAY_MODE_HOST)
+    {
+        return queue_packet_to_all_host_peers(state, NETPLAY_PACKET_CAPABILITIES, &wireCapabilities, sizeof(wireCapabilities));
+    }
+
     return queue_packet(state, NETPLAY_PACKET_CAPABILITIES, &wireCapabilities, sizeof(wireCapabilities));
 }
 
@@ -1595,4 +2123,14 @@ const char *netplayGetLocalAddress(const struct NetplayState *state)
 unsigned short netplayGetPort(const struct NetplayState *state)
 {
     return state == NULL ? 0u : state->port;
+}
+
+int netplayGetTrackedHostPeerCount(const struct NetplayState *state)
+{
+    if (state == NULL)
+    {
+        return 0;
+    }
+
+    return count_tracked_host_peers(state);
 }

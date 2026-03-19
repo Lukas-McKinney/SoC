@@ -87,6 +87,8 @@ void uiSetWindowMode(enum UiWindowMode mode);
 enum UiWindowMode uiGetWindowMode(void);
 void uiSetAiSpeedSetting(int speed);
 int uiGetAiSpeedSetting(void);
+void uiSetProfileName(const char *name);
+const char *uiGetProfileName(void);
 void uiSetSettingsConfirmAction(enum UiSettingsConfirmAction action);
 enum UiSettingsConfirmAction uiGetSettingsConfirmAction(void);
 void uiRequestReturnToMainMenu(void);

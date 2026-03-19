@@ -42,6 +42,7 @@ static float gDevelopmentPlayConfirmOpenAmount = 0.0f;
 static enum DevelopmentCardType gDevelopmentPlayCardType = DEVELOPMENT_CARD_COUNT;
 static enum UiTheme gTheme = UI_THEME_LIGHT;
 static int gAiSpeedSetting = 3;
+static char gProfileName[32] = "Player";
 static bool gReturnToMainMenuRequested = false;
 static bool gRestartGameRequested = false;
 static bool gQuitGameRequested = false;
@@ -756,6 +757,45 @@ void uiSetAiSpeedSetting(int speed)
 int uiGetAiSpeedSetting(void)
 {
     return gAiSpeedSetting;
+}
+
+void uiSetProfileName(const char *name)
+{
+    size_t writeIndex = 0u;
+
+    if (name == NULL)
+    {
+        snprintf(gProfileName, sizeof(gProfileName), "%s", "Player");
+        return;
+    }
+
+    for (size_t i = 0u; name[i] != '\0' && writeIndex + 1u < sizeof(gProfileName); i++)
+    {
+        const unsigned char c = (unsigned char)name[i];
+        if ((c >= 'A' && c <= 'Z') ||
+            (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') ||
+            c == ' ' || c == '_' || c == '-' || c == '.')
+        {
+            gProfileName[writeIndex++] = (char)c;
+        }
+    }
+
+    while (writeIndex > 0u && gProfileName[writeIndex - 1u] == ' ')
+    {
+        writeIndex--;
+    }
+
+    gProfileName[writeIndex] = '\0';
+    if (gProfileName[0] == '\0')
+    {
+        snprintf(gProfileName, sizeof(gProfileName), "%s", "Player");
+    }
+}
+
+const char *uiGetProfileName(void)
+{
+    return gProfileName;
 }
 
 void uiSetSettingsConfirmAction(enum UiSettingsConfirmAction action)

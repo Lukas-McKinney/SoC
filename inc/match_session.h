@@ -54,6 +54,7 @@ struct MatchSession
     bool pendingTradeAwaitingLocalResponse;
     bool pendingTradeRequestedByRemote;
     struct GameAction pendingTradeOffer;
+    int pendingTradePeerId;
     struct NetplayState *netplay;
     char connectionError[96];
     char reconnectHost[64];
@@ -67,6 +68,7 @@ struct MatchSession
     uint32_t peerProtocolMinVersion;
     uint32_t peerProtocolMaxVersion;
     bool peerCapabilitiesReceived;
+    int remotePeerForPlayer[MAX_PLAYERS];
 };
 
 void matchSessionInit(struct MatchSession *session);
@@ -97,6 +99,8 @@ bool matchSessionHasStarted(const struct MatchSession *session);
 bool matchSessionCanStartNetplayMatch(const struct MatchSession *session);
 bool matchSessionStartNetplayMatch(struct MatchSession *session);
 bool matchSessionRestartNetplayMatch(struct MatchSession *session);
+bool matchSessionHostToggleNetplayLobbySeat(struct MatchSession *session, enum PlayerType player);
+bool matchSessionHostCycleNetplayLobbyAiDifficulty(struct MatchSession *session);
 bool matchSessionConsumePendingMatchInitUiReset(struct MatchSession *session);
 bool matchSessionShouldAnimateLocalRoll(const struct MatchSession *session);
 bool matchSessionShouldRunAi(const struct MatchSession *session);
