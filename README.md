@@ -9,14 +9,17 @@ This is a playable prototype, not a complete rules-perfect Catan clone.
 Implemented already:
 
 - Main menu with:
-  - `Start Game` popup
-  - `Start vs AI` popup
-  - theme toggle
+  - `Start Game` popup (local hotseat)
+  - `Start vs AI` popup (one human vs three AI opponents)
+  - `Multiplayer` popup (private networked: Host / Join mode selection, color, port)
+  - `Statistics` popup (match history)
+  - `Settings` popup (theme toggle, display, language, AI speed)
   - player color selection
   - AI difficulty selection
-- Two game modes:
+- Three game modes:
   - local hotseat
   - one human vs three AI opponents
+  - private networked multiplayer (two humans, optional AI)
 - Randomized setup start player and randomized snake-order setup based on that start player
 - Randomized board generation:
   - terrain layout
@@ -87,7 +90,9 @@ These are intentional shortcuts or current prototype settings:
 - Full hidden-hand hotseat support is still incomplete
   - some handoff screens exist
   - true private local multiplayer flow is not complete
-- No networked multiplayer
+- Private networked multiplayer is functional but limited
+  - supports two humans (host + join) with optional AI
+  - no dedicated server; requires a direct LAN or tunneled connection
 - AI now exhaustively searches bounded deterministic play lines
   - robber sub-choices use fast post-resolution scoring so thief turns stay responsive
   - long-horizon strategy is still guided by state evaluation rather than a full-game solve
@@ -295,8 +300,8 @@ The macOS zip now contains a signed `SoC.app` bundle with embedded frameworks to
 Each zip includes:
 
 - game executable (`settlers.exe` on Windows, `SoC.app` on macOS)
-- quick-start script for host
-- quick-start script for join
+- `run_host.bat` / `run_host.command` — launch as host (opens the lobby)
+- `run_join.bat` / `run_join.command` — join a host by IP address
 - `QUICKSTART.txt`
 
 Notes:
