@@ -17,6 +17,7 @@ Implemented already:
 - Two game modes:
   - local hotseat
   - one human vs three AI opponents
+  - private network multiplayer (host + remote peers)
 - Randomized setup start player and randomized snake-order setup based on that start player
 - Randomized board generation:
   - terrain layout
@@ -87,7 +88,6 @@ These are intentional shortcuts or current prototype settings:
 - Full hidden-hand hotseat support is still incomplete
   - some handoff screens exist
   - true private local multiplayer flow is not complete
-- No networked multiplayer
 - AI now exhaustively searches bounded deterministic play lines
   - robber sub-choices use fast post-resolution scoring so thief turns stay responsive
   - long-horizon strategy is still guided by state evaluation rather than a full-game solve

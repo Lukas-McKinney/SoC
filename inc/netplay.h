@@ -8,7 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define NETPLAY_PROTOCOL_VERSION 3u
+#define NETPLAY_PROTOCOL_VERSION 4u
 #define NETPLAY_DEFAULT_PORT 24680u
 #define NETPLAY_MAX_PAYLOAD_SIZE 65536u
 #define NETPLAY_MAX_STATUS_TEXT 96
@@ -127,6 +127,10 @@ bool netplayQueueActionResult(struct NetplayState *state,
                               const struct GameActionResult *result,
                               uint32_t stateHash);
 bool netplayQueueActionReject(struct NetplayState *state, const char *message, uint32_t stateHash);
+bool netplayQueueActionRejectForHostPeer(struct NetplayState *state,
+                                         int peerId,
+                                         const char *message,
+                                         uint32_t stateHash);
 bool netplayQueueTradeOffer(struct NetplayState *state, const struct GameAction *offerAction);
 bool netplayQueueTradeOfferForHostPeer(struct NetplayState *state,
                                        int peerId,

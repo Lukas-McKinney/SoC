@@ -95,11 +95,16 @@ static void NormalizePlayerTradeSelection(const struct Map *map)
         return;
     }
 
-    if (gPlayerTradeTarget < PLAYER_RED || gPlayerTradeTarget > PLAYER_BLACK || gPlayerTradeTarget == map->currentPlayer)
+    if (gPlayerTradeTarget < PLAYER_RED ||
+        gPlayerTradeTarget > PLAYER_BLACK ||
+        gPlayerTradeTarget == map->currentPlayer ||
+        !gameIsPlayerActive(map, gPlayerTradeTarget))
     {
+        gPlayerTradeTarget = PLAYER_NONE;
         for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
         {
-            if (player != map->currentPlayer)
+            if (player != map->currentPlayer &&
+                gameIsPlayerActive(map, (enum PlayerType)player))
             {
                 gPlayerTradeTarget = (enum PlayerType)player;
                 break;
@@ -165,18 +170,21 @@ static enum PlayerType LocalHumanPlayer(const struct Map *map)
         return PLAYER_NONE;
     }
 
-    if (session != NULL && session->localPlayer >= PLAYER_RED && session->localPlayer <= PLAYER_BLACK)
+    if (session != NULL &&
+        session->localPlayer >= PLAYER_RED &&
+        session->localPlayer <= PLAYER_BLACK &&
+        playerControlModeIsHuman(map->players[session->localPlayer].controlMode))
     {
         return session->localPlayer;
     }
 
     for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
     {
-        if (map->players[player].controlMode == PLAYER_CONTROL_AI)
+        if (playerControlModeIsAi(map->players[player].controlMode))
         {
             aiCount++;
         }
-        else
+        else if (playerControlModeIsHuman(map->players[player].controlMode))
         {
             humanPlayer = (enum PlayerType)player;
             humanCount++;

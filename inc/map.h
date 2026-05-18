@@ -46,6 +46,7 @@ struct Map {
     enum PlayerType largestArmyOwner;
     enum PlayerType longestRoadOwner;
     int longestRoadLength;
+    double turnStartTime;
 };
 
 bool setupMap(struct Map *map);

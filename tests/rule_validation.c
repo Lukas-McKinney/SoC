@@ -94,6 +94,7 @@ static bool test_setup_settlement_requires_distance_rule(void);
 static bool test_play_roads_must_connect_to_network(void);
 static bool test_road_cannot_continue_only_through_opponent_settlement(void);
 static bool test_second_setup_settlement_grants_each_adjacent_non_desert_resource(void);
+static bool test_two_player_matches_skip_closed_seats_in_setup_and_turn_order(void);
 static bool test_roll_pays_all_structures_and_thief_blocks_the_tile(void);
 static bool test_development_cards_are_locked_until_next_turn_and_limited_to_one_play(void);
 static bool test_largest_army_requires_three_and_transfers_only_on_strictly_more_knights(void);
@@ -144,6 +145,7 @@ int main(void)
         {"roads connect to existing network", test_play_roads_must_connect_to_network},
         {"roads blocked by opponent settlement", test_road_cannot_continue_only_through_opponent_settlement},
         {"second setup settlement grants resources", test_second_setup_settlement_grants_each_adjacent_non_desert_resource},
+        {"two-player matches skip closed seats", test_two_player_matches_skip_closed_seats_in_setup_and_turn_order},
         {"roll payout and thief blocking", test_roll_pays_all_structures_and_thief_blocks_the_tile},
         {"development card timing limits", test_development_cards_are_locked_until_next_turn_and_limited_to_one_play},
         {"largest army threshold and transfer", test_largest_army_requires_three_and_transfers_only_on_strictly_more_knights},
@@ -286,6 +288,57 @@ static bool test_second_setup_settlement_grants_each_adjacent_non_desert_resourc
     ASSERT_EQ_INT(0, map.players[PLAYER_BLUE].resources[RESOURCE_CLAY]);
     ASSERT_EQ_INT(0, map.players[PLAYER_BLUE].resources[RESOURCE_SHEEP]);
     ASSERT_TRUE(map.setupNeedsRoad);
+    return true;
+}
+
+static bool test_two_player_matches_skip_closed_seats_in_setup_and_turn_order(void)
+{
+    struct Map map;
+    initialize_test_map(&map);
+
+    map.phase = GAME_PHASE_SETUP;
+    map.setupStartPlayer = PLAYER_RED;
+    map.currentPlayer = PLAYER_RED;
+    map.setupStep = 0;
+    map.setupNeedsRoad = false;
+    map.players[PLAYER_RED].controlMode = PLAYER_CONTROL_DISABLED;
+    map.players[PLAYER_BLUE].controlMode = PLAYER_CONTROL_HUMAN;
+    map.players[PLAYER_GREEN].controlMode = PLAYER_CONTROL_DISABLED;
+    map.players[PLAYER_BLACK].controlMode = PLAYER_CONTROL_HUMAN;
+
+    gameApplySeatControlModes(&map);
+    ASSERT_EQ_INT(2, gameGetActivePlayerCount(&map));
+    ASSERT_EQ_INT(PLAYER_BLUE, map.setupStartPlayer);
+    ASSERT_EQ_INT(PLAYER_BLUE, map.currentPlayer);
+
+    gameHandlePlacedSettlement(&map, 0, 0);
+    ASSERT_TRUE(map.setupNeedsRoad);
+    gameHandlePlacedRoad(&map);
+    ASSERT_EQ_INT(1, map.setupStep);
+    ASSERT_EQ_INT(PLAYER_BLACK, map.currentPlayer);
+
+    gameHandlePlacedSettlement(&map, 0, 0);
+    gameHandlePlacedRoad(&map);
+    ASSERT_EQ_INT(2, map.setupStep);
+    ASSERT_EQ_INT(PLAYER_BLACK, map.currentPlayer);
+
+    gameHandlePlacedSettlement(&map, 0, 0);
+    gameHandlePlacedRoad(&map);
+    ASSERT_EQ_INT(3, map.setupStep);
+    ASSERT_EQ_INT(PLAYER_BLUE, map.currentPlayer);
+
+    gameHandlePlacedSettlement(&map, 0, 0);
+    gameHandlePlacedRoad(&map);
+    ASSERT_EQ_INT(GAME_PHASE_PLAY, map.phase);
+    ASSERT_EQ_INT(PLAYER_BLUE, map.currentPlayer);
+
+    map.rolledThisTurn = true;
+    gameEndTurn(&map);
+    ASSERT_EQ_INT(PLAYER_BLACK, map.currentPlayer);
+
+    map.rolledThisTurn = true;
+    gameEndTurn(&map);
+    ASSERT_EQ_INT(PLAYER_BLUE, map.currentPlayer);
     return true;
 }
 

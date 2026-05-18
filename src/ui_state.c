@@ -1650,7 +1650,7 @@ static enum PlayerType local_human_player(const struct Map *map)
         const enum PlayerType sessionLocalPlayer = matchSessionGetLocalPlayer(session);
         if (sessionLocalPlayer >= PLAYER_RED &&
             sessionLocalPlayer <= PLAYER_BLACK &&
-            map->players[sessionLocalPlayer].controlMode != PLAYER_CONTROL_AI)
+            playerControlModeIsHuman(map->players[sessionLocalPlayer].controlMode))
         {
             return sessionLocalPlayer;
         }
@@ -1658,11 +1658,11 @@ static enum PlayerType local_human_player(const struct Map *map)
 
     for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
     {
-        if (map->players[player].controlMode == PLAYER_CONTROL_AI)
+        if (playerControlModeIsAi(map->players[player].controlMode))
         {
             aiCount++;
         }
-        else
+        else if (playerControlModeIsHuman(map->players[player].controlMode))
         {
             humanPlayer = (enum PlayerType)player;
             humanCount++;

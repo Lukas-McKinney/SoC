@@ -3,6 +3,8 @@
 #include "development_card.h"
 #include "resource.h"
 
+#include <stdbool.h>
+
 enum PlayerType{
   PLAYER_NONE = -1,
   PLAYER_RED,
@@ -13,7 +15,8 @@ enum PlayerType{
 
 enum PlayerControlMode {
   PLAYER_CONTROL_HUMAN,
-  PLAYER_CONTROL_AI
+  PLAYER_CONTROL_AI,
+  PLAYER_CONTROL_DISABLED
 };
 
 enum AiDifficulty {
@@ -33,5 +36,20 @@ struct PlayerState {
   int newlyPurchasedDevelopmentCards[DEVELOPMENT_CARD_COUNT];
   int playedKnightCount;
 };
+
+static inline bool playerControlModeIsHuman(enum PlayerControlMode mode)
+{
+  return mode == PLAYER_CONTROL_HUMAN;
+}
+
+static inline bool playerControlModeIsAi(enum PlayerControlMode mode)
+{
+  return mode == PLAYER_CONTROL_AI;
+}
+
+static inline bool playerControlModeIsActive(enum PlayerControlMode mode)
+{
+  return mode != PLAYER_CONTROL_DISABLED;
+}
 
 #endif

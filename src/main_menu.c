@@ -584,7 +584,8 @@ static void NormalizeLocalLobbySelection(void)
     for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
     {
         if (gMainMenuLobbySeatControl[player] != PLAYER_CONTROL_HUMAN &&
-            gMainMenuLobbySeatControl[player] != PLAYER_CONTROL_AI)
+            gMainMenuLobbySeatControl[player] != PLAYER_CONTROL_AI &&
+            gMainMenuLobbySeatControl[player] != PLAYER_CONTROL_DISABLED)
         {
             gMainMenuLobbySeatControl[player] = PLAYER_CONTROL_HUMAN;
         }
@@ -623,9 +624,20 @@ static void CycleLocalLobbySeat(enum PlayerType player)
         return;
     }
 
-    gMainMenuLobbySeatControl[player] = gMainMenuLobbySeatControl[player] == PLAYER_CONTROL_HUMAN
-                                            ? PLAYER_CONTROL_AI
-                                            : PLAYER_CONTROL_HUMAN;
+    // Cycle through: HUMAN -> AI -> DISABLED -> HUMAN
+    switch (gMainMenuLobbySeatControl[player])
+    {
+        case PLAYER_CONTROL_HUMAN:
+            gMainMenuLobbySeatControl[player] = PLAYER_CONTROL_AI;
+            break;
+        case PLAYER_CONTROL_AI:
+            gMainMenuLobbySeatControl[player] = PLAYER_CONTROL_DISABLED;
+            break;
+        case PLAYER_CONTROL_DISABLED:
+            gMainMenuLobbySeatControl[player] = PLAYER_CONTROL_HUMAN;
+            break;
+    }
+
     if (gMainMenuLobbySeatControl[player] == PLAYER_CONTROL_HUMAN)
     {
         gMainMenuHumanColor = player;
@@ -934,7 +946,14 @@ static void DrawLocalLobbyPopup(void)
 
     NormalizeLocalLobbySelection();
     const int humanCount = CountLocalLobbyHumanPlayers();
-    const int aiCount = MAX_PLAYERS - humanCount;
+    int aiCount = 0;
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        if (gMainMenuLobbySeatControl[player] == PLAYER_CONTROL_AI)
+        {
+            aiCount++;
+        }
+    }
     layout = BuildLocalLobbyLayout();
     snprintf(difficultyLabel, sizeof(difficultyLabel), loc("AI Difficulty: %s"), aiDifficultyLabel(gMainMenuAiDifficulty));
 
@@ -945,13 +964,14 @@ static void DrawLocalLobbyPopup(void)
 
     DrawUiText(loc("Lobby"), layout.panel.x + 26.0f, layout.panel.y + 24.0f, 30, textColor);
     DrawUiText(loc("See all four seats before the match starts."), layout.panel.x + 26.0f, layout.panel.y + 60.0f, 18, bodyColor);
-    DrawUiText(loc("Click a seat to toggle Human or AI."), layout.panel.x + 26.0f, layout.panel.y + 86.0f, 16, bodyColor);
+    DrawUiText(loc("Click a seat to toggle Human, AI, or Closed."), layout.panel.x + 26.0f, layout.panel.y + 86.0f, 16, bodyColor);
     snprintf(profileLine, sizeof(profileLine), loc("Profile: %s"), uiGetProfileName());
     DrawUiText(profileLine, layout.panel.x + 26.0f, layout.panel.y + 106.0f, 15, bodyColor);
 
     for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
     {
         const bool humanSeat = gMainMenuLobbySeatControl[player] == PLAYER_CONTROL_HUMAN;
+        const bool closedSeat = gMainMenuLobbySeatControl[player] == PLAYER_CONTROL_DISABLED;
         const bool hovered = CheckCollisionPointRec(mouse, layout.seatButtons[player]);
         const bool pressed = hovered && IsMouseButtonDown(MOUSE_BUTTON_LEFT);
         const float yOffset = pressed ? 2.0f : (hovered ? -2.0f : 0.0f);
@@ -964,29 +984,45 @@ static void DrawLocalLobbyPopup(void)
         const Color playerColor = PlayerColor((enum PlayerType)player);
         const Color cardFill = humanSeat
                                    ? Fade(playerColor, darkTheme ? 0.18f : 0.14f)
-                                   : (darkTheme ? (Color){48, 60, 75, 255} : (Color){236, 228, 208, 255});
-        const Color cardBorder = humanSeat ? Fade(playerColor, 0.95f) : Fade(borderColor, 0.95f);
+                                   : (closedSeat ? (darkTheme ? (Color){48, 60, 75, 255} : (Color){236, 228, 208, 255})
+                                                  : (darkTheme ? (Color){48, 60, 75, 255} : (Color){236, 228, 208, 255}));
+        const Color cardBorder = humanSeat ? Fade(playerColor, 0.95f) : Fade(borderColor, closedSeat ? 0.65f : 0.95f);
+
+        const char *statusText;
+        if (humanSeat)
+        {
+            statusText = loc("Human");
+        }
+        else if (closedSeat)
+        {
+            statusText = loc("Closed");
+        }
+        else
+        {
+            statusText = loc("AI");
+        }
 
         snprintf(seatLabel,
                  sizeof(seatLabel),
                  "%s%s%s",
-                 humanSeat ? loc("Human") : loc("AI"),
-                 humanSeat ? "" : " / ",
-                 humanSeat ? "" : aiDifficultyLabel(gMainMenuAiDifficulty));
+                 statusText,
+                 (humanSeat || closedSeat) ? "" : " / ",
+                 (humanSeat || closedSeat) ? "" : aiDifficultyLabel(gMainMenuAiDifficulty));
 
         DrawRectangleRounded((Rectangle){card.x + 4.0f, card.y + 6.0f, card.width, card.height}, 0.18f, 8, Fade(BLACK, 0.12f));
         DrawRectangleRounded(card, 0.18f, 8, hovered ? ColorBrightness(cardFill, 0.08f) : cardFill);
         DrawRectangleLinesEx(card, humanSeat ? 2.2f : 1.8f, hovered ? ColorBrightness(cardBorder, 0.08f) : cardBorder);
         DrawCircleV((Vector2){card.x + 22.0f, card.y + 24.0f}, 7.0f, playerColor);
         DrawUiText(PlayerName((enum PlayerType)player), card.x + 38.0f, card.y + 12.0f, 24, playerColor);
-        DrawUiText(seatLabel, card.x + 18.0f, card.y + 52.0f, 18, textColor);
-        DrawRectangleRounded(badge, 0.40f, 8, humanSeat ? Fade(playerColor, 0.92f) : sectionFill);
-        DrawRectangleLinesEx(badge, 1.4f, humanSeat ? Fade(playerColor, 0.98f) : Fade(borderColor, 0.95f));
-        DrawUiText(humanSeat ? loc("Human") : loc("AI"),
-                   badge.x + badge.width * 0.5f - MeasureUiText(humanSeat ? loc("Human") : loc("AI"), 16) * 0.5f,
+        DrawUiText(seatLabel, card.x + 18.0f, card.y + 52.0f, 18, closedSeat ? Fade(textColor, 0.5f) : textColor);
+        DrawRectangleRounded(badge, 0.40f, 8, humanSeat ? Fade(playerColor, 0.92f) : Fade(sectionFill, closedSeat ? 0.6f : 1.0f));
+        DrawRectangleLinesEx(badge, 1.4f, humanSeat ? Fade(playerColor, 0.98f) : Fade(borderColor, closedSeat ? 0.65f : 0.95f));
+        const Color badgeTextColor = humanSeat ? RAYWHITE : (closedSeat ? Fade(textColor, 0.5f) : textColor);
+        DrawUiText(statusText,
+                   badge.x + badge.width * 0.5f - MeasureUiText(statusText, 16) * 0.5f,
                    badge.y + 4.0f,
                    16,
-                   humanSeat ? RAYWHITE : textColor);
+                   badgeTextColor);
     }
 
     DrawMenuButton(layout.aiDifficultyButton,

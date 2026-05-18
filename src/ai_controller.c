@@ -865,7 +865,7 @@ static float evaluate_hand_value(const struct Map *map, enum PlayerType player, 
 
     score += cost_progress_score(resources, kSettlementCost, 6.0f, 1.15f, 1.45f);
     score += cost_progress_score(resources, kCityCost, cityReadyBonus, 1.30f, 1.70f);
-    score += cost_progress_score(resources, kRoadCost, 2.2f, 0.80f, 1.00f);
+    score += cost_progress_score(resources, kRoadCost, 4.2f, 0.95f, 1.15f);
 
     if (map != NULL && gameGetDevelopmentDeckCount(map) > 0)
     {
@@ -1508,7 +1508,7 @@ static float evaluate_player_strength(const struct Map *map, enum PlayerType pla
     }
     if (find_best_road_candidate(map, player, difficulty, false, &roadCandidate))
     {
-        score += roadCandidate.score * 0.85f;
+        score += roadCandidate.score * 1.35f;
     }
 
     score += (float)gameGetDevelopmentCardCount(map, player, DEVELOPMENT_CARD_KNIGHT) * 2.8f;

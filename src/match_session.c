@@ -20,6 +20,7 @@ static enum PlayerType active_decision_player(const struct MatchSession *session
 static void clear_connection_error(struct MatchSession *session);
 static void set_connection_error(struct MatchSession *session, const char *message);
 static bool configure_default_private_host_seats(struct MatchSession *session);
+static int connected_remote_human_seat_count(const struct MatchSession *session);
 static bool is_authoritative_only_action(enum GameActionType type);
 static bool active_decision_is_remote(const struct MatchSession *session);
 static void build_lobby_state_info(const struct MatchSession *session, struct NetplayLobbyStateInfo *info);
@@ -260,6 +261,8 @@ static void apply_lobby_state_info(struct MatchSession *session, const struct Ne
         session->map.players[player].controlMode = info->controlMode[player];
         session->map.players[player].aiDifficulty = info->aiDifficulty[player];
     }
+
+    gameApplySeatControlModes(&session->map);
 }
 
 static bool build_match_init_info(const struct MatchSession *session, struct NetplayMatchInitInfo *info)
@@ -296,6 +299,7 @@ static bool apply_match_init_info(struct MatchSession *session, const struct Net
         session->map.players[player].aiDifficulty = info->aiDifficulty[player];
     }
 
+    gameApplySeatControlModes(&session->map);
     matchSessionRefreshStateHash(session);
     return true;
 }
@@ -383,6 +387,11 @@ static enum PlayerType assign_remote_player_to_peer(struct MatchSession *session
     {
         if (session->seatAuthority[player] == MATCH_SEAT_AI)
         {
+            if (!playerControlModeIsAi(session->map.players[player].controlMode))
+            {
+                continue;
+            }
+
             session->seatAuthority[player] = MATCH_SEAT_REMOTE;
             session->remotePeerForPlayer[player] = peerId;
             session->map.players[player].controlMode = PLAYER_CONTROL_HUMAN;
@@ -733,6 +742,28 @@ static bool configure_default_private_host_seats(struct MatchSession *session)
     return remoteSeatCount >= 1 && remoteSeatCount <= NETPLAY_MAX_HOST_REMOTE_PLAYERS;
 }
 
+static int connected_remote_human_seat_count(const struct MatchSession *session)
+{
+    int connectedRemoteCount = 0;
+
+    if (session == NULL)
+    {
+        return 0;
+    }
+
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        if (session->seatAuthority[player] == MATCH_SEAT_REMOTE &&
+            session->remotePeerForPlayer[player] >= 0 &&
+            playerControlModeIsHuman(session->map.players[player].controlMode))
+        {
+            connectedRemoteCount++;
+        }
+    }
+
+    return connectedRemoteCount;
+}
+
 static bool is_authoritative_only_action(enum GameActionType type)
 {
     return type == GAME_ACTION_ROLL_DICE ||
@@ -1043,7 +1074,9 @@ bool matchSessionCanStartNetplayMatch(const struct MatchSession *session)
            !session->matchStarted &&
            session->connectionStatus == MATCH_CONNECTION_CONNECTED &&
            session->netplay != NULL &&
-           netplayIsConnected(session->netplay);
+           netplayIsConnected(session->netplay) &&
+           gameGetActivePlayerCount(&session->map) >= 2 &&
+           connected_remote_human_seat_count(session) > 0;
 }
 
 bool matchSessionStartNetplayMatch(struct MatchSession *session)
@@ -1087,7 +1120,8 @@ bool matchSessionHostToggleNetplayLobbySeat(struct MatchSession *session, enum P
         return false;
     }
 
-    if (session->seatAuthority[player] == MATCH_SEAT_REMOTE)
+    if (session->seatAuthority[player] == MATCH_SEAT_REMOTE &&
+        playerControlModeIsHuman(session->map.players[player].controlMode))
     {
         if (session->remotePeerForPlayer[player] >= 0)
         {
@@ -1100,7 +1134,7 @@ bool matchSessionHostToggleNetplayLobbySeat(struct MatchSession *session, enum P
 
         for (int i = PLAYER_RED; i <= PLAYER_BLACK; i++)
         {
-            if (session->seatAuthority[i] == MATCH_SEAT_AI)
+            if (playerControlModeIsAi(session->map.players[i].controlMode))
             {
                 appliedDifficulty = session->map.players[i].aiDifficulty;
                 break;
@@ -1111,7 +1145,22 @@ bool matchSessionHostToggleNetplayLobbySeat(struct MatchSession *session, enum P
         return true;
     }
 
-    if (session->seatAuthority[player] == MATCH_SEAT_AI)
+    if (playerControlModeIsAi(session->map.players[player].controlMode))
+    {
+        if (gameGetActivePlayerCount(&session->map) <= 2)
+        {
+            uiShowCenteredWarning(loc("Private multiplayer needs at least 2 active seats."));
+            return false;
+        }
+
+        session->seatAuthority[player] = MATCH_SEAT_AI;
+        session->remotePeerForPlayer[player] = -1;
+        session->map.players[player].controlMode = PLAYER_CONTROL_DISABLED;
+        broadcast_lobby_state(session);
+        return true;
+    }
+
+    if (!playerControlModeIsActive(session->map.players[player].controlMode))
     {
         session->seatAuthority[player] = MATCH_SEAT_REMOTE;
         session->remotePeerForPlayer[player] = -1;
@@ -1140,7 +1189,7 @@ bool matchSessionHostCycleNetplayLobbyAiDifficulty(struct MatchSession *session)
 
     for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
     {
-        if (session->seatAuthority[player] == MATCH_SEAT_AI)
+        if (playerControlModeIsAi(session->map.players[player].controlMode))
         {
             nextDifficulty = (enum AiDifficulty)(((int)session->map.players[player].aiDifficulty + 1) % 3);
             foundAiSeat = true;
@@ -1155,7 +1204,7 @@ bool matchSessionHostCycleNetplayLobbyAiDifficulty(struct MatchSession *session)
 
     for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
     {
-        if (session->seatAuthority[player] == MATCH_SEAT_AI)
+        if (playerControlModeIsAi(session->map.players[player].controlMode))
         {
             session->map.players[player].aiDifficulty = nextDifficulty;
         }
@@ -1218,7 +1267,7 @@ bool matchSessionLocalControlsPlayer(const struct MatchSession *session, enum Pl
         return false;
     }
 
-    if (session->map.players[player].controlMode == PLAYER_CONTROL_AI)
+    if (!playerControlModeIsHuman(session->map.players[player].controlMode))
     {
         return false;
     }
@@ -1810,7 +1859,10 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
             {
                 if (session->netplay != NULL)
                 {
-                    netplayQueueActionReject(session->netplay, "action submitted by wrong remote peer", session->stateHash);
+                    netplayQueueActionRejectForHostPeer(session->netplay,
+                                                        event->peerId,
+                                                        "action submitted by wrong remote peer",
+                                                        session->stateHash);
                 }
                 break;
             }
@@ -1837,7 +1889,10 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
                     break;
                 }
 
-                netplayQueueActionReject(session->netplay, "trade target unsupported", session->stateHash);
+                netplayQueueActionRejectForHostPeer(session->netplay,
+                                                    event->peerId,
+                                                    "trade target unsupported",
+                                                    session->stateHash);
                 break;
             }
 
@@ -1853,13 +1908,19 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
             }
             else if (session->netplay != NULL)
             {
-                netplayQueueActionReject(session->netplay, "action rejected", session->stateHash);
+                netplayQueueActionRejectForHostPeer(session->netplay,
+                                                    event->peerId,
+                                                    "action rejected",
+                                                    session->stateHash);
                 broadcast_host_snapshot(session);
             }
         }
         else if (session->isHost && session->netplay != NULL)
         {
-            netplayQueueActionReject(session->netplay, "not remote turn", session->stateHash);
+            netplayQueueActionRejectForHostPeer(session->netplay,
+                                                event->peerId,
+                                                "not remote turn",
+                                                session->stateHash);
             broadcast_host_snapshot(session);
         }
         break;

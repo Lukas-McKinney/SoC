@@ -279,9 +279,9 @@ static void DrawTurnPanelPlaytime(const struct Map *map, Rectangle panel, Color 
 {
     char duration[24];
     char label[48];
-    const int fontSize = 16;
+    const int fontSize = UiScaledFont(16);
     int width = 0;
-    const float textY = panel.y + 28.0f;
+    const float textY = panel.y + UiScaled(28.0f);
 
     if (map == NULL || gameHasWinner(map))
     {
@@ -291,7 +291,7 @@ static void DrawTurnPanelPlaytime(const struct Map *map, Rectangle panel, Color 
     FormatElapsedDuration(uiGetCurrentMatchPlaytimeSeconds(), duration, sizeof(duration));
     snprintf(label, sizeof(label), loc("Playtime %s"), duration);
     width = MeasureUiText(label, fontSize);
-    DrawUiText(label, panel.x + panel.width - 16.0f - width, textY, fontSize, color);
+    DrawUiText(label, panel.x + panel.width - UiScaled(16.0f) - width, textY, fontSize, color);
 }
 
 static const char *NetplayStatusLabel(const struct MatchSession *session)

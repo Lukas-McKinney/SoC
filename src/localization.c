@@ -290,7 +290,12 @@ static const struct TranslationEntry kTranslations[] = {
     {"Trade completed.", "Handel abgeschlossen."},
     {"%s traded with the bank.", "%s hat mit der Bank gehandelt."},
     {"%s traded with %s.", "%s hat mit %s gehandelt."},
-    {"%s rolled %d.", "%s hat %d gewürfelt."}};
+    {"%s rolled %d.", "%s hat %d gewürfelt."},
+    {"Move the thief\nand steal\n1 random card.", "Bewege den\nRäuber und stiehl\neine Karte."},
+    {"Worth 1 hidden\nvictory point\nat the end.", "Wert 1\nversteckter\nSiegpunkt."},
+    {"Place 2 roads\nfor free.", "Baue 2 Straßen\nkostenlos."},
+    {"Take any\n2 resources\nfrom the bank.", "Nimm beliebige\n2 Rohstoffe\naus der Bank."},
+    {"Choose 1 resource.\nAll opponents give\nyou that type.", "Wähle 1 Rohstoff.\nAlle Gegner geben\ndir diesen."}};
 
 void locSetLanguage(enum UiLanguage language)
 {

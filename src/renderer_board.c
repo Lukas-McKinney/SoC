@@ -239,11 +239,11 @@ void DrawMap(const struct Map *map)
 
         if (map->thiefTileId == tile->id && tile->type != TILE_DESERT)
         {
-            DrawTileHighlightWash(center, animatedRadius, (Color){238, 92, 81, 255}, 0.88f);
-            DrawTileHighlightBorder(center, animatedRadius, (Color){221, 78, 67, 255}, (Color){132, 32, 28, 255}, 0.80f);
+            DrawTileHighlightWash(center, animatedRadius, (Color){238, 92, 81, 255}, 1.0f);
+            DrawTileHighlightBorder(center, animatedRadius, (Color){255, 120, 100, 255}, (Color){200, 50, 40, 255}, 1.0f);
         }
 
-        if (tile->diceNumber > 0)
+        if (tile->diceNumber > 0 && !gameIsSetupSettlementTurn(map) && !gameIsSetupRoadTurn(map))
         {
             DrawNumberToken(tile->diceNumber, center, animatedRadius);
         }

@@ -38,7 +38,9 @@ static const struct PortRule kPorts[] = {
     {{-3, 0}, {-2, 0}, false, RESOURCE_SHEEP},
     {{-1, -2}, {-1, -1}, false, RESOURCE_WOOD}};
 
-static int setup_player_for_step(enum PlayerType startPlayer, int step);
+static int setup_player_for_step(const struct Map *map, enum PlayerType startPlayer, int step);
+static int collect_active_players(const struct Map *map, enum PlayerType activePlayers[MAX_PLAYERS]);
+static enum PlayerType normalize_active_player(const struct Map *map, enum PlayerType preferredPlayer);
 static enum ResourceType resource_for_tile_type(enum TileType type);
 static int resource_yield_for_structure(enum StructureType structure);
 static void distribute_resources_for_roll(struct Map *map, int roll);
@@ -118,9 +120,108 @@ enum PlayerType gameGetWinner(const struct Map *map)
   return gameHasWinner(map) ? map->winner : PLAYER_NONE;
 }
 
+bool gameIsPlayerActive(const struct Map *map, enum PlayerType player)
+{
+  return map != NULL &&
+         player >= PLAYER_RED &&
+         player <= PLAYER_BLACK &&
+         playerControlModeIsActive(map->players[player].controlMode);
+}
+
+int gameGetActivePlayerCount(const struct Map *map)
+{
+  return collect_active_players(map, NULL);
+}
+
+enum PlayerType gameGetNextActivePlayer(const struct Map *map, enum PlayerType player)
+{
+  if (map == NULL)
+  {
+    return PLAYER_NONE;
+  }
+
+  if (player >= PLAYER_RED && player <= PLAYER_BLACK)
+  {
+    for (int offset = 1; offset <= MAX_PLAYERS; offset++)
+    {
+      const enum PlayerType candidate = (enum PlayerType)(((int)player + offset) % MAX_PLAYERS);
+      if (gameIsPlayerActive(map, candidate))
+      {
+        return candidate;
+      }
+    }
+  }
+
+  return normalize_active_player(map, PLAYER_RED);
+}
+
+void gameApplySeatControlModes(struct Map *map)
+{
+  const int activePlayerCount = gameGetActivePlayerCount(map);
+
+  if (map == NULL)
+  {
+    return;
+  }
+
+  for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+  {
+    if (!gameIsPlayerActive(map, (enum PlayerType)player))
+    {
+      map->discardRemaining[player] = 0;
+    }
+  }
+
+  if (activePlayerCount <= 0)
+  {
+    map->setupStartPlayer = PLAYER_RED;
+    map->currentPlayer = PLAYER_RED;
+    map->winner = PLAYER_NONE;
+    map->largestArmyOwner = PLAYER_NONE;
+    map->longestRoadOwner = PLAYER_NONE;
+    return;
+  }
+
+  map->setupStartPlayer = normalize_active_player(map, map->setupStartPlayer);
+  if (!gameIsPlayerActive(map, map->winner))
+  {
+    map->winner = PLAYER_NONE;
+  }
+  if (!gameIsPlayerActive(map, map->largestArmyOwner))
+  {
+    map->largestArmyOwner = PLAYER_NONE;
+  }
+  if (!gameIsPlayerActive(map, map->longestRoadOwner))
+  {
+    map->longestRoadOwner = PLAYER_NONE;
+  }
+
+  if (map->phase == GAME_PHASE_SETUP)
+  {
+    const int totalSetupSteps = activePlayerCount * 2;
+
+    if (map->setupStep < 0)
+    {
+      map->setupStep = 0;
+    }
+
+    if (map->setupStep >= totalSetupSteps)
+    {
+      map->phase = GAME_PHASE_PLAY;
+      map->currentPlayer = map->setupStartPlayer;
+      return;
+    }
+
+    map->currentPlayer = (enum PlayerType)setup_player_for_step(map, map->setupStartPlayer, map->setupStep);
+    return;
+  }
+
+  map->currentPlayer = normalize_active_player(map, map->currentPlayer);
+}
+
 bool gameCheckVictory(struct Map *map, enum PlayerType player)
 {
-  if (map == NULL || player < PLAYER_RED || player > PLAYER_BLACK)
+  if (map == NULL || !gameIsPlayerActive(map, player))
   {
     return false;
   }
@@ -253,8 +354,7 @@ bool gameNeedsThiefVictimSelection(const struct Map *map)
 bool gameCanStealFromPlayer(const struct Map *map, enum PlayerType victim)
 {
   return gameNeedsThiefVictimSelection(map) &&
-         victim >= PLAYER_RED &&
-         victim <= PLAYER_BLACK &&
+         gameIsPlayerActive(map, victim) &&
          victim != map->currentPlayer &&
          player_touches_tile(map, victim, map->thiefTileId) &&
          player_has_any_resources(map, victim);
@@ -387,7 +487,8 @@ void gameEndTurn(struct Map *map)
     }
   }
 
-  map->currentPlayer = (enum PlayerType)(((int)map->currentPlayer + 1) % MAX_PLAYERS);
+  map->currentPlayer = gameGetNextActivePlayer(map, map->currentPlayer);
+  map->turnStartTime = GetTime();
   map->lastDiceRoll = 0;
   map->rolledThisTurn = false;
   map->awaitingThiefPlacement = false;
@@ -400,6 +501,42 @@ void gameEndTurn(struct Map *map)
   }
 }
 
+void gameHandleInactivityTimeout(struct Map *map)
+{
+  const double INACTIVITY_TIMEOUT_SECONDS = 300.0;
+  
+  if (map->phase != GAME_PHASE_PLAY || 
+      map->currentPlayer < PLAYER_RED || 
+      map->currentPlayer > PLAYER_BLACK ||
+      map->players[map->currentPlayer].controlMode != PLAYER_CONTROL_HUMAN)
+  {
+    return;
+  }
+
+  if (map->turnStartTime <= 0.0)
+  {
+    map->turnStartTime = GetTime();
+    return;
+  }
+
+  double elapsedSeconds = GetTime() - map->turnStartTime;
+  if (elapsedSeconds >= INACTIVITY_TIMEOUT_SECONDS)
+  {
+    if (map->rolledThisTurn)
+    {
+      debugLog("GAME", "Player %d timed out after rolling, ending turn", map->currentPlayer);
+      gameEndTurn(map);
+    }
+    else if (gameCanRollDice(map))
+    {
+      debugLog("GAME", "Player %d timed out without rolling, auto-rolling", map->currentPlayer);
+      int diceRoll = (rand() % 6 + 1) + (rand() % 6 + 1);
+      gameRollDice(map, diceRoll);
+      map->turnStartTime = GetTime();
+    }
+  }
+}
+
 void gameHandlePlacedSettlement(struct Map *map, int tileId, int cornerIndex)
 {
   if (!gameIsSetupSettlementTurn(map))
@@ -407,7 +544,7 @@ void gameHandlePlacedSettlement(struct Map *map, int tileId, int cornerIndex)
     return;
   }
 
-  if (map->setupStep >= MAX_PLAYERS)
+  if (map->setupStep >= gameGetActivePlayerCount(map))
   {
     grant_setup_settlement_resources(map, tileId, cornerIndex);
   }
@@ -429,14 +566,14 @@ void gameHandlePlacedRoad(struct Map *map)
   map->setupSettlementCornerIndex = -1;
   map->setupStep++;
 
-  if (map->setupStep >= 8)
+  if (map->setupStep >= gameGetActivePlayerCount(map) * 2)
   {
     map->phase = GAME_PHASE_PLAY;
     map->currentPlayer = map->setupStartPlayer;
     return;
   }
 
-  map->currentPlayer = (enum PlayerType)setup_player_for_step(map->setupStartPlayer, map->setupStep);
+  map->currentPlayer = (enum PlayerType)setup_player_for_step(map, map->setupStartPlayer, map->setupStep);
 }
 
 bool gameCanAffordRoad(const struct Map *map)
@@ -755,7 +892,7 @@ bool gameCanTradeWithPlayer(const struct Map *map, enum PlayerType otherPlayer, 
       give < RESOURCE_WOOD || give > RESOURCE_STONE ||
       receive < RESOURCE_WOOD || receive > RESOURCE_STONE ||
       !can_execute_main_turn_action(map) ||
-      otherPlayer < PLAYER_RED || otherPlayer > PLAYER_BLACK ||
+      !gameIsPlayerActive(map, otherPlayer) ||
       otherPlayer == map->currentPlayer)
   {
     return false;
@@ -864,6 +1001,7 @@ static void update_largest_army_owner(struct Map *map)
     for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
     {
       if (player != map->currentPlayer &&
+          gameIsPlayerActive(map, (enum PlayerType)player) &&
           map->players[player].playedKnightCount > bestOther)
       {
         bestOther = map->players[player].playedKnightCount;
@@ -1167,21 +1305,37 @@ static void update_longest_road_owner(struct Map *map)
   map->longestRoadOwner = PLAYER_NONE;
 }
 
-static int setup_player_for_step(enum PlayerType startPlayer, int step)
+static int setup_player_for_step(const struct Map *map, enum PlayerType startPlayer, int step)
 {
-  const int start = startPlayer >= PLAYER_RED && startPlayer <= PLAYER_BLACK ? (int)startPlayer : PLAYER_RED;
+  enum PlayerType activePlayers[MAX_PLAYERS];
+  const int activePlayerCount = collect_active_players(map, activePlayers);
+  int startIndex = 0;
 
-  if (step < 0 || step >= MAX_PLAYERS * 2)
+  if (activePlayerCount <= 0)
   {
     return PLAYER_RED;
   }
 
-  if (step < MAX_PLAYERS)
+  for (int i = 0; i < activePlayerCount; i++)
   {
-    return (start + step) % MAX_PLAYERS;
+    if (activePlayers[i] == startPlayer)
+    {
+      startIndex = i;
+      break;
+    }
   }
 
-  return (start + (MAX_PLAYERS * 2 - 1 - step)) % MAX_PLAYERS;
+  if (step < 0 || step >= activePlayerCount * 2)
+  {
+    return activePlayers[startIndex];
+  }
+
+  if (step < activePlayerCount)
+  {
+    return activePlayers[(startIndex + step) % activePlayerCount];
+  }
+
+  return activePlayers[(startIndex + (activePlayerCount * 2 - 1 - step)) % activePlayerCount];
 }
 
 static Vector2 axial_to_world(struct AxialCoord coord, Vector2 origin, float radius)
@@ -1263,7 +1417,8 @@ static bool any_pending_discards(const struct Map *map)
 
   for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
   {
-    if (map->discardRemaining[player] > 0)
+    if (gameIsPlayerActive(map, (enum PlayerType)player) &&
+        map->discardRemaining[player] > 0)
     {
       return true;
     }
@@ -1284,6 +1439,12 @@ static void begin_discard_phase(struct Map *map)
   debugLog("GAME", "begin discard phase currentPlayer=%d", map->currentPlayer);
   for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
   {
+    if (!gameIsPlayerActive(map, (enum PlayerType)player))
+    {
+      map->discardRemaining[player] = 0;
+      continue;
+    }
+
     const int total = total_resources_for_player(map, (enum PlayerType)player);
     map->discardRemaining[player] = total > 7 ? total / 2 : 0;
     debugLog("GAME", "discard requirement player=%d total=%d discard=%d",
@@ -1484,6 +1645,62 @@ static bool bank_has_resources(const struct Map *map, enum ResourceType resource
   }
 
   return bank_resource_count(map, resource) >= amount;
+}
+
+static int collect_active_players(const struct Map *map, enum PlayerType activePlayers[MAX_PLAYERS])
+{
+  int activePlayerCount = 0;
+
+  if (map == NULL)
+  {
+    return 0;
+  }
+
+  for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+  {
+    if (!gameIsPlayerActive(map, (enum PlayerType)player))
+    {
+      continue;
+    }
+
+    if (activePlayers != NULL)
+    {
+      activePlayers[activePlayerCount] = (enum PlayerType)player;
+    }
+    activePlayerCount++;
+  }
+
+  return activePlayerCount;
+}
+
+static enum PlayerType normalize_active_player(const struct Map *map, enum PlayerType preferredPlayer)
+{
+  if (map == NULL)
+  {
+    return PLAYER_NONE;
+  }
+
+  if (preferredPlayer >= PLAYER_RED && preferredPlayer <= PLAYER_BLACK)
+  {
+    for (int offset = 0; offset < MAX_PLAYERS; offset++)
+    {
+      const enum PlayerType candidate = (enum PlayerType)(((int)preferredPlayer + offset) % MAX_PLAYERS);
+      if (gameIsPlayerActive(map, candidate))
+      {
+        return candidate;
+      }
+    }
+  }
+
+  for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+  {
+    if (gameIsPlayerActive(map, (enum PlayerType)player))
+    {
+      return (enum PlayerType)player;
+    }
+  }
+
+  return PLAYER_NONE;
 }
 
 static bool can_afford_cost(const struct Map *map, int wood, int wheat, int clay, int sheep, int stone)

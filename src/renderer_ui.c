@@ -66,6 +66,28 @@ static void BuildVictorySubheadline(const struct Map *map, enum PlayerType winne
 static void FormatElapsedDuration(unsigned long long totalSeconds, char *buffer, size_t bufferSize);
 static void DrawTurnPanelPlaytime(const struct Map *map, Rectangle panel, Color color);
 static const char *NetplayStatusLabel(const struct MatchSession *session);
+static bool IsDarkUiTheme(void);
+static float GameplayUiScale(void);
+static float UiScaled(float value);
+static int UiScaledFont(int fontSize);
+static Color UiPanelColor(void);
+static Color UiPanelHighlightColor(void);
+static Color UiSectionFillColor(void);
+static Color UiButtonFillColor(void);
+static Color UiTrackFillColor(void);
+static Color UiPanelBorderColor(void);
+static Color UiTextColor(void);
+static Color UiMutedTextColor(void);
+static Color UiDisabledFillColor(void);
+static Color UiDisabledBorderColor(void);
+static Color UiDisabledTextColor(void);
+static Color UiCloseButtonFillColor(void);
+static Color UiReadableAccent(Color color);
+static Color UiReadablePlayerColor(enum PlayerType player);
+static void DrawPanelFrame(Rectangle panel, float roundness, float shadowOffsetX, float shadowOffsetY, float shadowAlpha, Color fill, Color border);
+static void DrawCenteredUiTextFitted(const char *text, Rectangle bounds, int preferredFontSize, int minFontSize, float yOffset, Color color);
+static void DrawLeftUiTextFitted(const char *text, Rectangle bounds, float padding, int preferredFontSize, int minFontSize, float yOffset, Color color);
+static void DrawModalCloseButton(Rectangle bounds, float alpha, Color fill, Color border, Color textColor);
 
 /* Shared UI copy/layout helpers stay file-local without bloating the main UI file. */
 #include "renderer_ui_common.inc"
@@ -76,20 +98,22 @@ void DrawBuildPanel(const struct Map *map)
     const float panelX = panel.x;
     const float panelY = panel.y;
     const float openAmount = uiGetBuildPanelOpenAmount();
-    const Color panelColor = (Color){232, 220, 196, 245};
-    const Color borderColor = (Color){118, 88, 56, 255};
-    const float cardWidth = 170.0f;
-    const float cardHeight = 56.0f;
-    const Rectangle roadCard = {panelX + 18.0f, panelY + 52.0f, cardWidth, cardHeight};
-    const Rectangle settlementCard = {panelX + 204.0f, panelY + 52.0f, cardWidth, cardHeight};
-    const Rectangle cityCard = {panelX + 18.0f, panelY + 118.0f, cardWidth, cardHeight};
+    const Color panelColor = UiPanelColor();
+    const Color borderColor = UiPanelBorderColor();
+    const Color textColor = UiTextColor();
+    const Color mutedText = UiMutedTextColor();
+    const float cardWidth = UiScaled(175.0f);
+    const float cardHeight = UiScaled(60.0f);
+    const Rectangle roadCard = {panelX + UiScaled(10.0f), panelY + UiScaled(50.0f), cardWidth, cardHeight};
+    const Rectangle settlementCard = {panelX + UiScaled(196.0f), panelY + UiScaled(50.0f), cardWidth, cardHeight};
+    const Rectangle cityCard = {panelX + UiScaled(10.0f), panelY + UiScaled(112.0f), cardWidth, cardHeight};
     const Rectangle devCard = GetBuildPanelDevelopmentCardBounds();
-    const Color activeCard = (Color){244, 236, 217, 255};
+    const Color activeCard = UiPanelHighlightColor();
     const Color armedAccent = (Color){171, 82, 54, 255};
-    const Color inactiveCard = (Color){236, 228, 208, 255};
-    const Color disabledCard = (Color){224, 216, 198, 255};
-    const Color disabledBorder = (Color){154, 132, 108, 255};
-    const Color disabledText = (Color){132, 112, 91, 255};
+    const Color inactiveCard = UiSectionFillColor();
+    const Color disabledCard = UiDisabledFillColor();
+    const Color disabledBorder = UiDisabledBorderColor();
+    const Color disabledText = UiDisabledTextColor();
     const bool setupSettlementMode = gameIsSetupSettlementTurn(map);
     const bool setupRoadMode = gameIsSetupRoadTurn(map);
     const bool canBuyRoad = setupRoadMode || gameCanAffordRoad(map);
@@ -97,13 +121,12 @@ void DrawBuildPanel(const struct Map *map)
     const bool canBuyCity = map->phase == GAME_PHASE_PLAY && gameCanAffordCity(map);
     const bool canBuyDevelopment = gameCanBuyDevelopment(map);
     const unsigned char contentAlpha = (unsigned char)(255.0f * ((openAmount - 0.55f) / 0.45f < 0.0f ? 0.0f : ((openAmount - 0.55f) / 0.45f > 1.0f ? 1.0f : (openAmount - 0.55f) / 0.45f)));
+    const float contentFade = contentAlpha / 255.0f;
 
     if (openAmount < 0.98f)
     {
-        DrawRectangleRounded((Rectangle){panelX + 6.0f, panelY + 8.0f, panel.width, panel.height}, 0.12f, 8, Fade(BLACK, 0.10f));
-        DrawRectangleRounded(panel, 0.12f, 8, panelColor);
-        DrawRectangleLinesEx(panel, 2.0f, borderColor);
-        DrawUiText(loc("Build (B)"), panelX + 18.0f, panelY + 14.0f, 24, (Color){54, 39, 29, 255});
+        DrawPanelFrame(panel, 0.12f, UiScaled(6.0f), UiScaled(8.0f), 0.10f, panelColor, borderColor);
+        DrawUiText(loc("Build (B)"), panelX + UiScaled(18.0f), panelY + UiScaled(14.0f), UiScaledFont(24), textColor);
         if (!uiIsBuildPanelOpen())
         {
             return;
@@ -115,62 +138,60 @@ void DrawBuildPanel(const struct Map *map)
         return;
     }
 
-    DrawRectangleRounded((Rectangle){panelX + 6.0f, panelY + 8.0f, panel.width, panel.height}, 0.08f, 8, Fade(BLACK, 0.10f));
-    DrawRectangleRounded(panel, 0.08f, 8, panelColor);
-    DrawRectangleLinesEx(panel, 2.0f, borderColor);
-    DrawUiText(loc("Build (B)"), panelX + 18.0f, panelY + 14.0f, 24, (Color){54, 39, 29, 255});
+    DrawPanelFrame(panel, 0.08f, UiScaled(6.0f), UiScaled(8.0f), 0.10f, panelColor, borderColor);
+    DrawUiText(loc("Build (B)"), panelX + UiScaled(18.0f), panelY + UiScaled(14.0f), UiScaledFont(24), textColor);
 
-    DrawRectangleRounded(roadCard, 0.14f, 8, Fade(canBuyRoad ? activeCard : disabledCard, contentAlpha / 255.0f));
-    DrawRectangleLinesEx(roadCard, 2.0f, Fade(gBuildMode == BUILD_MODE_ROAD ? armedAccent : (canBuyRoad ? borderColor : disabledBorder), contentAlpha / 255.0f));
-    DrawUiText(loc("Road"), roadCard.x + 12.0f, roadCard.y + 8.0f, 20, Fade(canBuyRoad ? (Color){54, 39, 29, 255} : disabledText, contentAlpha / 255.0f));
-    DrawUiText(loc("Wood + Clay"), roadCard.x + 12.0f, roadCard.y + 31.0f, 14, Fade(canBuyRoad ? (Color){92, 70, 50, 255} : disabledText, contentAlpha / 255.0f));
-    DrawLineEx((Vector2){roadCard.x + 112.0f, roadCard.y + 18.0f}, (Vector2){roadCard.x + 152.0f, roadCard.y + 38.0f}, 8.0f, Fade(canBuyRoad ? (Color){230, 41, 55, 255} : Fade((Color){230, 41, 55, 255}, 0.35f), contentAlpha / 255.0f));
-    DrawLineEx((Vector2){roadCard.x + 112.0f, roadCard.y + 18.0f}, (Vector2){roadCard.x + 152.0f, roadCard.y + 38.0f}, 2.0f, Fade(RAYWHITE, 0.24f * (contentAlpha / 255.0f)));
-    DrawRectangleRounded(settlementCard, 0.14f, 8, Fade(canBuySettlement ? inactiveCard : disabledCard, contentAlpha / 255.0f));
-    DrawRectangleLinesEx(settlementCard, 2.0f, Fade(gBuildMode == BUILD_MODE_SETTLEMENT ? armedAccent : (canBuySettlement ? borderColor : disabledBorder), contentAlpha / 255.0f));
-    DrawUiText(loc("Settlement"), settlementCard.x + 12.0f, settlementCard.y + 8.0f, 20, Fade(canBuySettlement ? (Color){54, 39, 29, 255} : disabledText, contentAlpha / 255.0f));
-    DrawUiText(loc("Wood Clay Wheat Sheep"), settlementCard.x + 12.0f, settlementCard.y + 31.0f, 11, Fade(canBuySettlement ? (Color){92, 70, 50, 255} : disabledText, contentAlpha / 255.0f));
-    DrawRectangle((int)(settlementCard.x + 126), (int)(settlementCard.y + 22), 24, 18, Fade(canBuySettlement ? (Color){170, 118, 72, 255} : Fade((Color){170, 118, 72, 255}, 0.45f), contentAlpha / 255.0f));
-    DrawTriangle((Vector2){settlementCard.x + 138, settlementCard.y + 10}, (Vector2){settlementCard.x + 124, settlementCard.y + 24}, (Vector2){settlementCard.x + 152, settlementCard.y + 24}, Fade(canBuySettlement ? (Color){132, 80, 49, 255} : Fade((Color){132, 80, 49, 255}, 0.45f), contentAlpha / 255.0f));
-    DrawRectangleRounded(cityCard, 0.14f, 8, Fade(canBuyCity ? inactiveCard : disabledCard, contentAlpha / 255.0f));
-    DrawRectangleLinesEx(cityCard, 2.0f, Fade(gBuildMode == BUILD_MODE_CITY ? armedAccent : (canBuyCity ? borderColor : disabledBorder), contentAlpha / 255.0f));
-    DrawUiText(loc("City"), cityCard.x + 12.0f, cityCard.y + 8.0f, 20, Fade(canBuyCity ? (Color){54, 39, 29, 255} : disabledText, contentAlpha / 255.0f));
-    DrawUiText(loc("2 Wheat + 3 Stone"), cityCard.x + 12.0f, cityCard.y + 31.0f, 13, Fade(canBuyCity ? (Color){92, 70, 50, 255} : disabledText, contentAlpha / 255.0f));
-    DrawRectangle((int)(cityCard.x + 122), (int)(cityCard.y + 24), 30, 18, Fade(canBuyCity ? (Color){170, 118, 72, 255} : Fade((Color){170, 118, 72, 255}, 0.45f), contentAlpha / 255.0f));
-    DrawRectangle((int)(cityCard.x + 127), (int)(cityCard.y + 15), 20, 12, Fade(canBuyCity ? (Color){170, 118, 72, 255} : Fade((Color){170, 118, 72, 255}, 0.45f), contentAlpha / 255.0f));
-    DrawTriangle((Vector2){cityCard.x + 137, cityCard.y + 6}, (Vector2){cityCard.x + 125, cityCard.y + 16}, (Vector2){cityCard.x + 149, cityCard.y + 16}, Fade(canBuyCity ? (Color){132, 80, 49, 255} : Fade((Color){132, 80, 49, 255}, 0.45f), contentAlpha / 255.0f));
-    DrawRectangleRounded(devCard, 0.14f, 8, Fade(canBuyDevelopment ? inactiveCard : disabledCard, contentAlpha / 255.0f));
-    DrawRectangleLinesEx(devCard, 2.0f, Fade(canBuyDevelopment ? borderColor : disabledBorder, contentAlpha / 255.0f));
-    DrawUiText(loc("Development"), devCard.x + 12.0f, devCard.y + 8.0f, 18, Fade(canBuyDevelopment ? (Color){54, 39, 29, 255} : disabledText, contentAlpha / 255.0f));
-    DrawUiText(loc("Wheat Sheep Stone"), devCard.x + 12.0f, devCard.y + 31.0f, 13, Fade(canBuyDevelopment ? (Color){92, 70, 50, 255} : disabledText, contentAlpha / 255.0f));
-    DrawRectangleRounded((Rectangle){devCard.x + 126.0f, devCard.y + 10.0f, 22.0f, 32.0f}, 0.12f, 6, Fade(canBuyDevelopment ? (Color){191, 171, 111, 255} : Fade((Color){191, 171, 111, 255}, 0.45f), contentAlpha / 255.0f));
-    DrawRectangleLinesEx((Rectangle){devCard.x + 126.0f, devCard.y + 10.0f, 22.0f, 32.0f}, 1.5f, Fade(canBuyDevelopment ? (Color){120, 96, 53, 255} : disabledBorder, contentAlpha / 255.0f));
+    DrawRectangleRounded(roadCard, 0.14f, 8, Fade(canBuyRoad ? activeCard : disabledCard, contentFade));
+    DrawRectangleLinesEx(roadCard, 2.0f, Fade(gBuildMode == BUILD_MODE_ROAD ? armedAccent : (canBuyRoad ? borderColor : disabledBorder), contentFade));
+    DrawLeftUiTextFitted(loc("Road"), (Rectangle){roadCard.x + UiScaled(12.0f), roadCard.y + UiScaled(4.0f), UiScaled(100.0f), UiScaled(21.0f)}, 0.0f, 21, 16, 0.0f, Fade(canBuyRoad ? textColor : disabledText, contentFade));
+    DrawLeftUiTextFitted(loc("Wood + Clay"), (Rectangle){roadCard.x + UiScaled(12.0f), roadCard.y + UiScaled(27.0f), UiScaled(102.0f), UiScaled(19.0f)}, 0.0f, 15, 12, 0.0f, Fade(canBuyRoad ? mutedText : disabledText, contentFade));
+    DrawLineEx((Vector2){roadCard.x + UiScaled(116.0f), roadCard.y + UiScaled(19.0f)}, (Vector2){roadCard.x + UiScaled(157.0f), roadCard.y + UiScaled(41.0f)}, UiScaled(8.0f), Fade(canBuyRoad ? (Color){230, 41, 55, 255} : Fade((Color){230, 41, 55, 255}, 0.35f), contentFade));
+    DrawLineEx((Vector2){roadCard.x + UiScaled(116.0f), roadCard.y + UiScaled(19.0f)}, (Vector2){roadCard.x + UiScaled(157.0f), roadCard.y + UiScaled(41.0f)}, UiScaled(2.0f), Fade(RAYWHITE, 0.24f * contentFade));
+    DrawRectangleRounded(settlementCard, 0.14f, 8, Fade(canBuySettlement ? inactiveCard : disabledCard, contentFade));
+    DrawRectangleLinesEx(settlementCard, 2.0f, Fade(gBuildMode == BUILD_MODE_SETTLEMENT ? armedAccent : (canBuySettlement ? borderColor : disabledBorder), contentFade));
+    DrawLeftUiTextFitted(loc("Settlement"), (Rectangle){settlementCard.x + UiScaled(12.0f), settlementCard.y + UiScaled(4.0f), UiScaled(114.0f), UiScaled(21.0f)}, 0.0f, 21, 15, 0.0f, Fade(canBuySettlement ? textColor : disabledText, contentFade));
+    DrawLeftUiTextFitted(loc("Wood Clay Wheat Sheep"), (Rectangle){settlementCard.x + UiScaled(12.0f), settlementCard.y + UiScaled(27.0f), UiScaled(112.0f), UiScaled(19.0f)}, 0.0f, 12, 10, 0.0f, Fade(canBuySettlement ? mutedText : disabledText, contentFade));
+    DrawRectangle((int)(settlementCard.x + UiScaled(129.0f)), (int)(settlementCard.y + UiScaled(23.0f)), (int)UiScaled(25.0f), (int)UiScaled(19.0f), Fade(canBuySettlement ? (Color){170, 118, 72, 255} : Fade((Color){170, 118, 72, 255}, 0.45f), contentFade));
+    DrawTriangle((Vector2){settlementCard.x + UiScaled(141.0f), settlementCard.y + UiScaled(11.0f)}, (Vector2){settlementCard.x + UiScaled(127.0f), settlementCard.y + UiScaled(26.0f)}, (Vector2){settlementCard.x + UiScaled(155.0f), settlementCard.y + UiScaled(26.0f)}, Fade(canBuySettlement ? (Color){132, 80, 49, 255} : Fade((Color){132, 80, 49, 255}, 0.45f), contentFade));
+    DrawRectangleRounded(cityCard, 0.14f, 8, Fade(canBuyCity ? inactiveCard : disabledCard, contentFade));
+    DrawRectangleLinesEx(cityCard, 2.0f, Fade(gBuildMode == BUILD_MODE_CITY ? armedAccent : (canBuyCity ? borderColor : disabledBorder), contentFade));
+    DrawLeftUiTextFitted(loc("City"), (Rectangle){cityCard.x + UiScaled(12.0f), cityCard.y + UiScaled(4.0f), UiScaled(98.0f), UiScaled(21.0f)}, 0.0f, 21, 16, 0.0f, Fade(canBuyCity ? textColor : disabledText, contentFade));
+    DrawLeftUiTextFitted(loc("2 Wheat + 3 Stone"), (Rectangle){cityCard.x + UiScaled(12.0f), cityCard.y + UiScaled(27.0f), UiScaled(110.0f), UiScaled(19.0f)}, 0.0f, 14, 11, 0.0f, Fade(canBuyCity ? mutedText : disabledText, contentFade));
+    DrawRectangle((int)(cityCard.x + UiScaled(125.0f)), (int)(cityCard.y + UiScaled(25.0f)), (int)UiScaled(32.0f), (int)UiScaled(19.0f), Fade(canBuyCity ? (Color){170, 118, 72, 255} : Fade((Color){170, 118, 72, 255}, 0.45f), contentFade));
+    DrawRectangle((int)(cityCard.x + UiScaled(130.0f)), (int)(cityCard.y + UiScaled(16.0f)), (int)UiScaled(22.0f), (int)UiScaled(13.0f), Fade(canBuyCity ? (Color){170, 118, 72, 255} : Fade((Color){170, 118, 72, 255}, 0.45f), contentFade));
+    DrawTriangle((Vector2){cityCard.x + UiScaled(141.0f), cityCard.y + UiScaled(6.0f)}, (Vector2){cityCard.x + UiScaled(129.0f), cityCard.y + UiScaled(17.0f)}, (Vector2){cityCard.x + UiScaled(153.0f), cityCard.y + UiScaled(17.0f)}, Fade(canBuyCity ? (Color){132, 80, 49, 255} : Fade((Color){132, 80, 49, 255}, 0.45f), contentFade));
+    DrawRectangleRounded(devCard, 0.14f, 8, Fade(canBuyDevelopment ? inactiveCard : disabledCard, contentFade));
+    DrawRectangleLinesEx(devCard, 2.0f, Fade(canBuyDevelopment ? borderColor : disabledBorder, contentFade));
+    DrawLeftUiTextFitted(loc("Development"), (Rectangle){devCard.x + UiScaled(12.0f), devCard.y + UiScaled(4.0f), UiScaled(116.0f), UiScaled(21.0f)}, 0.0f, 19, 14, 0.0f, Fade(canBuyDevelopment ? textColor : disabledText, contentFade));
+    DrawLeftUiTextFitted(loc("Wheat Sheep Stone"), (Rectangle){devCard.x + UiScaled(12.0f), devCard.y + UiScaled(27.0f), UiScaled(112.0f), UiScaled(19.0f)}, 0.0f, 14, 11, 0.0f, Fade(canBuyDevelopment ? mutedText : disabledText, contentFade));
+    DrawRectangleRounded((Rectangle){devCard.x + UiScaled(129.0f), devCard.y + UiScaled(11.0f), UiScaled(23.0f), UiScaled(34.0f)}, 0.12f, 6, Fade(canBuyDevelopment ? (Color){191, 171, 111, 255} : Fade((Color){191, 171, 111, 255}, 0.45f), contentFade));
+    DrawRectangleLinesEx((Rectangle){devCard.x + UiScaled(129.0f), devCard.y + UiScaled(11.0f), UiScaled(23.0f), UiScaled(34.0f)}, UiScaled(1.5f), Fade(canBuyDevelopment ? (Color){120, 96, 53, 255} : disabledBorder, contentFade));
 }
 
 void DrawTradeButton(const struct Map *map)
 {
     const Rectangle button = GetTradeButtonBounds();
     const bool isPlayable = map->phase == GAME_PHASE_PLAY;
-    DrawRectangleRounded(button, 0.18f, 8, isPlayable ? (Color){214, 202, 181, 255} : (Color){228, 220, 202, 255});
-    DrawRectangleLinesEx(button, 2.0f, (Color){118, 88, 56, 255});
-    DrawUiText(loc("Water Trade (W)"), button.x + 14.0f, button.y + 11.0f, 20, isPlayable ? (Color){54, 39, 29, 255} : (Color){132, 112, 91, 255});
+    DrawRectangleRounded(button, 0.18f, 8, isPlayable ? UiButtonFillColor() : UiDisabledFillColor());
+    DrawRectangleLinesEx(button, 2.0f, UiPanelBorderColor());
+    DrawCenteredUiTextFitted(loc("Water Trade (W)"), button, 20, 14, 0.0f, isPlayable ? UiTextColor() : UiDisabledTextColor());
 }
 
 void DrawPlayerTradeButton(const struct Map *map)
 {
     const Rectangle button = GetPlayerTradeButtonBounds();
     const bool isPlayable = map->phase == GAME_PHASE_PLAY;
-    DrawRectangleRounded(button, 0.18f, 8, isPlayable ? (Color){214, 202, 181, 255} : (Color){228, 220, 202, 255});
-    DrawRectangleLinesEx(button, 2.0f, (Color){118, 88, 56, 255});
-    DrawUiText(loc("Player Trade (T)"), button.x + 10.0f, button.y + 11.0f, 20, isPlayable ? (Color){54, 39, 29, 255} : (Color){132, 112, 91, 255});
+    DrawRectangleRounded(button, 0.18f, 8, isPlayable ? UiButtonFillColor() : UiDisabledFillColor());
+    DrawRectangleLinesEx(button, 2.0f, UiPanelBorderColor());
+    DrawCenteredUiTextFitted(loc("Player Trade (T)"), button, 20, 14, 0.0f, isPlayable ? UiTextColor() : UiDisabledTextColor());
 }
 
 void DrawSettingsButton(void)
 {
     const Rectangle button = GetSettingsButtonBounds();
-    DrawRectangleRounded(button, 0.18f, 8, (Color){214, 202, 181, 255});
-    DrawRectangleLinesEx(button, 2.0f, (Color){118, 88, 56, 255});
-    DrawUiText(loc("Settings (Esc)"), button.x + 14.0f, button.y + 10.0f, 20, (Color){54, 39, 29, 255});
+    DrawRectangleRounded(button, 0.18f, 8, UiButtonFillColor());
+    DrawRectangleLinesEx(button, 2.0f, UiPanelBorderColor());
+    DrawCenteredUiTextFitted(loc("Settings (Esc)"), button, 20, 14, 0.0f, UiTextColor());
 }
 
 void DrawSettingsModal(void)
@@ -195,12 +216,12 @@ void DrawSettingsModal(void)
     const bool submenuOpen = uiIsSettingsSubmenuOpen();
     const struct MatchSession *session = matchSessionGetActive();
     const bool showNetplayPanel = matchSessionIsNetplay(session);
-    const Color panelColor = (Color){244, 236, 217, 250};
-    const Color borderColor = (Color){118, 88, 56, 255};
-    const Color textColor = (Color){54, 39, 29, 255};
-    const Color mutedText = (Color){92, 70, 50, 255};
-    const Color sectionFill = (Color){236, 228, 208, 255};
-    const Color sectionBorder = (Color){154, 132, 108, 255};
+    const Color panelColor = UiPanelColor();
+    const Color borderColor = UiPanelBorderColor();
+    const Color textColor = UiTextColor();
+    const Color mutedText = UiMutedTextColor();
+    const Color sectionFill = UiSectionFillColor();
+    const Color sectionBorder = UiDisabledBorderColor();
     const Color accent = (Color){171, 82, 54, 255};
     const bool lightSelected = uiGetTheme() == UI_THEME_LIGHT;
     const bool darkSelected = uiGetTheme() == UI_THEME_DARK;
@@ -269,22 +290,16 @@ void DrawSettingsModal(void)
     snprintf(portLine, sizeof(portLine), "%s: %s", loc("Port"), portValue);
 
     DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, 0.24f * eased));
-    DrawRectangleRounded((Rectangle){menuPanel.x + 8.0f, menuPanel.y + 10.0f, menuPanel.width, menuPanel.height}, 0.08f, 8, Fade(BLACK, 0.14f * eased));
-    DrawRectangleRounded(menuPanel, 0.08f, 8, Fade(panelColor, eased));
-    DrawRectangleLinesEx(menuPanel, 2.0f, Fade(borderColor, eased));
+    DrawPanelFrame(menuPanel, 0.08f, 8.0f, 10.0f, 0.14f * eased, Fade(panelColor, eased), Fade(borderColor, eased));
 
     if (submenuOpen)
     {
-        DrawRectangleRounded((Rectangle){submenuPanel.x + 8.0f, submenuPanel.y + 10.0f, submenuPanel.width, submenuPanel.height}, 0.08f, 8, Fade(BLACK, 0.12f * eased));
-        DrawRectangleRounded(submenuPanel, 0.08f, 8, Fade(panelColor, eased));
-        DrawRectangleLinesEx(submenuPanel, 2.0f, Fade(borderColor, eased));
+        DrawPanelFrame(submenuPanel, 0.08f, 8.0f, 10.0f, 0.12f * eased, Fade(panelColor, eased), Fade(borderColor, eased));
     }
 
     if (showNetplayPanel)
     {
-        DrawRectangleRounded((Rectangle){multiplayerPanel.x + 8.0f, multiplayerPanel.y + 10.0f, multiplayerPanel.width, multiplayerPanel.height}, 0.08f, 8, Fade(BLACK, 0.12f * eased));
-        DrawRectangleRounded(multiplayerPanel, 0.08f, 8, Fade(panelColor, eased));
-        DrawRectangleLinesEx(multiplayerPanel, 2.0f, Fade(borderColor, eased));
+        DrawPanelFrame(multiplayerPanel, 0.08f, 8.0f, 10.0f, 0.12f * eased, Fade(panelColor, eased), Fade(borderColor, eased));
     }
 
     if (openAmount < 0.90f)
@@ -293,55 +308,51 @@ void DrawSettingsModal(void)
     }
 
     DrawUiText(loc("Menu"), menuPanel.x + 22.0f, menuPanel.y + 18.0f, 28, textColor);
-    DrawRectangleRounded(closeButton, 0.22f, 6, (Color){224, 216, 198, 255});
-    DrawRectangleLinesEx(closeButton, 1.5f, borderColor);
-    DrawUiText("X", closeButton.x + 9.0f, closeButton.y + 4.0f, 20, textColor);
+    DrawModalCloseButton(closeButton, 1.0f, UiCloseButtonFillColor(), borderColor, textColor);
 
     DrawRectangleRounded(settingsButton, 0.18f, 8, submenuOpen ? accent : sectionFill);
     DrawRectangleLinesEx(settingsButton, 2.0f, submenuOpen ? borderColor : sectionBorder);
-    DrawUiText(loc("Settings"), settingsButton.x + 18.0f, settingsButton.y + 10.0f, 20, submenuOpen ? RAYWHITE : textColor);
+    DrawLeftUiTextFitted(loc("Settings"), settingsButton, 18.0f, 20, 14, 0.0f, submenuOpen ? RAYWHITE : textColor);
 
     DrawRectangleRounded(restartButton, 0.18f, 8, sectionFill);
     DrawRectangleLinesEx(restartButton, 2.0f, sectionBorder);
-    DrawUiText(loc("Restart Game"), restartButton.x + 18.0f, restartButton.y + 10.0f, 20, textColor);
+    DrawLeftUiTextFitted(loc("Restart Game"), restartButton, 18.0f, 20, 14, 0.0f, textColor);
 
     DrawRectangleRounded(backToMenuButton, 0.18f, 8, sectionFill);
     DrawRectangleLinesEx(backToMenuButton, 2.0f, sectionBorder);
-    DrawUiText(loc("Back to Menu"), backToMenuButton.x + 18.0f, backToMenuButton.y + 10.0f, 20, textColor);
+    DrawLeftUiTextFitted(loc("Back to Menu"), backToMenuButton, 18.0f, 20, 14, 0.0f, textColor);
 
     DrawRectangleRounded(quitButton, 0.18f, 8, accent);
     DrawRectangleLinesEx(quitButton, 2.0f, borderColor);
-    DrawUiText(loc("Quit Game"), quitButton.x + 18.0f, quitButton.y + 10.0f, 20, RAYWHITE);
+    DrawLeftUiTextFitted(loc("Quit Game"), quitButton, 18.0f, 20, 14, 0.0f, RAYWHITE);
 
     if (submenuOpen)
     {
         DrawUiText(loc("Settings"), submenuPanel.x + 22.0f, submenuPanel.y + 18.0f, 28, textColor);
-        DrawRectangleRounded(submenuCloseButton, 0.22f, 6, (Color){224, 216, 198, 255});
-        DrawRectangleLinesEx(submenuCloseButton, 1.5f, borderColor);
-        DrawUiText("X", submenuCloseButton.x + 9.0f, submenuCloseButton.y + 4.0f, 20, textColor);
+        DrawModalCloseButton(submenuCloseButton, 1.0f, UiCloseButtonFillColor(), borderColor, textColor);
 
         DrawRectangleRounded(lightButton, 0.18f, 8, lightSelected ? accent : sectionFill);
         DrawRectangleLinesEx(lightButton, 2.0f, lightSelected ? borderColor : sectionBorder);
-        DrawUiText(loc("Light Mode"), lightButton.x + 18.0f, lightButton.y + 10.0f, 20, lightSelected ? RAYWHITE : textColor);
+        DrawLeftUiTextFitted(loc("Light Mode"), lightButton, 18.0f, 20, 14, 0.0f, lightSelected ? RAYWHITE : textColor);
 
         DrawRectangleRounded(darkButton, 0.18f, 8, darkSelected ? accent : sectionFill);
         DrawRectangleLinesEx(darkButton, 2.0f, darkSelected ? borderColor : sectionBorder);
-        DrawUiText(loc("Dark Mode"), darkButton.x + 18.0f, darkButton.y + 10.0f, 20, darkSelected ? RAYWHITE : textColor);
+        DrawLeftUiTextFitted(loc("Dark Mode"), darkButton, 18.0f, 20, 14, 0.0f, darkSelected ? RAYWHITE : textColor);
 
         DrawRectangleRounded(windowModeButton, 0.18f, 8, windowMode == UI_WINDOW_MODE_FULLSCREEN ? accent : sectionFill);
         DrawRectangleLinesEx(windowModeButton, 2.0f, windowMode == UI_WINDOW_MODE_FULLSCREEN ? borderColor : sectionBorder);
-        DrawUiText(displayLabel, windowModeButton.x + 18.0f, windowModeButton.y + 10.0f, 19, windowMode == UI_WINDOW_MODE_FULLSCREEN ? RAYWHITE : textColor);
+        DrawLeftUiTextFitted(displayLabel, windowModeButton, 18.0f, 19, 13, 0.0f, windowMode == UI_WINDOW_MODE_FULLSCREEN ? RAYWHITE : textColor);
 
         DrawRectangleRounded(languageButton, 0.18f, 8, sectionFill);
         DrawRectangleLinesEx(languageButton, 2.0f, sectionBorder);
-        DrawUiText(languageLabel, languageButton.x + 18.0f, languageButton.y + 10.0f, 20, textColor);
+        DrawLeftUiTextFitted(languageLabel, languageButton, 18.0f, 20, 13, 0.0f, textColor);
 
         DrawUiText(loc("AI Speed"), submenuPanel.x + 24.0f, submenuPanel.y + 300.0f, 18, mutedText);
         DrawUiText(loc("0 slow"), aiSpeedTrack.x, aiSpeedTrack.y + 16.0f, 14, mutedText);
         DrawUiText(loc("10 instant"), aiSpeedTrack.x + aiSpeedTrack.width - MeasureUiText(loc("10 instant"), 14), aiSpeedTrack.y + 16.0f, 14, mutedText);
-        DrawRectangleRounded(aiSpeedTrack, 0.45f, 8, (Color){224, 216, 198, 255});
+        DrawRectangleRounded(aiSpeedTrack, 0.45f, 8, UiTrackFillColor());
         DrawRectangleRounded((Rectangle){aiSpeedTrack.x, aiSpeedTrack.y, aiSpeedTrack.width * aiSpeedNormalized, aiSpeedTrack.height}, 0.45f, 8, accent);
-        DrawCircleV((Vector2){aiSpeedKnobX, aiSpeedTrack.y + aiSpeedTrack.height * 0.5f}, 9.0f, (Color){247, 240, 226, 255});
+        DrawCircleV((Vector2){aiSpeedKnobX, aiSpeedTrack.y + aiSpeedTrack.height * 0.5f}, 9.0f, UiPanelHighlightColor());
         DrawCircleLines((int)aiSpeedKnobX, (int)(aiSpeedTrack.y + aiSpeedTrack.height * 0.5f), 9.0f, borderColor);
         DrawUiText(TextFormat("%d", aiSpeed), submenuPanel.x + submenuPanel.width * 0.5f - 5.0f, aiSpeedTrack.y - 24.0f, 18, textColor);
 
@@ -353,11 +364,11 @@ void DrawSettingsModal(void)
         DrawUiText(loc("Multiplayer Options"), multiplayerPanel.x + 18.0f, multiplayerPanel.y + 18.0f, 24, textColor);
         DrawRectangleRounded(multiplayerIpRow, 0.16f, 8, revealLocalIp ? Fade(accent, 0.16f) : Fade(sectionFill, 0.94f));
         DrawRectangleLinesEx(multiplayerIpRow, 1.5f, revealLocalIp ? Fade(borderColor, 0.90f) : Fade(sectionBorder, 0.90f));
-        DrawUiText(ipLine, multiplayerIpRow.x + 12.0f, multiplayerIpRow.y + 8.0f, 17, textColor);
+        DrawLeftUiTextFitted(ipLine, multiplayerIpRow, 12.0f, 17, 13, 0.0f, textColor);
 
         DrawRectangleRounded(multiplayerPortRow, 0.16f, 8, revealPort ? Fade(accent, 0.16f) : Fade(sectionFill, 0.94f));
         DrawRectangleLinesEx(multiplayerPortRow, 1.5f, revealPort ? Fade(borderColor, 0.90f) : Fade(sectionBorder, 0.90f));
-        DrawUiText(portLine, multiplayerPortRow.x + 12.0f, multiplayerPortRow.y + 8.0f, 17, textColor);
+        DrawLeftUiTextFitted(portLine, multiplayerPortRow, 12.0f, 17, 13, 0.0f, textColor);
     }
 
     if (!showingConfirm)
@@ -388,9 +399,7 @@ void DrawSettingsModal(void)
     confirmTitleLineCount = BuildWrappedUiLinesFitted(confirmTitle, 24, 18, (int)confirmPanel.width - 36, confirmTitleLines, 2, &confirmTitleFont);
     confirmBodyLineCount = BuildWrappedUiLinesFitted(confirmBody, 17, 14, (int)confirmPanel.width - 36, confirmBodyLines, 3, &confirmBodyFont);
 
-    DrawRectangleRounded((Rectangle){confirmPanel.x + 4.0f, confirmPanel.y + 6.0f, confirmPanel.width, confirmPanel.height}, 0.08f, 8, Fade(BLACK, 0.08f));
-    DrawRectangleRounded(confirmPanel, 0.08f, 8, (Color){248, 241, 225, 252});
-    DrawRectangleLinesEx(confirmPanel, 2.0f, borderColor);
+    DrawPanelFrame(confirmPanel, 0.08f, 4.0f, 6.0f, 0.08f, UiPanelHighlightColor(), borderColor);
 
     for (int i = 0; i < confirmTitleLineCount; i++)
     {
@@ -409,20 +418,18 @@ void DrawSettingsModal(void)
     {
         const int confirmLabelMaxWidth = (int)confirmButton.width - 20;
         confirmButtonFont = FitUiTextFontSize(confirmButtonLabel, 17, 14, confirmLabelMaxWidth);
-        const int confirmLabelWidth = MeasureUiText(confirmButtonLabel, confirmButtonFont);
         DrawRectangleRounded(confirmButton, 0.18f, 8, confirmButtonColor);
         DrawRectangleLinesEx(confirmButton, 1.5f, borderColor);
-        DrawUiText(confirmButtonLabel, confirmButton.x + confirmButton.width * 0.5f - confirmLabelWidth * 0.5f, confirmButton.y + confirmButton.height * 0.5f - (float)confirmButtonFont * 0.48f, confirmButtonFont, RAYWHITE);
+        DrawCenteredUiTextFitted(confirmButtonLabel, confirmButton, confirmButtonFont, 14, 0.0f, RAYWHITE);
     }
 
     {
         const char *cancelLabel = loc("Cancel");
         const int cancelLabelMaxWidth = (int)cancelButton.width - 20;
         cancelButtonFont = FitUiTextFontSize(cancelLabel, 17, 14, cancelLabelMaxWidth);
-        const int cancelLabelWidth = MeasureUiText(cancelLabel, cancelButtonFont);
         DrawRectangleRounded(cancelButton, 0.18f, 8, sectionFill);
         DrawRectangleLinesEx(cancelButton, 1.5f, sectionBorder);
-        DrawUiText(cancelLabel, cancelButton.x + cancelButton.width * 0.5f - cancelLabelWidth * 0.5f, cancelButton.y + cancelButton.height * 0.5f - (float)cancelButtonFont * 0.48f, cancelButtonFont, textColor);
+        DrawCenteredUiTextFitted(cancelLabel, cancelButton, cancelButtonFont, 14, 0.0f, textColor);
     }
 }
 
@@ -439,10 +446,14 @@ void DrawTradeModal(const struct Map *map)
         targetPanel.height * scale};
     const Rectangle closeButton = {panel.x + panel.width - 42.0f, panel.y + 12.0f, 28.0f, 28.0f};
     const Rectangle confirmButton = {panel.x + 26.0f * scale, panel.y + panel.height - 48.0f * scale, 408.0f * scale, 34.0f * scale};
-    const Color panelColor = (Color){244, 236, 217, 250};
-    const Color borderColor = (Color){118, 88, 56, 255};
-    const Color textColor = (Color){54, 39, 29, 255};
-    const Color mutedText = (Color){92, 70, 50, 255};
+    const Color panelColor = UiPanelColor();
+    const Color borderColor = UiPanelBorderColor();
+    const Color textColor = UiTextColor();
+    const Color mutedText = UiMutedTextColor();
+    const Color sectionFill = UiSectionFillColor();
+    const Color disabledFill = UiDisabledFillColor();
+    const Color disabledBorder = UiDisabledBorderColor();
+    const Color disabledText = UiDisabledTextColor();
     const bool isPlayable = map->phase == GAME_PHASE_PLAY;
     const bool canTrade = isPlayable && gameCanTradeMaritime(map, (enum ResourceType)gTradeGiveResource, gTradeAmount, (enum ResourceType)gTradeReceiveResource);
     const float alpha = eased;
@@ -451,18 +462,14 @@ void DrawTradeModal(const struct Map *map)
     const float amountFill = maxTradeAmount > 0 ? (float)gTradeAmount / (float)maxTradeAmount : 0.0f;
 
     DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, 0.28f * alpha));
-    DrawRectangleRounded((Rectangle){panel.x + 8.0f, panel.y + 10.0f, panel.width, panel.height}, 0.06f, 8, Fade(BLACK, 0.14f * alpha));
-    DrawRectangleRounded(panel, 0.06f, 8, Fade(panelColor, alpha));
-    DrawRectangleLinesEx(panel, 2.0f, Fade(borderColor, alpha));
+    DrawPanelFrame(panel, 0.06f, 8.0f, 10.0f, 0.14f * alpha, Fade(panelColor, alpha), Fade(borderColor, alpha));
     if (openAmount < 0.90f)
     {
         return;
     }
 
     DrawUiText(loc("Available Water Trades"), panel.x + 22.0f, panel.y + 16.0f, 26, Fade(textColor, alpha));
-    DrawRectangleRounded(closeButton, 0.22f, 6, Fade((Color){224, 216, 198, 255}, alpha));
-    DrawRectangleLinesEx(closeButton, 1.5f, Fade(borderColor, alpha));
-    DrawUiText("X", closeButton.x + 9.0f, closeButton.y + 4.0f, 20, Fade(textColor, alpha));
+    DrawModalCloseButton(closeButton, alpha, UiCloseButtonFillColor(), borderColor, textColor);
 
     DrawUiText(loc("Give"), panel.x + 24.0f, panel.y + 48.0f, 18, Fade(mutedText, alpha));
     DrawUiText(loc("Receive"), panel.x + 232.0f, panel.y + 48.0f, 18, Fade(mutedText, alpha));
@@ -476,39 +483,52 @@ void DrawTradeModal(const struct Map *map)
         const Rectangle giveOption = {panel.x + 24.0f, panel.y + 74.0f + i * 34.0f, 180.0f, 28.0f};
         const Rectangle receiveOption = {panel.x + 232.0f, panel.y + 74.0f + i * 34.0f, 180.0f, 28.0f};
 
-        DrawRectangleRounded(giveOption, 0.18f, 6, selected ? (Color){171, 82, 54, 255} : (available ? (Color){236, 228, 208, 255} : (Color){224, 216, 198, 255}));
-        DrawRectangleLinesEx(giveOption, 1.5f, selected ? (Color){118, 88, 56, 255} : borderColor);
-        DrawUiText(TextFormat("%s  %d:1", ResourceName((enum ResourceType)i), optionRate), giveOption.x + 10.0f, giveOption.y + 6.0f, 16, selected ? RAYWHITE : (available ? textColor : (Color){132, 112, 91, 255}));
+        DrawRectangleRounded(giveOption, 0.18f, 6, selected ? (Color){171, 82, 54, 255} : (available ? sectionFill : disabledFill));
+        DrawRectangleLinesEx(giveOption, 1.5f, selected ? borderColor : (available ? borderColor : disabledBorder));
+        DrawLeftUiTextFitted(
+            TextFormat("%s  %d:1", ResourceName((enum ResourceType)i), optionRate),
+            giveOption,
+            10.0f,
+            16,
+            12,
+            0.0f,
+            selected ? RAYWHITE : (available ? textColor : disabledText));
 
-        DrawRectangleRounded(receiveOption, 0.18f, 6, receiveSelected ? (Color){171, 82, 54, 255} : (receiveAllowed ? (Color){236, 228, 208, 255} : (Color){224, 216, 198, 255}));
-        DrawRectangleLinesEx(receiveOption, 1.5f, receiveSelected ? (Color){118, 88, 56, 255} : borderColor);
-        DrawUiText(ResourceName((enum ResourceType)i), receiveOption.x + 10.0f, receiveOption.y + 6.0f, 16, receiveSelected ? RAYWHITE : (receiveAllowed ? textColor : (Color){132, 112, 91, 255}));
+        DrawRectangleRounded(receiveOption, 0.18f, 6, receiveSelected ? (Color){171, 82, 54, 255} : (receiveAllowed ? sectionFill : disabledFill));
+        DrawRectangleLinesEx(receiveOption, 1.5f, receiveSelected ? borderColor : (receiveAllowed ? borderColor : disabledBorder));
+        DrawLeftUiTextFitted(
+            ResourceName((enum ResourceType)i),
+            receiveOption,
+            10.0f,
+            16,
+            12,
+            0.0f,
+            receiveSelected ? RAYWHITE : (receiveAllowed ? textColor : disabledText));
     }
 
     DrawUiText(loc("Amount"), panel.x + panel.width * 0.5f - 32.0f, panel.y + 248.0f, 18, Fade(mutedText, alpha));
     const Rectangle tradeMinus = {panel.x + panel.width * 0.5f - 112.0f, panel.y + 276.0f, 28.0f, 28.0f};
     const Rectangle tradeTrack = {panel.x + panel.width * 0.5f - 68.0f, panel.y + 284.0f, 136.0f, 12.0f};
     const Rectangle tradePlus = {panel.x + panel.width * 0.5f + 84.0f, panel.y + 276.0f, 28.0f, 28.0f};
-    DrawRectangleRounded(tradeMinus, 0.22f, 6, (Color){224, 216, 198, 255});
+    DrawRectangleRounded(tradeMinus, 0.22f, 6, UiDisabledFillColor());
     DrawRectangleLinesEx(tradeMinus, 1.5f, borderColor);
-    DrawUiText("-", tradeMinus.x + 10.0f, tradeMinus.y + 2.0f, 24, textColor);
-    DrawRectangleRounded(tradeTrack, 0.45f, 8, (Color){224, 216, 198, 255});
+    DrawCenteredUiTextFitted("-", tradeMinus, 24, 20, -1.0f, textColor);
+    DrawRectangleRounded(tradeTrack, 0.45f, 8, UiTrackFillColor());
     DrawRectangleRounded((Rectangle){tradeTrack.x, tradeTrack.y, tradeTrack.width * amountFill, tradeTrack.height}, 0.45f, 8, (Color){171, 82, 54, 255});
     {
         const char *amountLabel = TextFormat("%d", gTradeAmount);
         const int amountWidth = MeasureUiText(amountLabel, 18);
         DrawUiText(amountLabel, tradeTrack.x + tradeTrack.width * 0.5f - amountWidth * 0.5f, tradeTrack.y - 20.0f, 18, textColor);
     }
-    DrawRectangleRounded(tradePlus, 0.22f, 6, (Color){224, 216, 198, 255});
+    DrawRectangleRounded(tradePlus, 0.22f, 6, UiDisabledFillColor());
     DrawRectangleLinesEx(tradePlus, 1.5f, borderColor);
-    DrawUiText("+", tradePlus.x + 8.0f, tradePlus.y + 2.0f, 24, textColor);
+    DrawCenteredUiTextFitted("+", tradePlus, 24, 20, -1.0f, textColor);
 
-    DrawRectangleRounded(confirmButton, 0.16f, 8, canTrade ? (Color){171, 82, 54, 255} : (Color){224, 216, 198, 255});
-    DrawRectangleLinesEx(confirmButton, 2.0f, canTrade ? borderColor : (Color){154, 132, 108, 255});
+    DrawRectangleRounded(confirmButton, 0.16f, 8, canTrade ? (Color){171, 82, 54, 255} : UiDisabledFillColor());
+    DrawRectangleLinesEx(confirmButton, 2.0f, canTrade ? borderColor : UiDisabledBorderColor());
     {
         const char *confirmLabel = TextFormat(loc("Trade %d %s for %d %s"), rate * gTradeAmount, ResourceName((enum ResourceType)gTradeGiveResource), gTradeAmount, ResourceName((enum ResourceType)gTradeReceiveResource));
-        const int labelWidth = MeasureUiText(confirmLabel, 18);
-        DrawUiText(confirmLabel, confirmButton.x + confirmButton.width * 0.5f - labelWidth * 0.5f, confirmButton.y + confirmButton.height * 0.5f - 9.0f, 18, canTrade ? RAYWHITE : (Color){132, 112, 91, 255});
+        DrawCenteredUiTextFitted(confirmLabel, confirmButton, 18, 12, 0.0f, canTrade ? RAYWHITE : disabledText);
     }
 }
 
@@ -525,10 +545,14 @@ void DrawPlayerTradeModal(const struct Map *map)
         targetPanel.height * scale};
     const Rectangle closeButton = {panel.x + panel.width - 42.0f, panel.y + 12.0f, 28.0f, 28.0f};
     const Rectangle confirmButton = {panel.x + 54.0f, panel.y + panel.height - 48.0f, 332.0f, 34.0f};
-    const Color panelColor = (Color){244, 236, 217, 250};
-    const Color borderColor = (Color){118, 88, 56, 255};
-    const Color textColor = (Color){54, 39, 29, 255};
-    const Color mutedText = (Color){92, 70, 50, 255};
+    const Color panelColor = UiPanelColor();
+    const Color borderColor = UiPanelBorderColor();
+    const Color textColor = UiTextColor();
+    const Color mutedText = UiMutedTextColor();
+    const Color sectionFill = UiSectionFillColor();
+    const Color disabledFill = UiDisabledFillColor();
+    const Color disabledBorder = UiDisabledBorderColor();
+    const Color disabledText = UiDisabledTextColor();
     const bool isPlayable = map->phase == GAME_PHASE_PLAY;
     const bool canTrade = isPlayable &&
                           gPlayerTradeGiveResource != gPlayerTradeReceiveResource &&
@@ -540,37 +564,33 @@ void DrawPlayerTradeModal(const struct Map *map)
     const float receiveFill = (float)gPlayerTradeReceiveAmount / (float)maxReceiveAmount;
 
     DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, 0.28f * alpha));
-    DrawRectangleRounded((Rectangle){panel.x + 8.0f, panel.y + 10.0f, panel.width, panel.height}, 0.06f, 8, Fade(BLACK, 0.14f * alpha));
-    DrawRectangleRounded(panel, 0.06f, 8, Fade(panelColor, alpha));
-    DrawRectangleLinesEx(panel, 2.0f, Fade(borderColor, alpha));
+    DrawPanelFrame(panel, 0.06f, 8.0f, 10.0f, 0.14f * alpha, Fade(panelColor, alpha), Fade(borderColor, alpha));
     if (openAmount < 0.90f)
     {
         return;
     }
 
     DrawUiText(loc("Player Trade"), panel.x + 22.0f, panel.y + 16.0f, 26, Fade(textColor, alpha));
-    DrawRectangleRounded(closeButton, 0.22f, 6, Fade((Color){224, 216, 198, 255}, alpha));
-    DrawRectangleLinesEx(closeButton, 1.5f, Fade(borderColor, alpha));
-    DrawUiText("X", closeButton.x + 9.0f, closeButton.y + 4.0f, 20, Fade(textColor, alpha));
+    DrawModalCloseButton(closeButton, alpha, UiCloseButtonFillColor(), borderColor, textColor);
 
     DrawUiText(loc("Trade With"), panel.x + 24.0f, panel.y + 48.0f, 18, Fade(mutedText, alpha));
     int playerSlot = 0;
     for (int i = 0; i < MAX_PLAYERS; i++)
     {
         const enum PlayerType candidate = (enum PlayerType)i;
-        if (candidate == map->currentPlayer)
+        if (candidate == map->currentPlayer ||
+            !gameIsPlayerActive(map, candidate))
         {
             continue;
         }
 
         const bool selected = candidate == gPlayerTradeTarget;
         const Rectangle playerOption = {panel.x + 24.0f + playerSlot * 130.0f, panel.y + 74.0f, 116.0f, 32.0f};
-        DrawRectangleRounded(playerOption, 0.18f, 6, selected ? Fade(PlayerColor(candidate), 0.95f) : (Color){236, 228, 208, 255});
-        DrawRectangleLinesEx(playerOption, 1.5f, selected ? borderColor : (Color){154, 132, 108, 255});
+        DrawRectangleRounded(playerOption, 0.18f, 6, selected ? Fade(UiReadablePlayerColor(candidate), 0.95f) : sectionFill);
+        DrawRectangleLinesEx(playerOption, 1.5f, selected ? borderColor : UiDisabledBorderColor());
         {
             const char *label = PlayerName(candidate);
-            const int labelWidth = MeasureUiText(label, 16);
-            DrawUiText(label, playerOption.x + playerOption.width * 0.5f - labelWidth * 0.5f, playerOption.y + 7.0f, 16, selected ? RAYWHITE : textColor);
+            DrawCenteredUiTextFitted(label, playerOption, 16, 12, 0.0f, selected ? RAYWHITE : textColor);
         }
         playerSlot++;
     }
@@ -585,61 +605,70 @@ void DrawPlayerTradeModal(const struct Map *map)
         const bool receiveSelected = i == gPlayerTradeReceiveResource && receiveAllowed;
         const Rectangle giveOption = {panel.x + 24.0f, panel.y + 160.0f + i * 28.0f, 180.0f, 22.0f};
         const Rectangle receiveOption = {panel.x + 232.0f, panel.y + 160.0f + i * 28.0f, 180.0f, 22.0f};
-        const Color disabledFill = (Color){224, 216, 198, 255};
-        const Color disabledBorder = (Color){154, 132, 108, 255};
-        const Color disabledText = (Color){132, 112, 91, 255};
+        DrawRectangleRounded(giveOption, 0.18f, 6, giveSelected ? (Color){171, 82, 54, 255} : (giveAvailable ? sectionFill : disabledFill));
+        DrawRectangleLinesEx(giveOption, 1.5f, giveSelected ? borderColor : (giveAvailable ? borderColor : disabledBorder));
+        DrawLeftUiTextFitted(
+            TextFormat("%s  %d", ResourceName((enum ResourceType)i), map->players[map->currentPlayer].resources[i]),
+            giveOption,
+            10.0f,
+            14,
+            11,
+            0.0f,
+            giveSelected ? RAYWHITE : (giveAvailable ? textColor : disabledText));
 
-        DrawRectangleRounded(giveOption, 0.18f, 6, giveSelected ? (Color){171, 82, 54, 255} : (giveAvailable ? (Color){236, 228, 208, 255} : disabledFill));
-        DrawRectangleLinesEx(giveOption, 1.5f, giveSelected ? borderColor : (giveAvailable ? (Color){154, 132, 108, 255} : disabledBorder));
-        DrawUiText(TextFormat("%s  %d", ResourceName((enum ResourceType)i), map->players[map->currentPlayer].resources[i]), giveOption.x + 10.0f, giveOption.y + 3.0f, 14, giveSelected ? RAYWHITE : (giveAvailable ? textColor : disabledText));
-
-        DrawRectangleRounded(receiveOption, 0.18f, 6, receiveSelected ? (Color){171, 82, 54, 255} : (receiveAllowed ? (Color){236, 228, 208, 255} : disabledFill));
-        DrawRectangleLinesEx(receiveOption, 1.5f, receiveSelected ? borderColor : (receiveAllowed ? (Color){154, 132, 108, 255} : disabledBorder));
-        DrawUiText(ResourceName((enum ResourceType)i), receiveOption.x + 10.0f, receiveOption.y + 3.0f, 14, receiveSelected ? RAYWHITE : (receiveAllowed ? textColor : disabledText));
+        DrawRectangleRounded(receiveOption, 0.18f, 6, receiveSelected ? (Color){171, 82, 54, 255} : (receiveAllowed ? sectionFill : disabledFill));
+        DrawRectangleLinesEx(receiveOption, 1.5f, receiveSelected ? borderColor : (receiveAllowed ? borderColor : disabledBorder));
+        DrawLeftUiTextFitted(
+            ResourceName((enum ResourceType)i),
+            receiveOption,
+            10.0f,
+            14,
+            11,
+            0.0f,
+            receiveSelected ? RAYWHITE : (receiveAllowed ? textColor : disabledText));
     }
 
     DrawUiText(loc("Your Amount"), panel.x + 24.0f, panel.y + 294.0f, 18, Fade(mutedText, alpha));
     const Rectangle giveMinus = {panel.x + 24.0f, panel.y + 326.0f, 28.0f, 28.0f};
     const Rectangle giveTrack = {panel.x + 68.0f, panel.y + 334.0f, 92.0f, 12.0f};
     const Rectangle givePlus = {panel.x + 176.0f, panel.y + 326.0f, 28.0f, 28.0f};
-    DrawRectangleRounded(giveMinus, 0.22f, 6, (Color){224, 216, 198, 255});
+    DrawRectangleRounded(giveMinus, 0.22f, 6, UiDisabledFillColor());
     DrawRectangleLinesEx(giveMinus, 1.5f, borderColor);
-    DrawUiText("-", giveMinus.x + 10.0f, giveMinus.y + 2.0f, 24, textColor);
-    DrawRectangleRounded(giveTrack, 0.45f, 8, (Color){224, 216, 198, 255});
+    DrawCenteredUiTextFitted("-", giveMinus, 24, 20, -1.0f, textColor);
+    DrawRectangleRounded(giveTrack, 0.45f, 8, UiTrackFillColor());
     DrawRectangleRounded((Rectangle){giveTrack.x, giveTrack.y, giveTrack.width * giveFill, giveTrack.height}, 0.45f, 8, (Color){171, 82, 54, 255});
     {
         const char *amountLabel = TextFormat("%d", gPlayerTradeGiveAmount);
         const int amountWidth = MeasureUiText(amountLabel, 18);
         DrawUiText(amountLabel, giveTrack.x + giveTrack.width * 0.5f - amountWidth * 0.5f, giveTrack.y - 20.0f, 18, textColor);
     }
-    DrawRectangleRounded(givePlus, 0.22f, 6, (Color){224, 216, 198, 255});
+    DrawRectangleRounded(givePlus, 0.22f, 6, UiDisabledFillColor());
     DrawRectangleLinesEx(givePlus, 1.5f, borderColor);
-    DrawUiText("+", givePlus.x + 8.0f, givePlus.y + 2.0f, 24, textColor);
+    DrawCenteredUiTextFitted("+", givePlus, 24, 20, -1.0f, textColor);
 
     DrawUiText(loc("Their Amount"), panel.x + 232.0f, panel.y + 294.0f, 18, Fade(mutedText, alpha));
     const Rectangle receiveMinus = {panel.x + 232.0f, panel.y + 326.0f, 28.0f, 28.0f};
     const Rectangle receiveTrack = {panel.x + 276.0f, panel.y + 334.0f, 92.0f, 12.0f};
     const Rectangle receivePlus = {panel.x + 384.0f, panel.y + 326.0f, 28.0f, 28.0f};
-    DrawRectangleRounded(receiveMinus, 0.22f, 6, (Color){224, 216, 198, 255});
+    DrawRectangleRounded(receiveMinus, 0.22f, 6, UiDisabledFillColor());
     DrawRectangleLinesEx(receiveMinus, 1.5f, borderColor);
-    DrawUiText("-", receiveMinus.x + 10.0f, receiveMinus.y + 2.0f, 24, textColor);
-    DrawRectangleRounded(receiveTrack, 0.45f, 8, (Color){224, 216, 198, 255});
+    DrawCenteredUiTextFitted("-", receiveMinus, 24, 20, -1.0f, textColor);
+    DrawRectangleRounded(receiveTrack, 0.45f, 8, UiTrackFillColor());
     DrawRectangleRounded((Rectangle){receiveTrack.x, receiveTrack.y, receiveTrack.width * receiveFill, receiveTrack.height}, 0.45f, 8, (Color){171, 82, 54, 255});
     {
         const char *amountLabel = TextFormat("%d", gPlayerTradeReceiveAmount);
         const int amountWidth = MeasureUiText(amountLabel, 18);
         DrawUiText(amountLabel, receiveTrack.x + receiveTrack.width * 0.5f - amountWidth * 0.5f, receiveTrack.y - 20.0f, 18, textColor);
     }
-    DrawRectangleRounded(receivePlus, 0.22f, 6, (Color){224, 216, 198, 255});
+    DrawRectangleRounded(receivePlus, 0.22f, 6, UiDisabledFillColor());
     DrawRectangleLinesEx(receivePlus, 1.5f, borderColor);
-    DrawUiText("+", receivePlus.x + 8.0f, receivePlus.y + 2.0f, 24, textColor);
+    DrawCenteredUiTextFitted("+", receivePlus, 24, 20, -1.0f, textColor);
 
-    DrawRectangleRounded(confirmButton, 0.16f, 8, canTrade ? (Color){171, 82, 54, 255} : (Color){224, 216, 198, 255});
-    DrawRectangleLinesEx(confirmButton, 2.0f, canTrade ? borderColor : (Color){154, 132, 108, 255});
+    DrawRectangleRounded(confirmButton, 0.16f, 8, canTrade ? (Color){171, 82, 54, 255} : UiDisabledFillColor());
+    DrawRectangleLinesEx(confirmButton, 2.0f, canTrade ? borderColor : UiDisabledBorderColor());
     {
         const char *confirmLabel = TextFormat(loc("Trade %d %s for %d %s"), gPlayerTradeGiveAmount, ResourceName((enum ResourceType)gPlayerTradeGiveResource), gPlayerTradeReceiveAmount, ResourceName((enum ResourceType)gPlayerTradeReceiveResource));
-        const int labelWidth = MeasureUiText(confirmLabel, 18);
-        DrawUiText(confirmLabel, confirmButton.x + confirmButton.width * 0.5f - labelWidth * 0.5f, confirmButton.y + confirmButton.height * 0.5f - 9.0f, 18, canTrade ? RAYWHITE : (Color){132, 112, 91, 255});
+        DrawCenteredUiTextFitted(confirmLabel, confirmButton, 18, 12, 0.0f, canTrade ? RAYWHITE : disabledText);
     }
 }
 
@@ -662,11 +691,11 @@ void DrawIncomingTradeOfferModal(const struct Map *map)
     const Rectangle declineBody = {declineButton.x, declineButton.y + declineYOffset, declineButton.width, declineButton.height};
     const Color acceptFill = acceptHovered ? ColorBrightness((Color){84, 146, 82, 255}, 0.08f) : (Color){84, 146, 82, 255};
     const Color acceptBorder = acceptHovered ? ColorBrightness((Color){60, 108, 58, 255}, 0.08f) : (Color){60, 108, 58, 255};
-    const Color declineFill = declineHovered ? ColorBrightness((Color){222, 212, 193, 255}, 0.06f) : (Color){222, 212, 193, 255};
+    const Color declineFill = declineHovered ? ColorBrightness(UiSectionFillColor(), 0.06f) : UiSectionFillColor();
     const Color declineBorder = declineHovered ? ColorBrightness(borderColor, 0.10f) : borderColor;
-    const Color panelColor = (Color){244, 236, 217, 252};
-    const Color textColor = (Color){54, 39, 29, 255};
-    const Color mutedText = (Color){92, 70, 50, 255};
+    const Color panelColor = UiPanelColor();
+    const Color textColor = UiTextColor();
+    const Color mutedText = UiMutedTextColor();
     const int titleWidth = MeasureUiText(loc("Incoming Trade Offer"), 28);
 
     if (map == NULL || session == NULL ||
@@ -677,34 +706,32 @@ void DrawIncomingTradeOfferModal(const struct Map *map)
     }
 
     DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, 0.34f));
-    DrawRectangleRounded((Rectangle){panel.x + 8.0f, panel.y + 10.0f, panel.width, panel.height}, 0.08f, 8, Fade(BLACK, 0.14f));
-    DrawRectangleRounded(panel, 0.08f, 8, panelColor);
-    DrawRectangleLinesEx(panel, 2.0f, borderColor);
+    DrawPanelFrame(panel, 0.08f, 8.0f, 10.0f, 0.14f, panelColor, borderColor);
 
     DrawUiText(loc("Incoming Trade Offer"), panel.x + panel.width * 0.5f - titleWidth * 0.5f, panel.y + 20.0f, 28, textColor);
     DrawUiText(TextFormat(loc("From %s"), PlayerName(map->currentPlayer)), panel.x + 24.0f, panel.y + 66.0f, 18, mutedText);
 
     DrawUiText(loc("You Receive"), panel.x + 24.0f, panel.y + 104.0f, 18, mutedText);
-    DrawRectangleRounded((Rectangle){panel.x + 24.0f, panel.y + 130.0f, panel.width - 48.0f, 36.0f}, 0.16f, 6, (Color){236, 228, 208, 255});
-    DrawRectangleLinesEx((Rectangle){panel.x + 24.0f, panel.y + 130.0f, panel.width - 48.0f, 36.0f}, 1.5f, (Color){154, 132, 108, 255});
-    DrawUiText(TextFormat("%d %s", offer.amountA, ResourceName(offer.resourceA)), panel.x + 36.0f, panel.y + 138.0f, 20, textColor);
+    DrawRectangleRounded((Rectangle){panel.x + 24.0f, panel.y + 130.0f, panel.width - 48.0f, 36.0f}, 0.16f, 6, UiSectionFillColor());
+    DrawRectangleLinesEx((Rectangle){panel.x + 24.0f, panel.y + 130.0f, panel.width - 48.0f, 36.0f}, 1.5f, UiDisabledBorderColor());
+    DrawLeftUiTextFitted(TextFormat("%d %s", offer.amountA, ResourceName(offer.resourceA)), (Rectangle){panel.x + 24.0f, panel.y + 130.0f, panel.width - 48.0f, 36.0f}, 12.0f, 20, 14, 0.0f, textColor);
 
     DrawUiText(loc("You Give"), panel.x + 24.0f, panel.y + 182.0f, 18, mutedText);
-    DrawRectangleRounded((Rectangle){panel.x + 24.0f, panel.y + 208.0f, panel.width - 48.0f, 36.0f}, 0.16f, 6, (Color){236, 228, 208, 255});
-    DrawRectangleLinesEx((Rectangle){panel.x + 24.0f, panel.y + 208.0f, panel.width - 48.0f, 36.0f}, 1.5f, (Color){154, 132, 108, 255});
-    DrawUiText(TextFormat("%d %s", offer.amountB, ResourceName(offer.resourceB)), panel.x + 36.0f, panel.y + 216.0f, 20, textColor);
+    DrawRectangleRounded((Rectangle){panel.x + 24.0f, panel.y + 208.0f, panel.width - 48.0f, 36.0f}, 0.16f, 6, UiSectionFillColor());
+    DrawRectangleLinesEx((Rectangle){panel.x + 24.0f, panel.y + 208.0f, panel.width - 48.0f, 36.0f}, 1.5f, UiDisabledBorderColor());
+    DrawLeftUiTextFitted(TextFormat("%d %s", offer.amountB, ResourceName(offer.resourceB)), (Rectangle){panel.x + 24.0f, panel.y + 208.0f, panel.width - 48.0f, 36.0f}, 12.0f, 20, 14, 0.0f, textColor);
 
     DrawUiText(loc("Accept or decline this offer."), panel.x + 24.0f, panel.y + 260.0f, 17, mutedText);
 
     DrawRectangleRounded((Rectangle){acceptBody.x + 4.0f, acceptBody.y + 6.0f, acceptBody.width, acceptBody.height}, 0.20f, 8, Fade(BLACK, 0.10f));
     DrawRectangleRounded(acceptBody, 0.20f, 8, acceptFill);
     DrawRectangleLinesEx(acceptBody, 2.0f, acceptBorder);
-    DrawUiText(loc("Accept"), acceptBody.x + acceptBody.width * 0.5f - MeasureUiText(loc("Accept"), 20) * 0.5f, acceptBody.y + 10.0f, 20, RAYWHITE);
+    DrawCenteredUiTextFitted(loc("Accept"), acceptBody, 20, 14, 0.0f, RAYWHITE);
 
     DrawRectangleRounded((Rectangle){declineBody.x + 4.0f, declineBody.y + 6.0f, declineBody.width, declineBody.height}, 0.20f, 8, Fade(BLACK, 0.10f));
     DrawRectangleRounded(declineBody, 0.20f, 8, declineFill);
     DrawRectangleLinesEx(declineBody, 2.0f, declineBorder);
-    DrawUiText(loc("Decline"), declineBody.x + declineBody.width * 0.5f - MeasureUiText(loc("Decline"), 20) * 0.5f, declineBody.y + 10.0f, 20, textColor);
+    DrawCenteredUiTextFitted(loc("Decline"), declineBody, 20, 14, 0.0f, textColor);
 }
 
 void DrawDiscardModal(const struct Map *map)
@@ -716,10 +743,10 @@ void DrawDiscardModal(const struct Map *map)
                            discardPlayer <= PLAYER_BLACK &&
                            map->players[discardPlayer].controlMode == PLAYER_CONTROL_AI;
     const bool revealDiscard = gDiscardRevealPlayer == discardPlayer;
-    const Color panelColor = (Color){244, 236, 217, 250};
-    const Color borderColor = (Color){118, 88, 56, 255};
-    const Color textColor = (Color){54, 39, 29, 255};
-    const Color mutedText = (Color){92, 70, 50, 255};
+    const Color panelColor = UiPanelColor();
+    const Color borderColor = UiPanelBorderColor();
+    const Color textColor = UiTextColor();
+    const Color mutedText = UiMutedTextColor();
     int discardSelected = 0;
 
     if (aiDiscard)
@@ -733,9 +760,7 @@ void DrawDiscardModal(const struct Map *map)
     }
 
     DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, 0.34f));
-    DrawRectangleRounded((Rectangle){panel.x + 8.0f, panel.y + 10.0f, panel.width, panel.height}, 0.06f, 8, Fade(BLACK, 0.14f));
-    DrawRectangleRounded(panel, 0.06f, 8, panelColor);
-    DrawRectangleLinesEx(panel, 2.0f, borderColor);
+    DrawPanelFrame(panel, 0.06f, 8.0f, 10.0f, 0.14f, panelColor, borderColor);
 
     if (!revealDiscard)
     {
@@ -761,31 +786,29 @@ void DrawDiscardModal(const struct Map *map)
         const Rectangle plusButton = {panel.x + 322.0f, rowY, 26.0f, 26.0f};
 
         DrawUiText(ResourceName((enum ResourceType)resource), panel.x + 26.0f, rowY + 4.0f, 18, textColor);
-        DrawRectangleRounded(minusButton, 0.22f, 6, (Color){224, 216, 198, 255});
+        DrawRectangleRounded(minusButton, 0.22f, 6, UiDisabledFillColor());
         DrawRectangleLinesEx(minusButton, 1.5f, borderColor);
-        DrawUiText("-", minusButton.x + 8.0f, minusButton.y + 1.0f, 24, textColor);
-        DrawRectangleRounded(amountBox, 0.16f, 6, (Color){236, 228, 208, 255});
+        DrawCenteredUiTextFitted("-", minusButton, 24, 20, -1.0f, textColor);
+        DrawRectangleRounded(amountBox, 0.16f, 6, UiSectionFillColor());
         DrawRectangleLinesEx(amountBox, 1.5f, borderColor);
         {
             const char *amountLabel = TextFormat("%d / %d", gDiscardSelection[resource], map->players[discardPlayer].resources[resource]);
-            const int amountWidth = MeasureUiText(amountLabel, 16);
-            DrawUiText(amountLabel, amountBox.x + amountBox.width * 0.5f - amountWidth * 0.5f, amountBox.y + 4.0f, 16, textColor);
+            DrawCenteredUiTextFitted(amountLabel, amountBox, 16, 12, 0.0f, textColor);
         }
-        DrawRectangleRounded(plusButton, 0.22f, 6, (Color){224, 216, 198, 255});
+        DrawRectangleRounded(plusButton, 0.22f, 6, UiDisabledFillColor());
         DrawRectangleLinesEx(plusButton, 1.5f, borderColor);
-        DrawUiText("+", plusButton.x + 7.0f, plusButton.y + 1.0f, 24, textColor);
+        DrawCenteredUiTextFitted("+", plusButton, 24, 20, -1.0f, textColor);
     }
 
     DrawUiText(TextFormat(loc("Selected %d / %d"), discardSelected, discardRequired), panel.x + 22.0f, panel.y + 280.0f, 18, discardSelected == discardRequired ? (Color){54, 130, 72, 255} : mutedText);
     {
         const Rectangle confirmButton = {panel.x + 38.0f, panel.y + panel.height - 48.0f, panel.width - 76.0f, 36.0f};
         const bool ready = discardSelected == discardRequired;
-        DrawRectangleRounded(confirmButton, 0.16f, 8, ready ? (Color){171, 82, 54, 255} : (Color){224, 216, 198, 255});
-        DrawRectangleLinesEx(confirmButton, 2.0f, ready ? borderColor : (Color){154, 132, 108, 255});
+        DrawRectangleRounded(confirmButton, 0.16f, 8, ready ? (Color){171, 82, 54, 255} : UiDisabledFillColor());
+        DrawRectangleLinesEx(confirmButton, 2.0f, ready ? borderColor : UiDisabledBorderColor());
         {
             const char *label = loc("Confirm Discard");
-            const int width = MeasureUiText(label, 18);
-            DrawUiText(label, confirmButton.x + confirmButton.width * 0.5f - width * 0.5f, confirmButton.y + 8.0f, 18, ready ? RAYWHITE : (Color){132, 112, 91, 255});
+            DrawCenteredUiTextFitted(label, confirmButton, 18, 13, 0.0f, ready ? RAYWHITE : UiDisabledTextColor());
         }
     }
 }
@@ -797,10 +820,10 @@ void DrawThiefVictimModal(const struct Map *map)
                            map->currentPlayer <= PLAYER_BLACK &&
                            map->players[map->currentPlayer].controlMode == PLAYER_CONTROL_AI;
     const bool revealVictims = gThiefVictimRevealPlayer == map->currentPlayer;
-    const Color panelColor = (Color){244, 236, 217, 250};
-    const Color borderColor = (Color){118, 88, 56, 255};
-    const Color textColor = (Color){54, 39, 29, 255};
-    const Color mutedText = (Color){92, 70, 50, 255};
+    const Color panelColor = UiPanelColor();
+    const Color borderColor = UiPanelBorderColor();
+    const Color textColor = UiTextColor();
+    const Color mutedText = UiMutedTextColor();
     int victimIndex = 0;
 
     if (aiChooser)
@@ -809,9 +832,7 @@ void DrawThiefVictimModal(const struct Map *map)
     }
 
     DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, 0.34f));
-    DrawRectangleRounded((Rectangle){panel.x + 8.0f, panel.y + 10.0f, panel.width, panel.height}, 0.06f, 8, Fade(BLACK, 0.14f));
-    DrawRectangleRounded(panel, 0.06f, 8, panelColor);
-    DrawRectangleLinesEx(panel, 2.0f, borderColor);
+    DrawPanelFrame(panel, 0.06f, 8.0f, 10.0f, 0.14f, panelColor, borderColor);
 
     if (!revealVictims)
     {
@@ -832,13 +853,9 @@ void DrawThiefVictimModal(const struct Map *map)
         }
 
         const Rectangle victimButton = {panel.x + 26.0f + victimIndex * 118.0f, panel.y + 102.0f, 102.0f, 42.0f};
-        DrawRectangleRounded(victimButton, 0.18f, 8, Fade(PlayerColor(victim), 0.88f));
+        DrawRectangleRounded(victimButton, 0.18f, 8, Fade(UiReadablePlayerColor(victim), 0.88f));
         DrawRectangleLinesEx(victimButton, 2.0f, borderColor);
-        {
-            const char *label = PlayerName(victim);
-            const int width = MeasureUiText(label, 18);
-            DrawUiText(label, victimButton.x + victimButton.width * 0.5f - width * 0.5f, victimButton.y + 11.0f, 18, RAYWHITE);
-        }
+        DrawCenteredUiTextFitted(PlayerName(victim), victimButton, 18, 13, 0.0f, RAYWHITE);
         victimIndex++;
     }
 }
@@ -847,11 +864,11 @@ void DrawAwardCards(const struct Map *map)
 {
     const enum PlayerType longestRoadOwner = gameGetLongestRoadOwner(map);
     const enum PlayerType largestArmyOwner = gameGetLargestArmyOwner(map);
-    const float cardWidth = 224.0f;
-    const float cardHeight = 176.0f;
-    const float gap = 14.0f;
-    const float cardX = 12.0f;
-    const float firstCardY = (float)GetScreenHeight() - 12.0f - gap - cardHeight * 2.0f;
+    const float cardWidth = UiScaled(224.0f);
+    const float cardHeight = UiScaled(176.0f);
+    const float gap = UiScaled(14.0f);
+    const float cardX = UiScaled(12.0f);
+    const float firstCardY = (float)GetScreenHeight() - UiScaled(12.0f) - gap - cardHeight * 2.0f;
     const Rectangle longestRoadCard = {cardX, firstCardY, cardWidth, cardHeight};
     const Rectangle largestArmyCard = {cardX, firstCardY + cardHeight + gap, cardWidth, cardHeight};
     const char *longestRoadDetail = gameGetLongestRoadLength(map) >= 5
@@ -890,34 +907,35 @@ void DrawPlayerPanel(const struct Map *map)
     const Rectangle panel = GetPlayerPanelBounds();
     const float panelX = panel.x;
     const float panelY = panel.y;
-    const Color panelColor = (Color){244, 236, 217, 245};
-    const Color borderColor = (Color){118, 88, 56, 255};
-    const Color buttonText = (Color){54, 39, 29, 255};
+    const Color panelColor = UiPanelColor();
+    const Color borderColor = UiPanelBorderColor();
+    const Color textColor = UiTextColor();
+    const Color mutedText = UiMutedTextColor();
 
-    DrawRectangleRounded((Rectangle){panelX + 6.0f, panelY + 8.0f, panel.width, panel.height}, 0.08f, 8, Fade(BLACK, 0.10f));
-    DrawRectangleRounded(panel, 0.08f, 8, panelColor);
-    DrawRectangleLinesEx(panel, 2.0f, borderColor);
+    DrawPanelFrame(panel, 0.08f, UiScaled(6.0f), UiScaled(8.0f), 0.10f, panelColor, borderColor);
 
-    DrawUiText(PlayerName(player->type), panelX + 16.0f, panelY + 14.0f, 26, PlayerColor(player->type));
-    DrawUiText(showingPinnedLocalInfo ? loc("Your Hand") : loc("Current Player"), panelX + 16.0f, panelY + 44.0f, 16, (Color){92, 70, 50, 255});
+    DrawUiText(PlayerName(player->type), panelX + UiScaled(16.0f), panelY + UiScaled(14.0f), UiScaledFont(26), UiReadablePlayerColor(player->type));
+    DrawUiText(showingPinnedLocalInfo ? loc("Your Hand") : loc("Current Player"), panelX + UiScaled(16.0f), panelY + UiScaled(44.0f), UiScaledFont(16), mutedText);
 
     const int totalVp = gameComputeVictoryPoints(map, player->type);
     const int visibleVp = gameComputeVisibleVictoryPoints(map, player->type);
-    DrawUiText(loc("Victory Points"), panelX + 16.0f, panelY + 78.0f, 18, (Color){54, 39, 29, 255});
+    DrawUiText(loc("Victory Points"), panelX + UiScaled(16.0f), panelY + UiScaled(78.0f), UiScaledFont(18), textColor);
     {
         const char *vpLabel = TextFormat("%d (%d)", totalVp, visibleVp);
-        const int vpWidth = MeasureUiText(vpLabel, 24);
-        DrawUiText(vpLabel, panelX + panel.width - 18.0f - vpWidth, panelY + 76.0f, 24, (Color){54, 39, 29, 255});
+        const int vpFont = UiScaledFont(24);
+        const int vpWidth = MeasureUiText(vpLabel, vpFont);
+        DrawUiText(vpLabel, panelX + panel.width - UiScaled(18.0f) - vpWidth, panelY + UiScaled(76.0f), vpFont, textColor);
     }
 
-    DrawUiText(loc("Developement Cards"), panelX + 16.0f, panelY + 108.0f, 14, (Color){92, 70, 50, 255});
+    DrawUiText(loc("Development Cards"), panelX + UiScaled(16.0f), panelY + UiScaled(108.0f), UiScaledFont(14), mutedText);
     {
         const char *deckCountLabel = TextFormat(loc("%d left"), gameGetDevelopmentDeckCount(map));
-        const int deckCountWidth = MeasureUiText(deckCountLabel, 14);
-        const float deckCountX = panelX + panel.width - 32.0f - deckCountWidth;
-        const Color deckCountColor = (Color){46, 33, 25, 255};
-        DrawUiText(deckCountLabel, deckCountX, panelY + 108.0f, 14, deckCountColor);
-        DrawUiText(deckCountLabel, deckCountX + 0.8f, panelY + 108.0f, 14, deckCountColor);
+        const int deckFont = UiScaledFont(14);
+        const int deckCountWidth = MeasureUiText(deckCountLabel, deckFont);
+        const float deckCountX = panelX + panel.width - UiScaled(32.0f) - deckCountWidth;
+        const Color deckCountColor = textColor;
+        DrawUiText(deckCountLabel, deckCountX, panelY + UiScaled(108.0f), deckFont, deckCountColor);
+        DrawUiText(deckCountLabel, deckCountX + UiScaled(0.8f), panelY + UiScaled(108.0f), deckFont, deckCountColor);
     }
 
     {
@@ -928,21 +946,22 @@ void DrawPlayerPanel(const struct Map *map)
             totalResources += player->resources[resource];
         }
         resourcesLabel = TextFormat("%s (%d)", loc("Resources"), totalResources);
-        DrawUiText(resourcesLabel, panelX + 16.0f, panelY + 126.0f, 18, buttonText);
+        DrawUiText(resourcesLabel, panelX + UiScaled(16.0f), panelY + UiScaled(126.0f), UiScaledFont(18), textColor);
     }
     for (int resource = 0; resource < 5; resource++)
     {
-        const float rowY = panelY + 148.0f + resource * 14.0f;
+        const float rowY = panelY + UiScaled(148.0f) + resource * UiScaled(14.0f);
         const char *resourceCountLabel = TextFormat("%d", player->resources[resource]);
-        const int resourceCountWidth = MeasureUiText(resourceCountLabel, 16);
+        const int resourceFont = UiScaledFont(16);
+        const int resourceCountWidth = MeasureUiText(resourceCountLabel, resourceFont);
         const int turnDelta = player->type == map->currentPlayer ? uiGetCurrentTurnResourceGain((enum ResourceType)resource) : 0;
-        DrawUiText(ResourceName((enum ResourceType)resource), panelX + 18.0f, rowY, 16, (Color){92, 70, 50, 255});
-        DrawUiText(resourceCountLabel, panelX + 202.0f - resourceCountWidth, rowY, 16, (Color){54, 39, 29, 255});
+        DrawUiText(ResourceName((enum ResourceType)resource), panelX + UiScaled(18.0f), rowY, resourceFont, mutedText);
+        DrawUiText(resourceCountLabel, panelX + UiScaled(202.0f) - resourceCountWidth, rowY, resourceFont, textColor);
         if (turnDelta != 0)
         {
             const char *deltaLabel = TextFormat("%+d", turnDelta);
             const Color deltaColor = turnDelta > 0 ? (Color){70, 136, 78, 255} : (Color){176, 63, 52, 255};
-            DrawUiText(deltaLabel, panelX + 208.0f, rowY, 15, deltaColor);
+            DrawUiText(deltaLabel, panelX + UiScaled(208.0f), rowY, UiScaledFont(15), deltaColor);
         }
     }
 }
@@ -953,15 +972,15 @@ void DrawOpponentVictoryBar(const struct Map *map)
     int opponentCount = 0;
     const struct PlayerState *player = CurrentPlayerState(map);
     Rectangle bar;
-    const Color panelColor = (Color){244, 236, 217, 245};
-    const Color borderColor = (Color){118, 88, 56, 255};
-    const Color textColor = (Color){54, 39, 29, 255};
-    const Color mutedText = (Color){92, 70, 50, 255};
-    const float slotWidth = 132.0f;
-    const float slotHeight = 34.0f;
-    const float slotGap = 10.0f;
-    const float labelWidth = 132.0f;
-    const float padding = 18.0f;
+    const Color panelColor = UiPanelColor();
+    const Color borderColor = UiPanelBorderColor();
+    const Color textColor = UiTextColor();
+    const Color mutedText = UiMutedTextColor();
+    const float slotWidth = UiScaled(132.0f);
+    const float slotHeight = UiScaled(34.0f);
+    const float slotGap = UiScaled(10.0f);
+    const float labelWidth = UiScaled(132.0f);
+    const float padding = UiScaled(18.0f);
     float slotsWidth = 0.0f;
     float startX = 0.0f;
 
@@ -972,7 +991,8 @@ void DrawOpponentVictoryBar(const struct Map *map)
 
     for (int candidate = PLAYER_RED; candidate <= PLAYER_BLACK; candidate++)
     {
-        if (candidate != player->type)
+        if (candidate != player->type &&
+            gameIsPlayerActive(map, (enum PlayerType)candidate))
         {
             opponents[opponentCount++] = (enum PlayerType)candidate;
         }
@@ -986,50 +1006,50 @@ void DrawOpponentVictoryBar(const struct Map *map)
     slotsWidth = opponentCount * slotWidth + (opponentCount - 1) * slotGap;
     bar = (Rectangle){
         (float)GetScreenWidth() * 0.5f - (labelWidth + slotsWidth + padding * 3.0f) * 0.5f,
-        24.0f,
+        UiScaled(24.0f),
         labelWidth + slotsWidth + padding * 3.0f,
-        56.0f};
+        UiScaled(56.0f)};
     startX = bar.x + bar.width - padding - slotsWidth;
 
-    DrawRectangleRounded((Rectangle){bar.x + 6.0f, bar.y + 8.0f, bar.width, bar.height}, 0.14f, 8, Fade(BLACK, 0.10f));
-    DrawRectangleRounded(bar, 0.14f, 8, panelColor);
-    DrawRectangleLinesEx(bar, 2.0f, borderColor);
-    DrawUiText(loc("Opponents"), bar.x + padding, bar.y + 8.0f, 18, textColor);
-    DrawUiText(loc("Visible VP"), bar.x + padding, bar.y + 30.0f, 13, mutedText);
+    DrawPanelFrame(bar, 0.14f, UiScaled(6.0f), UiScaled(8.0f), 0.10f, panelColor, borderColor);
+    DrawUiText(loc("Opponents"), bar.x + padding, bar.y + UiScaled(8.0f), UiScaledFont(18), textColor);
+    DrawUiText(loc("Visible VP"), bar.x + padding, bar.y + UiScaled(30.0f), UiScaledFont(13), mutedText);
 
     for (int i = 0; i < opponentCount; i++)
     {
         const int notificationCount = uiGetPlayerNotificationCount(opponents[i]);
         const Rectangle slot = {
             startX + i * (slotWidth + slotGap),
-            bar.y + 10.0f,
+            bar.y + UiScaled(10.0f),
             slotWidth,
             slotHeight};
         const char *name = PlayerName(opponents[i]);
         const char *score = TextFormat("%d", gameComputeVisibleVictoryPoints(map, opponents[i]));
-        const int scoreWidth = MeasureUiText(score, 22);
+        const int nameFont = UiScaledFont(16);
+        const int scoreFont = UiScaledFont(22);
+        const int scoreWidth = MeasureUiText(score, scoreFont);
 
-        DrawRectangleRounded(slot, 0.24f, 8, Fade(PlayerColor(opponents[i]), 0.18f));
-        DrawRectangleLinesEx(slot, 1.5f, Fade(PlayerColor(opponents[i]), 0.85f));
-        DrawUiText(name, slot.x + 12.0f, slot.y + 8.0f, 16, textColor);
-        DrawUiText(score, slot.x + slot.width - 14.0f - scoreWidth, slot.y + 5.0f, 22, PlayerColor(opponents[i]));
+        DrawRectangleRounded(slot, 0.24f, 8, Fade(UiReadablePlayerColor(opponents[i]), IsDarkUiTheme() ? 0.26f : 0.18f));
+        DrawRectangleLinesEx(slot, 1.5f, Fade(UiReadablePlayerColor(opponents[i]), 0.85f));
+        DrawUiText(name, slot.x + UiScaled(12.0f), slot.y + UiScaled(8.0f), nameFont, textColor);
+        DrawUiText(score, slot.x + slot.width - UiScaled(14.0f) - scoreWidth, slot.y + UiScaled(5.0f), scoreFont, UiReadablePlayerColor(opponents[i]));
 
         for (int notificationIndex = 0; notificationIndex < notificationCount; notificationIndex++)
         {
             const char *notificationText = uiGetPlayerNotificationText(opponents[i], notificationIndex);
             const enum UiNotificationTone tone = uiGetPlayerNotificationTone(opponents[i], notificationIndex);
             const float dismissProgress = uiGetPlayerNotificationDismissProgress(opponents[i], notificationIndex);
-            const int notificationFont = 16;
+            const int notificationFont = UiScaledFont(16);
             const int notificationWidth = MeasureUiText(notificationText, notificationFont);
-            const float chipWidth = (float)(notificationWidth + 20);
-            const float chipHeight = 22.0f;
+            const float chipWidth = (float)(notificationWidth + UiScaled(20.0f));
+            const float chipHeight = UiScaled(22.0f);
             const float chipX = slot.x + slot.width * 0.5f - chipWidth * 0.5f;
             const float textX = slot.x + slot.width * 0.5f - notificationWidth * 0.5f;
             Color notificationColor = mutedText;
-            Color chipFill = (Color){244, 236, 217, 242};
-            Color chipBorder = (Color){154, 132, 108, 255};
+            Color chipFill = UiPanelHighlightColor();
+            Color chipBorder = UiDisabledBorderColor();
             float alpha = 1.0f;
-            float y = bar.y + bar.height + 10.0f + notificationIndex * 28.0f;
+            float y = bar.y + bar.height + UiScaled(10.0f) + notificationIndex * UiScaled(28.0f);
 
             if (tone == UI_NOTIFICATION_POSITIVE)
             {
@@ -1053,7 +1073,7 @@ void DrawOpponentVictoryBar(const struct Map *map)
             if (uiIsPlayerNotificationDismissing(opponents[i], notificationIndex))
             {
                 alpha = 1.0f - dismissProgress;
-                y -= dismissProgress * 22.0f;
+                y -= dismissProgress * UiScaled(22.0f);
             }
 
             DrawRectangleRounded(
@@ -1068,7 +1088,7 @@ void DrawOpponentVictoryBar(const struct Map *map)
             DrawUiText(
                 notificationText,
                 textX,
-                y + 3.0f,
+                y + UiScaled(3.0f),
                 notificationFont,
                 Fade(notificationColor, alpha));
         }
@@ -1092,8 +1112,8 @@ void DrawTurnBanner(const struct Map *map)
     const char *title = NULL;
     const char *subtitle = "";
     char subtitleLines[2][96] = {{0}};
-    const Color textColor = (Color){54, 39, 29, 255};
-    const Color mutedText = (Color){92, 70, 50, 255};
+    const Color textColor = UiTextColor();
+    const Color mutedText = UiMutedTextColor();
     const float maxPanelWidth = (float)GetScreenWidth() - 20.0f;
     float width = 336.0f + emphasis * 20.0f;
     float height = 74.0f + emphasis * 6.0f;
@@ -1126,10 +1146,10 @@ void DrawTurnBanner(const struct Map *map)
         }
     }
 
-    currentHuman = map->players[bannerPlayer].controlMode != PLAYER_CONTROL_AI;
+    currentHuman = playerControlModeIsHuman(map->players[bannerPlayer].controlMode);
     for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
     {
-        if (map->players[player].controlMode != PLAYER_CONTROL_AI)
+        if (playerControlModeIsHuman(map->players[player].controlMode))
         {
             humanCount++;
         }
@@ -1146,9 +1166,9 @@ void DrawTurnBanner(const struct Map *map)
         return;
     }
 
-    accent = PlayerColor(bannerPlayer);
+    accent = UiReadablePlayerColor(bannerPlayer);
     border = ColorBrightness(accent, -0.36f);
-    panelColor = localTurn ? (Color){249, 242, 225, 252} : (Color){244, 236, 217, 244};
+    panelColor = localTurn ? UiPanelHighlightColor() : UiPanelColor();
 
     eyebrow = localTurn ? loc("Your turn.") : loc("Current Player");
     title = PlayerName(bannerPlayer);
@@ -1414,33 +1434,32 @@ void DrawDevelopmentPurchaseOverlay(const struct Map *map)
     const Rectangle cancelButton = GetDevelopmentPurchaseCancelButtonBounds();
     const float alpha = uiGetDevelopmentPurchaseConfirmOpenAmount();
     const bool canBuyDevelopment = gameCanBuyDevelopment(map);
+    const Color borderColor = UiPanelBorderColor();
+    const Color textColor = UiTextColor();
+    const Color mutedText = UiMutedTextColor();
 
     if (alpha <= 0.01f)
     {
         return;
     }
 
-    DrawRectangleRounded((Rectangle){panel.x + 6.0f, panel.y + 8.0f, panel.width, panel.height}, 0.10f, 8, Fade(BLACK, 0.12f * alpha));
-    DrawRectangleRounded(panel, 0.10f, 8, Fade((Color){247, 240, 226, 255}, alpha));
-    DrawRectangleLinesEx(panel, 2.0f, Fade((Color){118, 88, 56, 255}, alpha));
-    DrawUiText(loc("Buy Development Card?"), panel.x + 18.0f, panel.y + 16.0f, 22, Fade((Color){54, 39, 29, 255}, alpha));
-    DrawUiText(loc("Cost: Wheat + Sheep + Stone"), panel.x + 18.0f, panel.y + 50.0f, 16, Fade((Color){92, 70, 50, 255}, alpha));
-    DrawUiText(TextFormat(loc("%d cards left in deck"), gameGetDevelopmentDeckCount(map)), panel.x + 18.0f, panel.y + 72.0f, 14, Fade((Color){92, 70, 50, 255}, alpha));
+    DrawPanelFrame(panel, 0.10f, 6.0f, 8.0f, 0.12f * alpha, Fade(UiPanelHighlightColor(), alpha), Fade(borderColor, alpha));
+    DrawUiText(loc("Buy Development Card?"), panel.x + 18.0f, panel.y + 16.0f, 22, Fade(textColor, alpha));
+    DrawUiText(loc("Cost: Wheat + Sheep + Stone"), panel.x + 18.0f, panel.y + 50.0f, 16, Fade(mutedText, alpha));
+    DrawUiText(TextFormat(loc("%d cards left in deck"), gameGetDevelopmentDeckCount(map)), panel.x + 18.0f, panel.y + 72.0f, 14, Fade(mutedText, alpha));
 
-    DrawRectangleRounded(confirmButton, 0.18f, 8, Fade(canBuyDevelopment ? (Color){171, 82, 54, 255} : (Color){224, 216, 198, 255}, alpha));
-    DrawRectangleLinesEx(confirmButton, 2.0f, Fade(canBuyDevelopment ? (Color){118, 88, 56, 255} : (Color){154, 132, 108, 255}, alpha));
+    DrawRectangleRounded(confirmButton, 0.18f, 8, Fade(canBuyDevelopment ? (Color){171, 82, 54, 255} : UiDisabledFillColor(), alpha));
+    DrawRectangleLinesEx(confirmButton, 2.0f, Fade(canBuyDevelopment ? borderColor : UiDisabledBorderColor(), alpha));
     {
         const char *confirmLabel = loc("Confirm Buy");
-        const int confirmWidth = MeasureUiText(confirmLabel, 18);
-        DrawUiText(confirmLabel, confirmButton.x + confirmButton.width * 0.5f - confirmWidth * 0.5f, confirmButton.y + 8.0f, 18, Fade(canBuyDevelopment ? RAYWHITE : (Color){132, 112, 91, 255}, alpha));
+        DrawCenteredUiTextFitted(confirmLabel, confirmButton, 18, 13, 0.0f, Fade(canBuyDevelopment ? RAYWHITE : UiDisabledTextColor(), alpha));
     }
 
-    DrawRectangleRounded(cancelButton, 0.18f, 8, Fade((Color){224, 216, 198, 255}, alpha));
-    DrawRectangleLinesEx(cancelButton, 2.0f, Fade((Color){154, 132, 108, 255}, alpha));
+    DrawRectangleRounded(cancelButton, 0.18f, 8, Fade(UiDisabledFillColor(), alpha));
+    DrawRectangleLinesEx(cancelButton, 2.0f, Fade(UiDisabledBorderColor(), alpha));
     {
         const char *cancelLabel = loc("Cancel");
-        const int cancelWidth = MeasureUiText(cancelLabel, 18);
-        DrawUiText(cancelLabel, cancelButton.x + cancelButton.width * 0.5f - cancelWidth * 0.5f, cancelButton.y + 8.0f, 18, Fade((Color){92, 70, 50, 255}, alpha));
+        DrawCenteredUiTextFitted(cancelLabel, cancelButton, 18, 13, 0.0f, Fade(mutedText, alpha));
     }
 }
 
@@ -1458,8 +1477,8 @@ void DrawDevelopmentPlayOverlay(const struct Map *map)
     const float rowWidth = buttonWidth * 5.0f + buttonGap * 4.0f;
     const float rowX = panel.x + panel.width * 0.5f - rowWidth * 0.5f;
     const int detailMaxWidth = (int)(panel.width - 44.0f);
-    const Color textColor = (Color){54, 39, 29, 255};
-    const Color mutedText = (Color){92, 70, 50, 255};
+    const Color textColor = UiTextColor();
+    const Color mutedText = UiMutedTextColor();
 
     if (alpha <= 0.01f || type < DEVELOPMENT_CARD_KNIGHT || type >= DEVELOPMENT_CARD_COUNT)
     {
@@ -1467,9 +1486,7 @@ void DrawDevelopmentPlayOverlay(const struct Map *map)
     }
 
     DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, 0.18f * alpha));
-    DrawRectangleRounded((Rectangle){panel.x + 8.0f, panel.y + 10.0f, panel.width, panel.height}, 0.10f, 8, Fade(BLACK, 0.14f * alpha));
-    DrawRectangleRounded(panel, 0.10f, 8, Fade((Color){247, 240, 226, 252}, alpha));
-    DrawRectangleLinesEx(panel, 2.0f, Fade((Color){118, 88, 56, 255}, alpha));
+    DrawPanelFrame(panel, 0.10f, 8.0f, 10.0f, 0.14f * alpha, Fade(UiPanelHighlightColor(), alpha), Fade(UiPanelBorderColor(), alpha));
     DrawUiText(TextFormat(loc("Use %s?"), DevelopmentCardTitle(type)), panel.x + 22.0f, panel.y + 18.0f, 26, Fade(textColor, alpha));
 
     switch (type)
@@ -1492,20 +1509,19 @@ void DrawDevelopmentPlayOverlay(const struct Map *map)
             const Rectangle secondButton = {rowX + resource * (buttonWidth + buttonGap), panel.y + 200.0f, buttonWidth, buttonHeight};
             const bool firstSelected = gDevelopmentPlayPrimaryResource == (enum ResourceType)resource;
             const bool secondSelected = gDevelopmentPlaySecondaryResource == (enum ResourceType)resource;
-            const Color fill = (Color){236, 228, 208, 255};
+            const Color fill = UiSectionFillColor();
             const Color selectedFill = (Color){182, 141, 97, 255};
-            const Color border = (Color){154, 132, 108, 255};
+            const Color border = UiDisabledBorderColor();
             const Color selectedText = RAYWHITE;
             const char *label = ResourceName((enum ResourceType)resource);
-            const int labelWidth = MeasureUiText(label, 15);
 
             DrawRectangleRounded(firstButton, 0.18f, 8, Fade(firstSelected ? selectedFill : fill, alpha));
             DrawRectangleLinesEx(firstButton, 1.6f, Fade(border, alpha));
-            DrawUiText(label, firstButton.x + firstButton.width * 0.5f - labelWidth * 0.5f, firstButton.y + 9.0f, 15, Fade(firstSelected ? selectedText : textColor, alpha));
+            DrawCenteredUiTextFitted(label, firstButton, 15, 11, 0.0f, Fade(firstSelected ? selectedText : textColor, alpha));
 
             DrawRectangleRounded(secondButton, 0.18f, 8, Fade(secondSelected ? selectedFill : fill, alpha));
             DrawRectangleLinesEx(secondButton, 1.6f, Fade(border, alpha));
-            DrawUiText(label, secondButton.x + secondButton.width * 0.5f - labelWidth * 0.5f, secondButton.y + 9.0f, 15, Fade(secondSelected ? selectedText : textColor, alpha));
+            DrawCenteredUiTextFitted(label, secondButton, 15, 11, 0.0f, Fade(secondSelected ? selectedText : textColor, alpha));
         }
         break;
     case DEVELOPMENT_CARD_MONOPOLY:
@@ -1516,11 +1532,10 @@ void DrawDevelopmentPlayOverlay(const struct Map *map)
             const Rectangle button = {rowX + resource * (buttonWidth + buttonGap), panel.y + 144.0f, buttonWidth, buttonHeight};
             const bool selected = gDevelopmentPlayPrimaryResource == (enum ResourceType)resource;
             const char *label = ResourceName((enum ResourceType)resource);
-            const int labelWidth = MeasureUiText(label, 15);
 
-            DrawRectangleRounded(button, 0.18f, 8, Fade(selected ? (Color){182, 141, 97, 255} : (Color){236, 228, 208, 255}, alpha));
-            DrawRectangleLinesEx(button, 1.6f, Fade((Color){154, 132, 108, 255}, alpha));
-            DrawUiText(label, button.x + button.width * 0.5f - labelWidth * 0.5f, button.y + 9.0f, 15, Fade(selected ? RAYWHITE : textColor, alpha));
+            DrawRectangleRounded(button, 0.18f, 8, Fade(selected ? (Color){182, 141, 97, 255} : UiSectionFillColor(), alpha));
+            DrawRectangleLinesEx(button, 1.6f, Fade(UiDisabledBorderColor(), alpha));
+            DrawCenteredUiTextFitted(label, button, 15, 11, 0.0f, Fade(selected ? RAYWHITE : textColor, alpha));
         }
         break;
     case DEVELOPMENT_CARD_VICTORY_POINT:
@@ -1529,8 +1544,8 @@ void DrawDevelopmentPlayOverlay(const struct Map *map)
         break;
     }
 
-    DrawRectangleRounded(confirmButton, 0.18f, 8, Fade(canPlay ? (Color){171, 82, 54, 255} : (Color){224, 216, 198, 255}, alpha));
-    DrawRectangleLinesEx(confirmButton, 2.0f, Fade(canPlay ? (Color){118, 88, 56, 255} : (Color){154, 132, 108, 255}, alpha));
+    DrawRectangleRounded(confirmButton, 0.18f, 8, Fade(canPlay ? (Color){171, 82, 54, 255} : UiDisabledFillColor(), alpha));
+    DrawRectangleLinesEx(confirmButton, 2.0f, Fade(canPlay ? UiPanelBorderColor() : UiDisabledBorderColor(), alpha));
     {
         const char *confirmLabel = loc("Confirm Use");
         if (type == DEVELOPMENT_CARD_YEAR_OF_PLENTY)
@@ -1545,16 +1560,14 @@ void DrawDevelopmentPlayOverlay(const struct Map *map)
         {
             confirmLabel = loc("Place Roads");
         }
-        const int confirmWidth = MeasureUiText(confirmLabel, 18);
-        DrawUiText(confirmLabel, confirmButton.x + confirmButton.width * 0.5f - confirmWidth * 0.5f, confirmButton.y + 8.0f, 18, Fade(canPlay ? RAYWHITE : (Color){132, 112, 91, 255}, alpha));
+        DrawCenteredUiTextFitted(confirmLabel, confirmButton, 18, 13, 0.0f, Fade(canPlay ? RAYWHITE : UiDisabledTextColor(), alpha));
     }
 
-    DrawRectangleRounded(cancelButton, 0.18f, 8, Fade((Color){224, 216, 198, 255}, alpha));
-    DrawRectangleLinesEx(cancelButton, 2.0f, Fade((Color){154, 132, 108, 255}, alpha));
+    DrawRectangleRounded(cancelButton, 0.18f, 8, Fade(UiDisabledFillColor(), alpha));
+    DrawRectangleLinesEx(cancelButton, 2.0f, Fade(UiDisabledBorderColor(), alpha));
     {
         const char *cancelLabel = loc("Cancel");
-        const int cancelWidth = MeasureUiText(cancelLabel, 18);
-        DrawUiText(cancelLabel, cancelButton.x + cancelButton.width * 0.5f - cancelWidth * 0.5f, cancelButton.y + 8.0f, 18, Fade((Color){92, 70, 50, 255}, alpha));
+        DrawCenteredUiTextFitted(cancelLabel, cancelButton, 18, 13, 0.0f, Fade(mutedText, alpha));
     }
 }
 
@@ -1573,9 +1586,9 @@ void DrawCenteredWarning(void)
         (float)GetScreenHeight() * 0.5f - 162.0f + yOffset,
         panelWidth,
         panelHeight};
-    const Color panelColor = (Color){249, 233, 230, 248};
-    const Color borderColor = (Color){176, 63, 52, 255};
-    const Color textColor = (Color){176, 41, 33, 255};
+    const Color panelColor = IsDarkUiTheme() ? (Color){74, 45, 48, 248} : (Color){249, 233, 230, 248};
+    const Color borderColor = IsDarkUiTheme() ? (Color){214, 105, 96, 255} : (Color){176, 63, 52, 255};
+    const Color textColor = IsDarkUiTheme() ? (Color){247, 204, 198, 255} : (Color){176, 41, 33, 255};
 
     if (message == NULL || message[0] == '\0' || alpha <= 0.01f)
     {
@@ -1600,9 +1613,7 @@ void DrawCenteredWarning(void)
         }
     }
 
-    DrawRectangleRounded((Rectangle){panel.x + 7.0f, panel.y + 9.0f, panel.width, panel.height}, 0.18f, 8, Fade(BLACK, 0.11f * alpha));
-    DrawRectangleRounded(panel, 0.18f, 8, Fade(panelColor, alpha));
-    DrawRectangleLinesEx(panel, 2.2f, Fade(borderColor, alpha));
+    DrawPanelFrame(panel, 0.18f, 7.0f, 9.0f, 0.11f * alpha, Fade(panelColor, alpha), Fade(borderColor, alpha));
 
     for (int i = 0; i < lineCount; i++)
     {
@@ -1632,9 +1643,9 @@ void DrawCenteredStatus(void)
     float panelHeight = 72.0f;
     Rectangle panel = {0};
     Rectangle scaledPanel = {0};
-    Color panelColor = (Color){241, 235, 219, 248};
-    Color borderColor = (Color){118, 88, 56, 255};
-    Color textColor = (Color){54, 39, 29, 255};
+    Color panelColor = UiPanelHighlightColor();
+    Color borderColor = UiPanelBorderColor();
+    Color textColor = UiTextColor();
     Color glowColor = (Color){196, 158, 112, 255};
     Color accentColor = (Color){196, 158, 112, 255};
 
@@ -1667,7 +1678,7 @@ void DrawCenteredStatus(void)
 
     if (accentPlayer >= PLAYER_RED && accentPlayer <= PLAYER_BLACK)
     {
-        accentColor = PlayerColor(accentPlayer);
+        accentColor = UiReadablePlayerColor(accentPlayer);
         borderColor = ColorBrightness(accentColor, -0.28f);
         textColor = accentColor;
         glowColor = accentColor;
@@ -1730,42 +1741,41 @@ void DrawTurnPanel(const struct Map *map)
     const Rectangle endTurnButton = GetEndTurnButtonBounds();
     const struct MatchSession *session = matchSessionGetActive();
     const Color turnAccent = map->currentPlayer >= PLAYER_RED && map->currentPlayer <= PLAYER_BLACK
-                                 ? PlayerColor(map->currentPlayer)
+                                 ? UiReadablePlayerColor(map->currentPlayer)
                                  : (Color){171, 82, 54, 255};
-    const Color panelColor = (Color){244, 236, 217, 245};
+    const Color panelColor = UiPanelColor();
     const Color borderColor = ColorBrightness(turnAccent, -0.34f);
     const Color actionColor = ColorBrightness(turnAccent, -0.08f);
-    const Color mutedButton = (Color){214, 202, 181, 255};
-    const Color textColor = (Color){54, 39, 29, 255};
+    const Color mutedButton = UiButtonFillColor();
+    const Color textColor = UiTextColor();
+    const Color mutedText = UiMutedTextColor();
     const bool humanControlledTurn = matchSessionLocalControlsPlayer(session, map->currentPlayer);
     const bool canEndTurn = gameCanEndTurn(map);
     const bool diceLocked = map->rolledThisTurn || uiIsDiceRolling();
     const bool rollButtonInteractive = humanControlledTurn && !diceLocked;
     const bool endTurnButtonInteractive = humanControlledTurn && canEndTurn;
-    const Rectangle dieA = {panel.x + 20.0f, panel.y + 76.0f, 54.0f, 54.0f};
-    const Rectangle dieB = {panel.x + 84.0f, panel.y + 76.0f, 54.0f, 54.0f};
+    const Rectangle dieA = {panel.x + UiScaled(20.0f), panel.y + UiScaled(76.0f), UiScaled(54.0f), UiScaled(54.0f)};
+    const Rectangle dieB = {panel.x + UiScaled(84.0f), panel.y + UiScaled(76.0f), UiScaled(54.0f), UiScaled(54.0f)};
     const int shownTotal = uiIsDiceRolling() ? (uiGetDisplayedDieA() + uiGetDisplayedDieB()) : map->lastDiceRoll;
     const char *turnTitle = TextFormat("%s: %s", loc("Turn"), PlayerName(map->currentPlayer));
-    const float headerTextY = panel.y + 28.0f;
+    const float headerTextY = panel.y + UiScaled(28.0f);
 
-    DrawRectangleRounded((Rectangle){panel.x + 6.0f, panel.y + 8.0f, panel.width, panel.height}, 0.08f, 8, Fade(BLACK, 0.10f));
-    DrawRectangleRounded(panel, 0.08f, 8, panelColor);
-    DrawRectangleLinesEx(panel, 2.0f, borderColor);
-    DrawRectangleRounded((Rectangle){panel.x + 12.0f, panel.y + 12.0f, panel.width - 24.0f, 8.0f}, 0.4f, 8, Fade(turnAccent, 0.82f));
+    DrawPanelFrame(panel, 0.08f, UiScaled(6.0f), UiScaled(8.0f), 0.10f, panelColor, borderColor);
+    DrawRectangleRounded((Rectangle){panel.x + UiScaled(12.0f), panel.y + UiScaled(12.0f), panel.width - UiScaled(24.0f), UiScaled(8.0f)}, 0.4f, 8, Fade(turnAccent, 0.82f));
 
-    DrawUiText(turnTitle, panel.x + 16.0f, headerTextY, 22, turnAccent);
-    DrawTurnPanelPlaytime(map, panel, (Color){92, 70, 50, 255});
+    DrawUiText(turnTitle, panel.x + UiScaled(16.0f), headerTextY, UiScaledFont(22), turnAccent);
+    DrawTurnPanelPlaytime(map, panel, mutedText);
     if (matchSessionIsNetplay(session))
     {
         const char *statusLabel = NetplayStatusLabel(session);
         const char *errorLabel = matchSessionGetConnectionError(session);
         if (statusLabel[0] != '\0')
         {
-            DrawUiText(statusLabel, panel.x + 16.0f, panel.y + panel.height - 22.0f, 14, (Color){92, 70, 50, 255});
+            DrawUiText(statusLabel, panel.x + UiScaled(16.0f), panel.y + panel.height - UiScaled(22.0f), UiScaledFont(14), mutedText);
         }
         if (errorLabel[0] != '\0')
         {
-            DrawUiText(errorLabel, panel.x + 16.0f, panel.y + panel.height - 40.0f, 13, (Color){146, 54, 46, 255});
+            DrawUiText(errorLabel, panel.x + UiScaled(16.0f), panel.y + panel.height - UiScaled(40.0f), UiScaledFont(13), (Color){146, 54, 46, 255});
         }
     }
     if (gameHasWinner(map))
@@ -1784,15 +1794,15 @@ void DrawTurnPanel(const struct Map *map)
         FormatElapsedDuration(uiGetTotalPlaytimeSeconds(), totalDuration, sizeof(totalDuration));
         snprintf(matchLength, sizeof(matchLength), loc("Match length %s"), matchDuration);
         snprintf(totalPlaytime, sizeof(totalPlaytime), loc("Total playtime %s"), totalDuration);
-        DrawUiText(loc("Game Over"), panel.x + 16.0f, panel.y + 52.0f, 24, (Color){171, 82, 54, 255});
-        DrawUiText(headline, panel.x + 16.0f, panel.y + 88.0f, 28, winner == LocalHumanPlayer(map) ? (Color){54, 130, 72, 255} : PlayerColor(winner));
-        DrawUiText(subheadline, panel.x + 16.0f, panel.y + 124.0f, 18, PlayerColor(winner));
-        DrawUiText(TextFormat(loc("%d victory points"), winnerPoints), panel.x + 16.0f, panel.y + 150.0f, 18, (Color){92, 70, 50, 255});
-        DrawUiText(loc("Board is locked"), panel.x + 16.0f, panel.y + 174.0f, 20, textColor);
-        DrawUiText(loc("Use the overlay buttons"), panel.x + 16.0f, panel.y + 202.0f, 18, (Color){92, 70, 50, 255});
-        DrawUiText(loc("to restart or return"), panel.x + 16.0f, panel.y + 224.0f, 18, (Color){92, 70, 50, 255});
-        DrawUiText(matchLength, panel.x + 16.0f, panel.y + 254.0f, 18, textColor);
-        DrawUiText(totalPlaytime, panel.x + 16.0f, panel.y + 278.0f, 18, (Color){92, 70, 50, 255});
+        DrawUiText(loc("Game Over"), panel.x + UiScaled(16.0f), panel.y + UiScaled(52.0f), UiScaledFont(24), (Color){171, 82, 54, 255});
+        DrawUiText(headline, panel.x + UiScaled(16.0f), panel.y + UiScaled(88.0f), UiScaledFont(28), winner == LocalHumanPlayer(map) ? (Color){54, 130, 72, 255} : UiReadablePlayerColor(winner));
+        DrawUiText(subheadline, panel.x + UiScaled(16.0f), panel.y + UiScaled(124.0f), UiScaledFont(18), UiReadablePlayerColor(winner));
+        DrawUiText(TextFormat(loc("%d victory points"), winnerPoints), panel.x + UiScaled(16.0f), panel.y + UiScaled(150.0f), UiScaledFont(18), mutedText);
+        DrawUiText(loc("Board is locked"), panel.x + UiScaled(16.0f), panel.y + UiScaled(174.0f), UiScaledFont(20), textColor);
+        DrawUiText(loc("Use the overlay buttons"), panel.x + UiScaled(16.0f), panel.y + UiScaled(202.0f), UiScaledFont(18), mutedText);
+        DrawUiText(loc("to restart or return"), panel.x + UiScaled(16.0f), panel.y + UiScaled(224.0f), UiScaledFont(18), mutedText);
+        DrawUiText(matchLength, panel.x + UiScaled(16.0f), panel.y + UiScaled(254.0f), UiScaledFont(18), textColor);
+        DrawUiText(totalPlaytime, panel.x + UiScaled(16.0f), panel.y + UiScaled(278.0f), UiScaledFont(18), mutedText);
         UpdateTurnButtonAnimation(&gRollDiceButtonAnimation, rollDiceButton, false);
         UpdateTurnButtonAnimation(&gEndTurnButtonAnimation, endTurnButton, false);
         return;
@@ -1802,9 +1812,9 @@ void DrawTurnPanel(const struct Map *map)
     {
         UpdateTurnButtonAnimation(&gRollDiceButtonAnimation, rollDiceButton, false);
         UpdateTurnButtonAnimation(&gEndTurnButtonAnimation, endTurnButton, false);
-        DrawUiText(loc("Setup Phase"), panel.x + 16.0f, panel.y + 48.0f, 18, (Color){92, 70, 50, 255});
-        DrawUiText(map->setupNeedsRoad ? loc("Place 1 road") : loc("Place 1 settlement"), panel.x + 16.0f, panel.y + 76.0f, 24, textColor);
-        DrawUiText(TextFormat(loc("Round %d / 8"), map->setupStep + 1), panel.x + 16.0f, panel.y + 110.0f, 18, (Color){92, 70, 50, 255});
+        DrawUiText(loc("Setup Phase"), panel.x + UiScaled(16.0f), panel.y + UiScaled(48.0f), UiScaledFont(18), mutedText);
+        DrawUiText(map->setupNeedsRoad ? loc("Place 1 road") : loc("Place 1 settlement"), panel.x + UiScaled(16.0f), panel.y + UiScaled(76.0f), UiScaledFont(24), textColor);
+        DrawUiText(TextFormat(loc("Round %d / 8"), map->setupStep + 1), panel.x + UiScaled(16.0f), panel.y + UiScaled(110.0f), UiScaledFont(18), mutedText);
         return;
     }
 
@@ -1818,27 +1828,27 @@ void DrawTurnPanel(const struct Map *map)
                                discardPlayer <= PLAYER_BLACK &&
                                map->players[discardPlayer].controlMode == PLAYER_CONTROL_AI;
         const bool revealDiscard = gDiscardRevealPlayer == discardPlayer;
-        DrawUiText(loc("Dice"), panel.x + 16.0f, panel.y + 48.0f, 18, (Color){92, 70, 50, 255});
+        DrawUiText(loc("Dice"), panel.x + UiScaled(16.0f), panel.y + UiScaled(48.0f), UiScaledFont(18), mutedText);
         DrawDie(dieA, uiGetDisplayedDieA(), uiIsDiceRolling() ? -8.0f : -2.0f, 1.0f);
         DrawDie(dieB, uiGetDisplayedDieB(), uiIsDiceRolling() ? 7.0f : 2.0f, 1.0f);
-        DrawUiText(shownTotal > 0 ? TextFormat("%d", shownTotal) : "-", panel.x + 178.0f, panel.y + 72.0f, 30, textColor);
+        DrawUiText(shownTotal > 0 ? TextFormat("%d", shownTotal) : "-", panel.x + UiScaled(178.0f), panel.y + UiScaled(72.0f), UiScaledFont(30), textColor);
         if (uiIsDiceRolling())
         {
-            DrawUiText(loc("Rolling..."), panel.x + 148.0f, panel.y + 106.0f, 16, (Color){92, 70, 50, 255});
+            DrawUiText(loc("Rolling..."), panel.x + UiScaled(148.0f), panel.y + UiScaled(106.0f), UiScaledFont(16), mutedText);
         }
-        DrawUiText(loc("Discard Cards"), panel.x + 16.0f, panel.y + 148.0f, 24, (Color){171, 82, 54, 255});
+        DrawUiText(loc("Discard Cards"), panel.x + UiScaled(16.0f), panel.y + UiScaled(148.0f), UiScaledFont(24), (Color){171, 82, 54, 255});
         if (aiDiscard)
         {
-            DrawUiText(loc("Waiting for AI discard"), panel.x + 16.0f, panel.y + 178.0f, 18, (Color){92, 70, 50, 255});
+            DrawUiText(loc("Waiting for AI discard"), panel.x + UiScaled(16.0f), panel.y + UiScaled(178.0f), UiScaledFont(18), mutedText);
         }
         else if (!revealDiscard)
         {
-            DrawUiText(TextFormat(loc("%s is up next"), PlayerName(discardPlayer)), panel.x + 16.0f, panel.y + 178.0f, 18, (Color){92, 70, 50, 255});
-            DrawUiText(loc("Pass the screen to continue"), panel.x + 16.0f, panel.y + 200.0f, 18, (Color){92, 70, 50, 255});
+            DrawUiText(TextFormat(loc("%s is up next"), PlayerName(discardPlayer)), panel.x + UiScaled(16.0f), panel.y + UiScaled(178.0f), UiScaledFont(18), mutedText);
+            DrawUiText(loc("Pass the screen to continue"), panel.x + UiScaled(16.0f), panel.y + UiScaled(200.0f), UiScaledFont(18), mutedText);
         }
         else
         {
-            DrawUiText(TextFormat(loc("Choose %d cards to discard"), discardAmount), panel.x + 16.0f, panel.y + 178.0f, 18, (Color){92, 70, 50, 255});
+            DrawUiText(TextFormat(loc("Choose %d cards to discard"), discardAmount), panel.x + UiScaled(16.0f), panel.y + UiScaled(178.0f), UiScaledFont(18), mutedText);
         }
         return;
     }
@@ -1847,19 +1857,19 @@ void DrawTurnPanel(const struct Map *map)
     {
         UpdateTurnButtonAnimation(&gRollDiceButtonAnimation, rollDiceButton, false);
         UpdateTurnButtonAnimation(&gEndTurnButtonAnimation, endTurnButton, false);
-        DrawUiText(loc("Dice"), panel.x + 16.0f, panel.y + 48.0f, 18, (Color){92, 70, 50, 255});
+        DrawUiText(loc("Dice"), panel.x + UiScaled(16.0f), panel.y + UiScaled(48.0f), UiScaledFont(18), mutedText);
         DrawDie(dieA, uiGetDisplayedDieA(), uiIsDiceRolling() ? -8.0f : -2.0f, 1.0f);
         DrawDie(dieB, uiGetDisplayedDieB(), uiIsDiceRolling() ? 7.0f : 2.0f, 1.0f);
-        DrawUiText(shownTotal > 0 ? TextFormat("%d", shownTotal) : "-", panel.x + 178.0f, panel.y + 72.0f, 30, textColor);
+        DrawUiText(shownTotal > 0 ? TextFormat("%d", shownTotal) : "-", panel.x + UiScaled(178.0f), panel.y + UiScaled(72.0f), UiScaledFont(30), textColor);
         if (uiIsDiceRolling())
         {
-            DrawUiText(loc("Rolling..."), panel.x + 148.0f, panel.y + 106.0f, 16, (Color){92, 70, 50, 255});
+            DrawUiText(loc("Rolling..."), panel.x + UiScaled(148.0f), panel.y + UiScaled(106.0f), UiScaledFont(16), mutedText);
         }
-        DrawUiText(loc("Move Thief"), panel.x + 16.0f, panel.y + 148.0f, 24, (Color){171, 82, 54, 255});
-        DrawUiText(loc("Select a land tile"), panel.x + 16.0f, panel.y + 178.0f, 18, (Color){92, 70, 50, 255});
-        DrawUiText(loc("before ending turn"), panel.x + 16.0f, panel.y + 200.0f, 18, (Color){92, 70, 50, 255});
-        DrawTurnActionButton(rollDiceButton, loc("Roll Dice (Enter)"), 22, mutedButton, borderColor, (Color){108, 86, 67, 255}, actionColor, &gRollDiceButtonAnimation);
-        DrawTurnActionButton(endTurnButton, loc("End Turn"), 22, (Color){228, 220, 202, 255}, (Color){154, 132, 108, 255}, (Color){132, 112, 91, 255}, mutedButton, &gEndTurnButtonAnimation);
+        DrawUiText(loc("Move Thief"), panel.x + UiScaled(16.0f), panel.y + UiScaled(148.0f), UiScaledFont(24), (Color){171, 82, 54, 255});
+        DrawUiText(loc("Select a land tile"), panel.x + UiScaled(16.0f), panel.y + UiScaled(178.0f), UiScaledFont(18), mutedText);
+        DrawUiText(loc("before ending turn"), panel.x + UiScaled(16.0f), panel.y + UiScaled(200.0f), UiScaledFont(18), mutedText);
+        DrawTurnActionButton(rollDiceButton, loc("Roll Dice (Enter)"), 22, mutedButton, borderColor, UiDisabledTextColor(), actionColor, &gRollDiceButtonAnimation);
+        DrawTurnActionButton(endTurnButton, loc("End Turn"), 22, UiDisabledFillColor(), UiDisabledBorderColor(), UiDisabledTextColor(), mutedButton, &gEndTurnButtonAnimation);
         return;
     }
 
@@ -1867,41 +1877,41 @@ void DrawTurnPanel(const struct Map *map)
     {
         UpdateTurnButtonAnimation(&gRollDiceButtonAnimation, rollDiceButton, false);
         UpdateTurnButtonAnimation(&gEndTurnButtonAnimation, endTurnButton, false);
-        DrawUiText(loc("Dice"), panel.x + 16.0f, panel.y + 48.0f, 18, (Color){92, 70, 50, 255});
+        DrawUiText(loc("Dice"), panel.x + UiScaled(16.0f), panel.y + UiScaled(48.0f), UiScaledFont(18), mutedText);
         DrawDie(dieA, uiGetDisplayedDieA(), uiIsDiceRolling() ? -8.0f : -2.0f, 1.0f);
         DrawDie(dieB, uiGetDisplayedDieB(), uiIsDiceRolling() ? 7.0f : 2.0f, 1.0f);
-        DrawUiText(shownTotal > 0 ? TextFormat("%d", shownTotal) : "-", panel.x + 178.0f, panel.y + 72.0f, 30, textColor);
+        DrawUiText(shownTotal > 0 ? TextFormat("%d", shownTotal) : "-", panel.x + UiScaled(178.0f), panel.y + UiScaled(72.0f), UiScaledFont(30), textColor);
         if (uiIsDiceRolling())
         {
-            DrawUiText(loc("Rolling..."), panel.x + 148.0f, panel.y + 106.0f, 16, (Color){92, 70, 50, 255});
+            DrawUiText(loc("Rolling..."), panel.x + UiScaled(148.0f), panel.y + UiScaled(106.0f), UiScaledFont(16), mutedText);
         }
-        DrawUiText(loc("Steal Resource"), panel.x + 16.0f, panel.y + 148.0f, 24, (Color){171, 82, 54, 255});
+        DrawUiText(loc("Steal Resource"), panel.x + UiScaled(16.0f), panel.y + UiScaled(148.0f), UiScaledFont(24), (Color){171, 82, 54, 255});
         if (map->players[map->currentPlayer].controlMode == PLAYER_CONTROL_AI)
         {
-            DrawUiText(TextFormat(loc("%s is choosing"), PlayerName(map->currentPlayer)), panel.x + 16.0f, panel.y + 178.0f, 18, (Color){92, 70, 50, 255});
-            DrawUiText(loc("an enemy"), panel.x + 16.0f, panel.y + 200.0f, 18, (Color){92, 70, 50, 255});
+            DrawUiText(TextFormat(loc("%s is choosing"), PlayerName(map->currentPlayer)), panel.x + UiScaled(16.0f), panel.y + UiScaled(178.0f), UiScaledFont(18), mutedText);
+            DrawUiText(loc("an enemy"), panel.x + UiScaled(16.0f), panel.y + UiScaled(200.0f), UiScaledFont(18), mutedText);
         }
         else
         {
-            DrawUiText(loc("Choose one adjacent"), panel.x + 16.0f, panel.y + 178.0f, 18, (Color){92, 70, 50, 255});
-            DrawUiText(loc("player to rob"), panel.x + 16.0f, panel.y + 200.0f, 18, (Color){92, 70, 50, 255});
+            DrawUiText(loc("Choose one adjacent"), panel.x + UiScaled(16.0f), panel.y + UiScaled(178.0f), UiScaledFont(18), mutedText);
+            DrawUiText(loc("player to rob"), panel.x + UiScaled(16.0f), panel.y + UiScaled(200.0f), UiScaledFont(18), mutedText);
         }
         return;
     }
 
-    DrawUiText(loc("Dice"), panel.x + 16.0f, panel.y + 48.0f, 18, (Color){92, 70, 50, 255});
+    DrawUiText(loc("Dice"), panel.x + UiScaled(16.0f), panel.y + UiScaled(48.0f), UiScaledFont(18), mutedText);
     DrawDie(dieA, uiGetDisplayedDieA(), uiIsDiceRolling() ? -8.0f : -2.0f, 1.0f);
     DrawDie(dieB, uiGetDisplayedDieB(), uiIsDiceRolling() ? 7.0f : 2.0f, 1.0f);
-    DrawUiText(shownTotal > 0 ? TextFormat("%d", shownTotal) : "-", panel.x + 178.0f, panel.y + 72.0f, 30, textColor);
+    DrawUiText(shownTotal > 0 ? TextFormat("%d", shownTotal) : "-", panel.x + UiScaled(178.0f), panel.y + UiScaled(72.0f), UiScaledFont(30), textColor);
     if (uiIsDiceRolling())
     {
-        DrawUiText(loc("Rolling..."), panel.x + 148.0f, panel.y + 106.0f, 16, (Color){92, 70, 50, 255});
+        DrawUiText(loc("Rolling..."), panel.x + UiScaled(148.0f), panel.y + UiScaled(106.0f), UiScaledFont(16), mutedText);
     }
 
     UpdateTurnButtonAnimation(&gRollDiceButtonAnimation, rollDiceButton, rollButtonInteractive);
     UpdateTurnButtonAnimation(&gEndTurnButtonAnimation, endTurnButton, endTurnButtonInteractive);
-    DrawTurnActionButton(rollDiceButton, loc("Roll Dice (Enter)"), 22, rollButtonInteractive ? actionColor : mutedButton, rollButtonInteractive ? ColorBrightness(actionColor, -0.18f) : borderColor, rollButtonInteractive ? RAYWHITE : (Color){108, 86, 67, 255}, actionColor, &gRollDiceButtonAnimation);
-    DrawTurnActionButton(endTurnButton, loc("End Turn"), 22, endTurnButtonInteractive ? mutedButton : (Color){228, 220, 202, 255}, endTurnButtonInteractive ? borderColor : (Color){154, 132, 108, 255}, endTurnButtonInteractive ? textColor : (Color){132, 112, 91, 255}, (Color){182, 141, 97, 255}, &gEndTurnButtonAnimation);
+    DrawTurnActionButton(rollDiceButton, loc("Roll Dice (Enter)"), 22, rollButtonInteractive ? actionColor : mutedButton, rollButtonInteractive ? ColorBrightness(actionColor, -0.18f) : borderColor, rollButtonInteractive ? RAYWHITE : UiDisabledTextColor(), actionColor, &gRollDiceButtonAnimation);
+    DrawTurnActionButton(endTurnButton, loc("End Turn"), 22, endTurnButtonInteractive ? mutedButton : UiDisabledFillColor(), endTurnButtonInteractive ? borderColor : UiDisabledBorderColor(), endTurnButtonInteractive ? textColor : UiDisabledTextColor(), (Color){182, 141, 97, 255}, &gEndTurnButtonAnimation);
 }
 
 void DrawVictoryOverlay(const struct Map *map)
@@ -1916,10 +1926,10 @@ void DrawVictoryOverlay(const struct Map *map)
     const Rectangle panel = GetVictoryOverlayBounds();
     const Rectangle restartButton = GetVictoryOverlayRestartButtonBounds();
     const Rectangle menuButton = GetVictoryOverlayMenuButtonBounds();
-    const Color borderColor = (Color){118, 88, 56, 255};
-    const Color panelColor = (Color){244, 236, 217, 252};
-    const Color textColor = (Color){54, 39, 29, 255};
-    const Color mutedText = (Color){92, 70, 50, 255};
+    const Color borderColor = UiPanelBorderColor();
+    const Color panelColor = UiPanelColor();
+    const Color textColor = UiTextColor();
+    const Color mutedText = UiMutedTextColor();
     char headline[64];
     char winnerLabel[64];
     char subtitle[48];
@@ -1943,17 +1953,12 @@ void DrawVictoryOverlay(const struct Map *map)
     const int hintWidth = MeasureUiText(hint, 18);
     const char *restartLabel = loc("Restart Game");
     const char *menuLabel = loc("Back to Menu");
-    const int restartWidth = MeasureUiText(restartLabel, 19);
-    const int menuWidth = MeasureUiText(menuLabel, 19);
-
     DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, 0.36f));
-    DrawRectangleRounded((Rectangle){panel.x + 8.0f, panel.y + 10.0f, panel.width, panel.height}, 0.08f, 8, Fade(BLACK, 0.14f));
-    DrawRectangleRounded(panel, 0.08f, 8, panelColor);
-    DrawRectangleLinesEx(panel, 2.0f, borderColor);
+    DrawPanelFrame(panel, 0.08f, 8.0f, 10.0f, 0.14f, panelColor, borderColor);
 
     DrawUiText(loc("Game Over"), panel.x + panel.width * 0.5f - MeasureUiText(loc("Game Over"), 20) * 0.5f, panel.y + 20.0f, 20, mutedText);
     DrawUiText(headline, panel.x + panel.width * 0.5f - headlineWidth * 0.5f, panel.y + 54.0f, 34, winner == LocalHumanPlayer(map) ? (Color){54, 130, 72, 255} : (Color){171, 82, 54, 255});
-    DrawUiText(winnerLabel, panel.x + panel.width * 0.5f - winnerWidth * 0.5f, panel.y + 98.0f, 24, PlayerColor(winner));
+    DrawUiText(winnerLabel, panel.x + panel.width * 0.5f - winnerWidth * 0.5f, panel.y + 98.0f, 24, UiReadablePlayerColor(winner));
     DrawUiText(subtitle, panel.x + panel.width * 0.5f - subtitleWidth * 0.5f, panel.y + 130.0f, 18, textColor);
     DrawUiText(matchTimeLine, panel.x + panel.width * 0.5f - matchTimeWidth * 0.5f, panel.y + 156.0f, 18, textColor);
     DrawUiText(totalTimeLine, panel.x + panel.width * 0.5f - totalTimeWidth * 0.5f, panel.y + 180.0f, 18, mutedText);
@@ -1962,12 +1967,172 @@ void DrawVictoryOverlay(const struct Map *map)
     DrawRectangleRounded((Rectangle){restartButton.x + 4.0f, restartButton.y + 6.0f, restartButton.width, restartButton.height}, 0.22f, 8, Fade(BLACK, 0.10f));
     DrawRectangleRounded(restartButton, 0.22f, 8, (Color){171, 82, 54, 255});
     DrawRectangleLinesEx(restartButton, 2.0f, (Color){120, 58, 37, 255});
-    DrawUiText(restartLabel, restartButton.x + restartButton.width * 0.5f - restartWidth * 0.5f, restartButton.y + 11.0f, 19, RAYWHITE);
+    DrawCenteredUiTextFitted(restartLabel, restartButton, 19, 14, 0.0f, RAYWHITE);
 
     DrawRectangleRounded((Rectangle){menuButton.x + 4.0f, menuButton.y + 6.0f, menuButton.width, menuButton.height}, 0.22f, 8, Fade(BLACK, 0.10f));
-    DrawRectangleRounded(menuButton, 0.22f, 8, (Color){222, 212, 193, 255});
+    DrawRectangleRounded(menuButton, 0.22f, 8, UiSectionFillColor());
     DrawRectangleLinesEx(menuButton, 2.0f, borderColor);
-    DrawUiText(menuLabel, menuButton.x + menuButton.width * 0.5f - menuWidth * 0.5f, menuButton.y + 11.0f, 19, textColor);
+    DrawCenteredUiTextFitted(menuLabel, menuButton, 19, 14, 0.0f, textColor);
+}
+
+static bool IsDarkUiTheme(void)
+{
+    return uiGetTheme() == UI_THEME_DARK;
+}
+
+static float GameplayUiScale(void)
+{
+    const float widthScale = (float)GetScreenWidth() / 1280.0f;
+    const float heightScale = (float)GetScreenHeight() / 720.0f;
+    const float rawScale = widthScale < heightScale ? widthScale : heightScale;
+    float scale = 1.0f;
+
+    if (rawScale > 1.0f)
+    {
+        scale += (rawScale - 1.0f) * 0.55f;
+    }
+
+    if (scale > 1.36f)
+    {
+        scale = 1.36f;
+    }
+
+    return scale;
+}
+
+static float UiScaled(float value)
+{
+    return roundf(value * GameplayUiScale());
+}
+
+static int UiScaledFont(int fontSize)
+{
+    return (int)roundf((float)fontSize * GameplayUiScale());
+}
+
+static Color UiPanelColor(void)
+{
+    return IsDarkUiTheme() ? (Color){38, 47, 60, 248} : (Color){244, 236, 217, 250};
+}
+
+static Color UiPanelHighlightColor(void)
+{
+    return IsDarkUiTheme() ? (Color){47, 58, 73, 252} : (Color){247, 240, 226, 252};
+}
+
+static Color UiSectionFillColor(void)
+{
+    return IsDarkUiTheme() ? (Color){59, 72, 90, 255} : (Color){236, 228, 208, 255};
+}
+
+static Color UiButtonFillColor(void)
+{
+    return IsDarkUiTheme() ? (Color){66, 80, 99, 255} : (Color){214, 202, 181, 255};
+}
+
+static Color UiTrackFillColor(void)
+{
+    return IsDarkUiTheme() ? (Color){48, 60, 76, 255} : (Color){224, 216, 198, 255};
+}
+
+static Color UiPanelBorderColor(void)
+{
+    return IsDarkUiTheme() ? (Color){132, 151, 176, 255} : (Color){118, 88, 56, 255};
+}
+
+static Color UiTextColor(void)
+{
+    return IsDarkUiTheme() ? (Color){236, 241, 246, 255} : (Color){54, 39, 29, 255};
+}
+
+static Color UiMutedTextColor(void)
+{
+    return IsDarkUiTheme() ? (Color){194, 205, 216, 255} : (Color){92, 70, 50, 255};
+}
+
+static Color UiDisabledFillColor(void)
+{
+    return IsDarkUiTheme() ? (Color){49, 60, 74, 255} : (Color){224, 216, 198, 255};
+}
+
+static Color UiDisabledBorderColor(void)
+{
+    return IsDarkUiTheme() ? (Color){102, 118, 138, 255} : (Color){154, 132, 108, 255};
+}
+
+static Color UiDisabledTextColor(void)
+{
+    return IsDarkUiTheme() ? (Color){146, 158, 172, 255} : (Color){132, 112, 91, 255};
+}
+
+static Color UiCloseButtonFillColor(void)
+{
+    return IsDarkUiTheme() ? (Color){70, 82, 100, 255} : (Color){224, 216, 198, 255};
+}
+
+static Color UiReadableAccent(Color color)
+{
+    if (!IsDarkUiTheme())
+    {
+        return color;
+    }
+
+    if (color.r < 80 && color.g < 80 && color.b < 80)
+    {
+        return (Color){170, 179, 190, color.a};
+    }
+
+    return ColorBrightness(color, 0.08f);
+}
+
+static Color UiReadablePlayerColor(enum PlayerType player)
+{
+    return UiReadableAccent(PlayerColor(player));
+}
+
+static void DrawPanelFrame(Rectangle panel, float roundness, float shadowOffsetX, float shadowOffsetY, float shadowAlpha, Color fill, Color border)
+{
+    DrawRectangleRounded(
+        (Rectangle){panel.x + shadowOffsetX, panel.y + shadowOffsetY, panel.width, panel.height},
+        roundness,
+        8,
+        Fade(BLACK, shadowAlpha));
+    DrawRectangleRounded(panel, roundness, 8, fill);
+    DrawRectangleLinesEx(panel, 2.0f, border);
+}
+
+static void DrawCenteredUiTextFitted(const char *text, Rectangle bounds, int preferredFontSize, int minFontSize, float yOffset, Color color)
+{
+    const int scaledPreferredFontSize = UiScaledFont(preferredFontSize);
+    const int scaledMinFontSize = UiScaledFont(minFontSize);
+    const int fontSize = FitUiTextFontSize(text, scaledPreferredFontSize, scaledMinFontSize, (int)bounds.width - (int)UiScaled(18.0f));
+    const int textWidth = MeasureUiText(text, fontSize);
+    DrawUiText(
+        text,
+        bounds.x + bounds.width * 0.5f - textWidth * 0.5f,
+        bounds.y + bounds.height * 0.5f - (float)fontSize * 0.48f + yOffset,
+        fontSize,
+        color);
+}
+
+static void DrawLeftUiTextFitted(const char *text, Rectangle bounds, float padding, int preferredFontSize, int minFontSize, float yOffset, Color color)
+{
+    const int scaledPreferredFontSize = UiScaledFont(preferredFontSize);
+    const int scaledMinFontSize = UiScaledFont(minFontSize);
+    const int fontSize = FitUiTextFontSize(text, scaledPreferredFontSize, scaledMinFontSize, (int)(bounds.width - padding * 2.0f));
+    DrawUiText(
+        text,
+        bounds.x + padding,
+        bounds.y + bounds.height * 0.5f - (float)fontSize * 0.48f + yOffset,
+        fontSize,
+        color);
+}
+
+static void DrawModalCloseButton(Rectangle bounds, float alpha, Color fill, Color border, Color textColor)
+{
+    DrawRectangleRounded(bounds, 0.22f, 6, Fade(fill, alpha));
+    DrawRectangleLinesEx(bounds, 1.5f, Fade(border, alpha));
+    DrawCenteredUiTextFitted("X", bounds, 20, 18, 0.0f, Fade(textColor, alpha));
 }
 
 static float EaseAnimationValue(float current, float target, float speed)
@@ -2008,14 +2173,17 @@ static void DrawTurnActionButton(Rectangle bounds, const char *label, int fontSi
     const float pulseWave = 0.5f + 0.5f * sinf((float)GetTime() * 5.4f);
     const float pulseAmount = activeAmount * (0.25f + 0.75f * pulseWave);
     const float scale = 1.0f + hoverAmount * 0.028f + pulseAmount * 0.024f - pressAmount * 0.015f;
-    const float lift = hoverAmount * 3.0f + pulseAmount * 2.2f - pressAmount * 1.6f;
+    const float lift = hoverAmount * UiScaled(3.0f) + pulseAmount * UiScaled(2.2f) - pressAmount * UiScaled(1.6f);
     const Rectangle body = ScaleRectangleFromCenter((Rectangle){bounds.x, bounds.y - lift, bounds.width, bounds.height}, scale);
-    const Rectangle shadow = {body.x + 4.0f, body.y + 6.0f + hoverAmount * 1.4f, body.width, body.height};
-    const float glowExpand = 3.0f + 4.0f * pulseAmount;
+    const Rectangle shadow = {body.x + UiScaled(4.0f), body.y + UiScaled(6.0f) + hoverAmount * UiScaled(1.4f), body.width, body.height};
+    const float glowExpand = UiScaled(3.0f) + UiScaled(4.0f) * pulseAmount;
     const Rectangle glow = {body.x - glowExpand, body.y - glowExpand, body.width + glowExpand * 2.0f, body.height + glowExpand * 2.0f};
-    const int labelWidth = MeasureUiText(label, fontSize);
+    const int scaledFontSize = UiScaledFont(fontSize);
+    const int minFontSize = UiScaledFont(fontSize - 5 > 13 ? fontSize - 5 : 13);
+    const int fittedFontSize = FitUiTextFontSize(label, scaledFontSize, minFontSize, (int)body.width - (int)UiScaled(18.0f));
+    const int labelWidth = MeasureUiText(label, fittedFontSize);
     const float labelX = body.x + body.width * 0.5f - labelWidth * 0.5f;
-    const float labelY = body.y + body.height * 0.5f - (float)fontSize * 0.48f + pressAmount * 1.0f;
+    const float labelY = body.y + body.height * 0.5f - (float)fittedFontSize * 0.48f + pressAmount * UiScaled(1.0f);
 
     DrawRectangleRounded(shadow, 0.22f, 8, Fade(BLACK, 0.10f + hoverAmount * 0.08f - pressAmount * 0.03f));
     if (hoverAmount > 0.01f || pressAmount > 0.01f || pulseAmount > 0.01f)
@@ -2024,7 +2192,7 @@ static void DrawTurnActionButton(Rectangle bounds, const char *label, int fontSi
     }
     DrawRectangleRounded(body, 0.18f, 8, ColorBrightness(fillColor, hoverAmount * 0.10f + pulseAmount * 0.07f - pressAmount * 0.08f));
     DrawRectangleLinesEx(body, 2.0f, ColorBrightness(borderColor, hoverAmount * 0.10f + pulseAmount * 0.12f));
-    DrawUiText(label, labelX, labelY, fontSize, textColor);
+    DrawUiText(label, labelX, labelY, fittedFontSize, textColor);
 }
 
 /* Bounds helpers are grouped separately because both rendering and input depend on them. */

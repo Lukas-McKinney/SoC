@@ -319,6 +319,7 @@ int main(int argc, char **argv)
                 uiBeginMatch();
             }
             updateUiState(&session.map);
+            gameHandleInactivityTimeout(&session.map);
 
             const bool aiControlledDecision = matchSessionShouldRunAi(&session) && aiControlsActiveDecision(&session.map);
             const bool localControlledDecision = matchSessionLocalCanActOnCurrentDecision(&session);
@@ -392,7 +393,13 @@ int main(int argc, char **argv)
                     for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
                     {
                         const enum MatchSeatAuthority authority = matchSessionGetSeatAuthority(&session, (enum PlayerType)player);
-                        if (authority == MATCH_SEAT_AI)
+                        const enum PlayerControlMode controlMode = session.map.players[player].controlMode;
+                        if (!playerControlModeIsActive(controlMode))
+                        {
+                            session.map.players[player].controlMode = PLAYER_CONTROL_DISABLED;
+                            session.map.players[player].aiDifficulty = AI_DIFFICULTY_EASY;
+                        }
+                        else if (authority == MATCH_SEAT_AI || playerControlModeIsAi(controlMode))
                         {
                             session.map.players[player].controlMode = PLAYER_CONTROL_AI;
                             session.map.players[player].aiDifficulty = aiDifficulty;
@@ -468,7 +475,10 @@ int main(int argc, char **argv)
             DrawMap(&session.map);
         }
 
-        DrawProfileBadge();
+        if (appScreen != APP_SCREEN_GAME)
+        {
+            DrawProfileBadge();
+        }
 
         EndDrawing();
     }
@@ -958,7 +968,12 @@ static const char *NetplayLobbySeatRoleLabel(const struct MatchSession *session,
         return "";
     }
 
-    if (session->map.players[player].controlMode == PLAYER_CONTROL_AI)
+    if (!playerControlModeIsActive(session->map.players[player].controlMode))
+    {
+        return loc("Closed");
+    }
+
+    if (playerControlModeIsAi(session->map.players[player].controlMode))
     {
         return loc("AI");
     }
@@ -1052,12 +1067,12 @@ static void DrawNetplayLobby(const struct MatchSession *session)
     DrawRectangleLinesEx(panel, 2.0f, borderColor);
 
     DrawUiText(loc("Lobby"), panel.x + 26.0f, panel.y + 24.0f, 30, textColor);
-    DrawUiText(loc("Private multiplayer supports up to 4 humans and AI."), panel.x + 26.0f, panel.y + 60.0f, 17, bodyColor);
+    DrawUiText(loc("Private multiplayer supports 2 to 4 active seats."), panel.x + 26.0f, panel.y + 60.0f, 17, bodyColor);
     DrawUiText(NetplayLobbyStatusLabel(session), panel.x + 26.0f, panel.y + 86.0f, 18, accentColor);
     snprintf(profileLine, sizeof(profileLine), loc("Profile: %s"), uiGetProfileName());
     DrawUiText(profileLine, panel.x + 26.0f, panel.y + 124.0f, 15, bodyColor);
     DrawUiText(matchSessionIsHost(session)
-                   ? loc("Click a seat to toggle Human or AI.")
+                   ? loc("Click a seat to cycle Remote, AI, or Closed.")
                    : loc("Waiting for host to start the match."),
                panel.x + 26.0f,
                panel.y + 108.0f,
@@ -1091,16 +1106,28 @@ static void DrawNetplayLobby(const struct MatchSession *session)
             startY + row * (cardHeight + 18.0f),
             cardWidth,
             cardHeight};
-        const bool aiSeat = session != NULL && session->map.players[player].controlMode == PLAYER_CONTROL_AI;
+        const bool disabledSeat = session != NULL && !playerControlModeIsActive(session->map.players[player].controlMode);
+        const bool aiSeat = session != NULL && playerControlModeIsAi(session->map.players[player].controlMode);
         const Color playerColor = PlayerColor((enum PlayerType)player);
-        const Color fillColor = aiSeat
+        const Color fillColor = disabledSeat
+                                    ? Fade(sectionFill, darkTheme ? 0.62f : 0.84f)
+                                    : aiSeat
                                     ? sectionFill
                                     : Fade(playerColor, darkTheme ? 0.18f : 0.14f);
-        const Color border = aiSeat ? Fade(borderColor, 0.95f) : Fade(playerColor, 0.95f);
+        const Color border = disabledSeat
+                                 ? Fade(borderColor, 0.72f)
+                                 : aiSeat ? Fade(borderColor, 0.95f) : Fade(playerColor, 0.95f);
         const char *roleLabel = NetplayLobbySeatRoleLabel(session, (enum PlayerType)player);
         const Rectangle badge = {card.x + card.width - 112.0f, card.y + 14.0f, 92.0f, 24.0f};
+        const Color nameColor = disabledSeat ? Fade(textColor, 0.72f) : playerColor;
+        const Color detailColor = disabledSeat ? Fade(bodyColor, 0.85f) : textColor;
+        const Color badgeTextColor = disabledSeat ? Fade(textColor, 0.78f) : (aiSeat ? textColor : RAYWHITE);
 
-        if (aiSeat)
+        if (disabledSeat)
+        {
+            snprintf(detailLine, sizeof(detailLine), "%s", loc("Not in this match"));
+        }
+        else if (aiSeat)
         {
             aiSeatCount++;
             displayedDifficulty = session->map.players[player].aiDifficulty;
@@ -1130,15 +1157,15 @@ static void DrawNetplayLobby(const struct MatchSession *session)
         DrawRectangleRounded(card, 0.18f, 8, fillColor);
         DrawRectangleLinesEx(card, 1.9f, border);
         DrawCircleV((Vector2){card.x + 22.0f, card.y + 24.0f}, 7.0f, playerColor);
-        DrawUiText(locPlayerName((enum PlayerType)player), card.x + 38.0f, card.y + 12.0f, 24, playerColor);
-        DrawRectangleRounded(badge, 0.40f, 8, aiSeat ? sectionFill : Fade(playerColor, 0.92f));
-        DrawRectangleLinesEx(badge, 1.4f, aiSeat ? Fade(borderColor, 0.95f) : Fade(playerColor, 0.98f));
+        DrawUiText(locPlayerName((enum PlayerType)player), card.x + 38.0f, card.y + 12.0f, 24, nameColor);
+        DrawRectangleRounded(badge, 0.40f, 8, disabledSeat ? Fade(sectionFill, 0.80f) : (aiSeat ? sectionFill : Fade(playerColor, 0.92f)));
+        DrawRectangleLinesEx(badge, 1.4f, disabledSeat ? Fade(borderColor, 0.75f) : (aiSeat ? Fade(borderColor, 0.95f) : Fade(playerColor, 0.98f)));
         DrawUiText(roleLabel,
                    badge.x + badge.width * 0.5f - MeasureUiText(roleLabel, 16) * 0.5f,
                    badge.y + 4.0f,
                    16,
-                   aiSeat ? textColor : RAYWHITE);
-        DrawUiText(detailLine, card.x + 18.0f, card.y + 56.0f, 18, textColor);
+                   badgeTextColor);
+        DrawUiText(detailLine, card.x + 18.0f, card.y + 56.0f, 18, detailColor);
     }
 
     snprintf(difficultyLabel,
@@ -1170,7 +1197,7 @@ static void DrawNetplayLobby(const struct MatchSession *session)
     }
     else if (!hostCanStart)
     {
-        DrawUiText(loc("Host can start once the remote player connects."), panel.x + 26.0f, primaryButton.y - 30.0f, 16, bodyColor);
+        DrawUiText(loc("Host can start once a remote seat is connected and at least 2 seats are active."), panel.x + 26.0f, primaryButton.y - 30.0f, 16, bodyColor);
     }
 
     DrawLobbyButton(primaryButton,

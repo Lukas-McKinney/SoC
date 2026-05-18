@@ -51,25 +51,25 @@ void HandleMapInput(struct MatchSession *session)
         buildPanel.width,
         46.0f};
     const Rectangle buildButton = {
-        buildPanel.x + 18.0f,
-        buildPanel.y + 52.0f,
-        166.0f,
-        56.0f};
+        buildPanel.x + 10.0f,
+        buildPanel.y + 50.0f,
+        175.0f,
+        60.0f};
     const Rectangle settlementButton = {
-        buildPanel.x + 204.0f,
-        buildPanel.y + 52.0f,
-        170.0f,
-        56.0f};
+        buildPanel.x + 196.0f,
+        buildPanel.y + 50.0f,
+        175.0f,
+        60.0f};
     const Rectangle cityButton = {
-        buildPanel.x + 18.0f,
-        buildPanel.y + 118.0f,
-        170.0f,
-        56.0f};
+        buildPanel.x + 10.0f,
+        buildPanel.y + 112.0f,
+        175.0f,
+        60.0f};
     const Rectangle devButton = {
-        buildPanel.x + 204.0f,
-        buildPanel.y + 118.0f,
-        170.0f,
-        56.0f};
+        buildPanel.x + 196.0f,
+        buildPanel.y + 112.0f,
+        175.0f,
+        60.0f};
     const Rectangle developmentPurchaseOverlay = GetDevelopmentPurchaseOverlayBounds();
     const Rectangle developmentPurchaseConfirmButton = GetDevelopmentPurchaseConfirmButtonBounds();
     const Rectangle developmentPurchaseCancelButton = GetDevelopmentPurchaseCancelButtonBounds();
@@ -881,7 +881,8 @@ void HandleMapInput(struct MatchSession *session)
         for (int i = 0; i < MAX_PLAYERS; i++)
         {
             enum PlayerType candidate = (enum PlayerType)i;
-            if (candidate == map->currentPlayer)
+            if (candidate == map->currentPlayer ||
+                !gameIsPlayerActive(map, candidate))
             {
                 continue;
             }
@@ -946,7 +947,7 @@ void HandleMapInput(struct MatchSession *session)
         {
             const enum ResourceType give = (enum ResourceType)gPlayerTradeGiveResource;
             const enum ResourceType receive = (enum ResourceType)gPlayerTradeReceiveResource;
-            const bool targetIsAi = map->players[gPlayerTradeTarget].controlMode == PLAYER_CONTROL_AI;
+            const bool targetIsAi = playerControlModeIsAi(map->players[gPlayerTradeTarget].controlMode);
 
             if (targetIsAi)
             {
@@ -1215,21 +1216,21 @@ void DrawRoad(Vector2 center, float radius, int sideIndex, enum PlayerType playe
     const float popScale = 1.0f + popAmount * 0.24f;
     const Vector2 a = Vec2Add(mid, Vec2Scale((Vector2){LerpVec2(edgeA, edgeB, 0.18f).x - mid.x, LerpVec2(edgeA, edgeB, 0.18f).y - mid.y}, popScale));
     const Vector2 b = Vec2Add(mid, Vec2Scale((Vector2){LerpVec2(edgeA, edgeB, 0.82f).x - mid.x, LerpVec2(edgeA, edgeB, 0.82f).y - mid.y}, popScale));
-    const Color availableColor = hovered ? (Color){235, 199, 67, 255} : Fade((Color){248, 227, 161, 255}, 0.82f);
+    const Color availableColor = hovered ? (Color){255, 235, 100, 255} : Fade((Color){248, 227, 161, 255}, 0.82f);
     const Color roadColor = placed ? PlayerColor(player) : availableColor;
-    const float shadowWidth = (hovered ? 13.0f : 12.0f) * popScale;
-    const float bodyWidth = (hovered ? 11.0f : (available ? 10.0f : 9.0f)) * popScale;
-    const float highlightWidth = (hovered ? 3.0f : 2.0f) * popScale;
+    const float shadowWidth = (hovered ? 15.0f : 12.0f) * popScale;
+    const float bodyWidth = (hovered ? 13.0f : (available ? 11.0f : 9.0f)) * popScale;
+    const float highlightWidth = (hovered ? 5.0f : (available ? 3.0f : 2.0f)) * popScale;
 
     if (placed || available || hovered)
     {
-        DrawLineEx(a, b, shadowWidth, Fade(BLACK, placed ? 0.14f : (hovered ? 0.14f : 0.10f)));
+        DrawLineEx(a, b, shadowWidth, Fade(BLACK, placed ? 0.14f : (hovered ? 0.20f : 0.12f)));
     }
 
     DrawLineEx(a, b, bodyWidth, roadColor);
-    if (!placed)
+    if (!placed && (available || hovered))
     {
-        DrawLineEx(a, b, highlightWidth, Fade(RAYWHITE, hovered ? 0.34f : 0.24f));
+        DrawLineEx(a, b, highlightWidth, Fade(RAYWHITE, hovered ? 0.48f : 0.35f));
     }
 }
 
@@ -1248,21 +1249,21 @@ void DrawStructure(Vector2 center, float radius, int cornerIndex, enum PlayerTyp
                                ? 0.78f + 0.22f * backOvershoot + 0.10f * popAmount
                                : (1.0f + popAmount * 0.20f);
     const Vector2 animatedCorner = {corner.x, corner.y - landingLift};
-    const Color previewFill = hovered ? (Color){235, 199, 67, 235} : Fade((Color){248, 227, 161, 255}, 0.84f);
-    const Color fill = available ? previewFill : (hovered ? Fade(PlayerColor(player), 0.60f) : PlayerColor(player));
-    const Color outline = available ? (hovered ? (Color){120, 84, 22, 255} : (Color){143, 116, 47, 255}) : (hovered ? Fade((Color){236, 220, 187, 255}, 0.75f) : (Color){80, 50, 28, 255});
-    const Color roof = hovered ? Fade(ColorBrightness(fill, -0.18f), 0.72f) : ColorBrightness(fill, -0.20f);
-    const Color shadow = Fade(BLACK, available ? (hovered ? 0.14f : 0.10f) : (hovered ? 0.10f : 0.14f));
+    const Color previewFill = hovered ? (Color){255, 235, 100, 245} : Fade((Color){248, 227, 161, 255}, 0.92f);
+    const Color fill = available ? previewFill : (hovered ? Fade(PlayerColor(player), 0.70f) : PlayerColor(player));
+    const Color outline = available ? (hovered ? (Color){100, 70, 0, 255} : (Color){120, 90, 40, 255}) : (hovered ? Fade((Color){236, 220, 187, 255}, 0.85f) : (Color){80, 50, 28, 255});
+    const Color roof = hovered ? Fade(ColorBrightness(fill, -0.16f), 0.80f) : (available ? Fade(ColorBrightness(fill, -0.20f), 0.75f) : ColorBrightness(fill, -0.20f));
+    const Color shadow = Fade(BLACK, available ? (hovered ? 0.18f : 0.12f) : (hovered ? 0.12f : 0.14f));
 
     if (placementAnimating)
     {
         const float pulseOuter = radius * (0.08f + 0.22f * clampedProgress);
         const float pulseInner = pulseOuter - radius * (0.035f + 0.045f * popAmount);
-        const float pulseAlpha = 0.22f * popAmount;
+        const float pulseAlpha = 0.32f * popAmount;
         const float shadowRadius = radius * (0.08f + 0.10f * clampedProgress);
 
         DrawRing(corner, pulseInner, pulseOuter, 0.0f, 360.0f, 32, Fade(fill, pulseAlpha));
-        DrawCircleV((Vector2){corner.x, corner.y + radius * 0.02f}, shadowRadius, Fade(BLACK, 0.10f * popAmount));
+        DrawCircleV((Vector2){corner.x, corner.y + radius * 0.02f}, shadowRadius, Fade(BLACK, 0.14f * popAmount));
     }
 
     if (structure == STRUCTURE_CITY)
@@ -1844,24 +1845,44 @@ static void DrawPipRow(Vector2 center, int pipCount, float spacing, float dotRad
 void DrawThief(Vector2 center, float radius)
 {
     const Vector2 body = {center.x + radius * 0.32f, center.y - radius * 0.18f};
-    const Color cloak = (Color){48, 45, 55, 255};
-    const Color shadow = Fade(BLACK, 0.24f);
+    const Color cloak = (Color){32, 28, 40, 255};
+    const Color shadow = Fade(BLACK, 0.40f);
+    const Color glow = (Color){80, 40, 30, 255};
 
-    DrawEllipse((int)body.x, (int)(body.y + radius * 0.18f), radius * 0.12f, radius * 0.17f, shadow);
-    DrawCircleV((Vector2){body.x, body.y - radius * 0.12f}, radius * 0.08f, (Color){226, 210, 182, 255});
+    // Glowing aura effect
+    DrawCircleV(body, radius * 0.32f, Fade(glow, 0.20f));
+    DrawCircleV(body, radius * 0.28f, Fade(glow, 0.12f));
+    
+    // Shadow
+    DrawEllipse((int)body.x, (int)(body.y + radius * 0.18f), radius * 0.14f, radius * 0.20f, shadow);
+    
+    // Head
+    DrawCircleV((Vector2){body.x, body.y - radius * 0.12f}, radius * 0.10f, (Color){226, 210, 182, 255});
+    
+    // Cloak/body
     DrawTriangle(
-        (Vector2){body.x, body.y - radius * 0.25f},
-        (Vector2){body.x - radius * 0.18f, body.y + radius * 0.18f},
-        (Vector2){body.x + radius * 0.18f, body.y + radius * 0.18f},
+        (Vector2){body.x, body.y - radius * 0.28f},
+        (Vector2){body.x - radius * 0.20f, body.y + radius * 0.20f},
+        (Vector2){body.x + radius * 0.20f, body.y + radius * 0.20f},
         cloak);
+    
+    // Legs
     DrawRectangleRounded(
-        (Rectangle){body.x - radius * 0.07f, body.y + radius * 0.12f, radius * 0.14f, radius * 0.18f},
+        (Rectangle){body.x - radius * 0.08f, body.y + radius * 0.12f, radius * 0.16f, radius * 0.20f},
         0.35f, 8, cloak);
+    
+    // Sword/staff - more prominent
     DrawLineEx(
         (Vector2){body.x + radius * 0.12f, body.y - radius * 0.08f},
-        (Vector2){body.x + radius * 0.24f, body.y + radius * 0.22f},
-        4.0f,
-        (Color){109, 75, 45, 255});
+        (Vector2){body.x + radius * 0.28f, body.y + radius * 0.28f},
+        5.0f,
+        (Color){80, 50, 30, 255});
+    
+    DrawLineEx(
+        (Vector2){body.x + radius * 0.12f, body.y - radius * 0.08f},
+        (Vector2){body.x + radius * 0.26f, body.y + radius * 0.26f},
+        2.5f,
+        (Color){180, 120, 60, 255});
 }
 
 void DrawTileHighlightBorder(Vector2 center, float radius, Color glowColor, Color borderColor, float intensity)

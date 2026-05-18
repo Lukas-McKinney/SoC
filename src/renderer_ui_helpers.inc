@@ -98,18 +98,21 @@ static enum PlayerType LocalHumanPlayer(const struct Map *map)
         return PLAYER_NONE;
     }
 
-    if (session != NULL && session->localPlayer >= PLAYER_RED && session->localPlayer <= PLAYER_BLACK)
+    if (session != NULL &&
+        session->localPlayer >= PLAYER_RED &&
+        session->localPlayer <= PLAYER_BLACK &&
+        playerControlModeIsHuman(map->players[session->localPlayer].controlMode))
     {
         return session->localPlayer;
     }
 
     for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
     {
-        if (map->players[player].controlMode == PLAYER_CONTROL_AI)
+        if (playerControlModeIsAi(map->players[player].controlMode))
         {
             aiCount++;
         }
-        else
+        else if (playerControlModeIsHuman(map->players[player].controlMode))
         {
             humanPlayer = (enum PlayerType)player;
             humanCount++;
@@ -230,27 +233,27 @@ static void DrawAwardCard(Rectangle bounds, const char *title, const char *subti
     const Color textColor = (Color){54, 39, 29, 255};
     const Color mutedText = (Color){88, 68, 50, 255};
     const Color detailText = (Color){48, 35, 24, 255};
-    const Rectangle ribbon = {bounds.x + 14.0f, bounds.y + 14.0f, bounds.width - 28.0f, 26.0f};
-    const Rectangle detailPanel = {bounds.x + 16.0f, bounds.y + 96.0f, bounds.width - 32.0f, 40.0f};
-    const Rectangle ownerChip = {bounds.x + 16.0f, bounds.y + bounds.height - 34.0f, bounds.width - 32.0f, 22.0f};
+    const Rectangle ribbon = {bounds.x + UiScaled(14.0f), bounds.y + UiScaled(14.0f), bounds.width - UiScaled(28.0f), UiScaled(26.0f)};
+    const Rectangle detailPanel = {bounds.x + UiScaled(16.0f), bounds.y + UiScaled(96.0f), bounds.width - UiScaled(32.0f), UiScaled(40.0f)};
+    const Rectangle ownerChip = {bounds.x + UiScaled(16.0f), bounds.y + bounds.height - UiScaled(34.0f), bounds.width - UiScaled(32.0f), UiScaled(22.0f)};
     const bool claimed = owner >= PLAYER_RED && owner <= PLAYER_BLACK;
     const Color chipFill = claimed ? Fade(PlayerColor(owner), 0.92f) : (Color){221, 212, 194, 255};
     const Color chipText = claimed ? RAYWHITE : mutedText;
     const char *ownerLabel = claimed ? PlayerName(owner) : loc("Unclaimed");
     char detailLines[2][96] = {{0}};
-    const int titleFont = FitUiTextFontSize(title, 22, 17, (int)bounds.width - 30);
-    const int subtitleFont = FitUiTextFontSize(subtitle, 13, 11, (int)bounds.width - 30);
-    const int ownerFont = FitUiTextFontSize(ownerLabel, 14, 12, (int)ownerChip.width - 12);
-    int detailFont = 15;
-    const int detailLineCount = BuildWrappedUiLinesFitted(detail, 15, 12, (int)detailPanel.width - 10, detailLines, 2, &detailFont);
+    const int titleFont = FitUiTextFontSize(title, UiScaledFont(22), UiScaledFont(17), (int)bounds.width - (int)UiScaled(30.0f));
+    const int subtitleFont = FitUiTextFontSize(subtitle, UiScaledFont(13), UiScaledFont(11), (int)bounds.width - (int)UiScaled(30.0f));
+    const int ownerFont = FitUiTextFontSize(ownerLabel, UiScaledFont(14), UiScaledFont(12), (int)ownerChip.width - (int)UiScaled(12.0f));
+    int detailFont = UiScaledFont(15);
+    const int detailLineCount = BuildWrappedUiLinesFitted(detail, UiScaledFont(15), UiScaledFont(12), (int)detailPanel.width - (int)UiScaled(10.0f), detailLines, 2, &detailFont);
     const int titleWidth = MeasureUiText(title, titleFont);
     const int subtitleWidth = MeasureUiText(subtitle, subtitleFont);
     const int ownerWidth = MeasureUiText(ownerLabel, ownerFont);
-    const float detailLineHeight = (float)detailFont + 2.0f;
+    const float detailLineHeight = (float)detailFont + UiScaled(2.0f);
     const float detailBlockHeight = detailLineCount > 0 ? detailLineHeight * (float)detailLineCount : 0.0f;
-    const float detailTextY = detailPanel.y + (detailPanel.height - detailBlockHeight) * 0.5f - 1.0f;
+    const float detailTextY = detailPanel.y + (detailPanel.height - detailBlockHeight) * 0.5f - UiScaled(1.0f);
 
-    DrawRectangleRounded((Rectangle){bounds.x + 6.0f, bounds.y + 8.0f, bounds.width, bounds.height}, 0.10f, 8, Fade(BLACK, 0.10f));
+    DrawRectangleRounded((Rectangle){bounds.x + UiScaled(6.0f), bounds.y + UiScaled(8.0f), bounds.width, bounds.height}, 0.10f, 8, Fade(BLACK, 0.10f));
     DrawRectangleRounded(bounds, 0.10f, 8, parchment);
     DrawRectangleLinesEx(bounds, 2.0f, border);
     DrawRectangleRounded(ribbon, 0.16f, 8, Fade(accent, 0.96f));
@@ -258,21 +261,21 @@ static void DrawAwardCard(Rectangle bounds, const char *title, const char *subti
     DrawRectangleRounded(detailPanel, 0.28f, 8, (Color){249, 243, 232, 255});
     DrawRectangleLinesEx(detailPanel, 1.5f, Fade(border, 0.54f));
 
-    DrawUiText(title, bounds.x + bounds.width * 0.5f - titleWidth * 0.5f, bounds.y + 52.0f + (22 - titleFont) * 0.5f, titleFont, textColor);
-    DrawUiText(subtitle, bounds.x + bounds.width * 0.5f - subtitleWidth * 0.5f, bounds.y + 84.0f + (13 - subtitleFont) * 0.5f, subtitleFont, mutedText);
+    DrawUiText(title, bounds.x + bounds.width * 0.5f - titleWidth * 0.5f, bounds.y + UiScaled(52.0f) + (UiScaledFont(22) - titleFont) * 0.5f, titleFont, textColor);
+    DrawUiText(subtitle, bounds.x + bounds.width * 0.5f - subtitleWidth * 0.5f, bounds.y + UiScaled(84.0f) + (UiScaledFont(13) - subtitleFont) * 0.5f, subtitleFont, mutedText);
     for (int i = 0; i < detailLineCount; i++)
     {
         const int detailWidth = MeasureUiText(detailLines[i], detailFont);
         const float detailX = detailPanel.x + detailPanel.width * 0.5f - detailWidth * 0.5f;
         const float lineY = detailTextY + (float)i * detailLineHeight;
 
-        DrawUiText(detailLines[i], detailX, lineY + 1.0f, detailFont, Fade((Color){255, 255, 255, 255}, 0.32f));
+        DrawUiText(detailLines[i], detailX, lineY + UiScaled(1.0f), detailFont, Fade((Color){255, 255, 255, 255}, 0.32f));
         DrawUiText(detailLines[i], detailX, lineY, detailFont, detailText);
     }
 
     DrawRectangleRounded(ownerChip, 0.40f, 8, chipFill);
     DrawRectangleLinesEx(ownerChip, 1.4f, claimed ? Fade(border, 0.64f) : (Color){154, 132, 108, 255});
-    DrawUiText(ownerLabel, ownerChip.x + ownerChip.width * 0.5f - ownerWidth * 0.5f, ownerChip.y + 3.0f + (14 - ownerFont) * 0.5f, ownerFont, chipText);
+    DrawUiText(ownerLabel, ownerChip.x + ownerChip.width * 0.5f - ownerWidth * 0.5f, ownerChip.y + UiScaled(3.0f) + (UiScaledFont(14) - ownerFont) * 0.5f, ownerFont, chipText);
 }
 
 static const char *DevelopmentCardTitle(enum DevelopmentCardType type)
