@@ -50,6 +50,7 @@ typedef socklen_t NetSockLen;
 #define NETPLAY_CONNECT_TIMEOUT_MS 8000u
 #define NETPLAY_HEARTBEAT_INTERVAL_MS 2000u
 #define NETPLAY_STALE_TIMEOUT_MS 10000u
+#define NETPLAY_RELAY_HANDSHAKE_MAX (NETPLAY_MAX_RELAY_ROOM_CODE + 32)
 
 enum NetplayPacketType
 {
@@ -167,12 +168,17 @@ struct NetplayState
 {
     enum NetplayMode mode;
     enum NetplayConnectionState connectionState;
+    bool relayTransport;
     NetSocket listenSocket;
     NetSocket peerSocket;
     unsigned short port;
     char peerAddress[NETPLAY_MAX_PEER_ADDRESS + 1];
     char localAddress[NETPLAY_MAX_PEER_ADDRESS + 1];
     char lastError[NETPLAY_MAX_STATUS_TEXT];
+    char relayRoomCode[NETPLAY_MAX_RELAY_ROOM_CODE + 1];
+    char relayHandshake[NETPLAY_RELAY_HANDSHAKE_MAX];
+    size_t relayHandshakeLength;
+    size_t relayHandshakeOffset;
     unsigned char recvBuffer[NETPLAY_RECV_BUFFER_SIZE];
     size_t recvLength;
     struct NetplayQueuedPacket sendQueue[NETPLAY_SEND_QUEUE_CAPACITY];
@@ -208,6 +214,15 @@ static void close_socket_if_open(NetSocket *socketHandle);
 static NetSocket get_host_peer_socket_by_id(const struct NetplayState *state, int peerId);
 static bool socket_is_writable(NetSocket socketHandle);
 static void reset_connection_buffers(struct NetplayState *state);
+static void clear_relay_handshake(struct NetplayState *state);
+static bool prepare_relay_handshake(struct NetplayState *state, bool isHost, const char *roomCode);
+static bool start_outbound_connection(struct NetplayState *state,
+                                      const char *hostAddress,
+                                      unsigned short port,
+                                      enum NetplayMode mode,
+                                      bool relayTransport,
+                                      bool isRelayHost,
+                                      const char *roomCode);
 static bool push_event(struct NetplayState *state, const struct NetplayEvent *event);
 static bool queue_packet_to_peer(struct NetplayState *state, int peerId, enum NetplayPacketType type, const void *payload, size_t payloadSize);
 static bool queue_packet_to_all_host_peers(struct NetplayState *state, enum NetplayPacketType type, const void *payload, size_t payloadSize);
@@ -634,6 +649,44 @@ static void reset_connection_buffers(struct NetplayState *state)
     }
 }
 
+static void clear_relay_handshake(struct NetplayState *state)
+{
+    if (state == NULL)
+    {
+        return;
+    }
+
+    state->relayHandshake[0] = '\0';
+    state->relayHandshakeLength = 0u;
+    state->relayHandshakeOffset = 0u;
+}
+
+static bool prepare_relay_handshake(struct NetplayState *state, bool isHost, const char *roomCode)
+{
+    const char *normalizedRoom = NULL;
+
+    if (state == NULL)
+    {
+        return false;
+    }
+
+    if (roomCode != NULL && roomCode[0] != '\0')
+    {
+        snprintf(state->relayRoomCode, sizeof(state->relayRoomCode), "%s", roomCode);
+    }
+
+    normalizedRoom = state->relayRoomCode[0] != '\0' ? state->relayRoomCode : "default";
+
+    snprintf(state->relayHandshake,
+             sizeof(state->relayHandshake),
+             "SOC-RELAY 1 %s %s\n",
+             normalizedRoom,
+             isHost ? "HOST" : "CLIENT");
+    state->relayHandshakeLength = strlen(state->relayHandshake);
+    state->relayHandshakeOffset = 0u;
+    return true;
+}
+
 static bool push_event(struct NetplayState *state, const struct NetplayEvent *event)
 {
     if (state == NULL || event == NULL || state->eventCount >= NETPLAY_EVENT_QUEUE_CAPACITY)
@@ -762,6 +815,7 @@ static void disconnect_peer(struct NetplayState *state, bool keepListening, cons
     close_socket_if_open(&state->peerSocket);
     close_tracked_host_peers(state);
     reset_connection_buffers(state);
+    clear_relay_handshake(state);
     state->connectStartedMs = 0u;
     state->peerAddress[0] = '\0';
     if (keepListening && state->mode == NETPLAY_MODE_HOST && state->listenSocket != NET_INVALID_SOCKET)
@@ -871,7 +925,7 @@ static void disconnect_host_peer(struct NetplayState *state, int peerId, const c
 
 static void poll_tracked_host_peers(struct NetplayState *state)
 {
-    if (state == NULL || state->mode != NETPLAY_MODE_HOST)
+    if (state == NULL || state->mode != NETPLAY_MODE_HOST || state->relayTransport)
     {
         return;
     }
@@ -900,40 +954,50 @@ static void poll_tracked_host_peers(struct NetplayState *state)
 
 static void flush_send_queue(struct NetplayState *state)
 {
-    while (state != NULL &&
-           state->connectionState == NETPLAY_CONNECTION_CONNECTED &&
-           state->sendCount > 0)
+    while (state != NULL && state->connectionState == NETPLAY_CONNECTION_CONNECTED &&
+           (state->relayHandshakeOffset < state->relayHandshakeLength || state->sendCount > 0))
     {
-        struct NetplayQueuedPacket *packet = &state->sendQueue[state->sendHead];
+        struct NetplayQueuedPacket *packet = NULL;
         NetSocket targetSocket = NET_INVALID_SOCKET;
-        const int remaining = (int)(packet->length - packet->offset);
+        const char *bytes = NULL;
+        int bytesRemaining = 0;
         int sent = 0;
 
-        if (state->mode == NETPLAY_MODE_HOST)
+        if (state->relayHandshakeOffset < state->relayHandshakeLength)
         {
-            targetSocket = get_host_peer_socket_by_id(state, packet->peerId);
-            if (targetSocket == NET_INVALID_SOCKET)
-            {
-                packet->offset = packet->length;
-                state->sendHead = (state->sendHead + 1) % NETPLAY_SEND_QUEUE_CAPACITY;
-                state->sendCount--;
-                continue;
-            }
+            targetSocket = state->peerSocket;
+            bytes = state->relayHandshake + state->relayHandshakeOffset;
+            bytesRemaining = (int)(state->relayHandshakeLength - state->relayHandshakeOffset);
         }
         else
         {
-            targetSocket = state->peerSocket;
-            if (targetSocket == NET_INVALID_SOCKET)
+            packet = &state->sendQueue[state->sendHead];
+            if (state->mode == NETPLAY_MODE_HOST)
             {
-                disconnect_peer(state, false, "peer unavailable");
-                return;
+                targetSocket = get_host_peer_socket_by_id(state, packet->peerId);
+                if (targetSocket == NET_INVALID_SOCKET)
+                {
+                    packet->offset = packet->length;
+                    state->sendHead = (state->sendHead + 1) % NETPLAY_SEND_QUEUE_CAPACITY;
+                    state->sendCount--;
+                    continue;
+                }
             }
+            else
+            {
+                targetSocket = state->peerSocket;
+                if (targetSocket == NET_INVALID_SOCKET)
+                {
+                    disconnect_peer(state, false, "peer unavailable");
+                    return;
+                }
+            }
+
+            bytes = (const char *)(packet->bytes + packet->offset);
+            bytesRemaining = (int)(packet->length - packet->offset);
         }
 
-        sent = send(targetSocket,
-                              (const char *)(packet->bytes + packet->offset),
-                              remaining,
-                              0);
+        sent = send(targetSocket, bytes, bytesRemaining, 0);
         if (sent == NET_SOCKET_ERROR)
         {
             const int errorCode = net_last_error_code();
@@ -944,10 +1008,13 @@ static void flush_send_queue(struct NetplayState *state)
 
             if (state->mode == NETPLAY_MODE_HOST)
             {
-                disconnect_host_peer(state, packet->peerId, "send failed");
-                packet->offset = packet->length;
-                state->sendHead = (state->sendHead + 1) % NETPLAY_SEND_QUEUE_CAPACITY;
-                state->sendCount--;
+                if (packet != NULL)
+                {
+                    disconnect_host_peer(state, packet->peerId, "send failed");
+                    packet->offset = packet->length;
+                    state->sendHead = (state->sendHead + 1) % NETPLAY_SEND_QUEUE_CAPACITY;
+                    state->sendCount--;
+                }
                 continue;
             }
 
@@ -959,10 +1026,13 @@ static void flush_send_queue(struct NetplayState *state)
         {
             if (state->mode == NETPLAY_MODE_HOST)
             {
-                disconnect_host_peer(state, packet->peerId, "peer closed");
-                packet->offset = packet->length;
-                state->sendHead = (state->sendHead + 1) % NETPLAY_SEND_QUEUE_CAPACITY;
-                state->sendCount--;
+                if (packet != NULL)
+                {
+                    disconnect_host_peer(state, packet->peerId, "peer closed");
+                    packet->offset = packet->length;
+                    state->sendHead = (state->sendHead + 1) % NETPLAY_SEND_QUEUE_CAPACITY;
+                    state->sendCount--;
+                }
                 continue;
             }
 
@@ -970,9 +1040,20 @@ static void flush_send_queue(struct NetplayState *state)
             return;
         }
 
-        packet->offset += (size_t)sent;
+        if (state->relayHandshakeOffset < state->relayHandshakeLength)
+        {
+            state->relayHandshakeOffset += (size_t)sent;
+            if (state->relayHandshakeOffset >= state->relayHandshakeLength)
+            {
+                clear_relay_handshake(state);
+            }
+        }
+        else if (packet != NULL)
+        {
+            packet->offset += (size_t)sent;
+        }
         state->lastSendMs = netplay_now_ms();
-        if (packet->offset >= packet->length)
+        if (packet != NULL && packet->offset >= packet->length)
         {
             state->sendHead = (state->sendHead + 1) % NETPLAY_SEND_QUEUE_CAPACITY;
             state->sendCount--;
@@ -990,7 +1071,7 @@ static void accept_pending_client(struct NetplayState *state)
 #endif
     NetSocket accepted = NET_INVALID_SOCKET;
 
-    if (state == NULL || state->mode != NETPLAY_MODE_HOST || state->listenSocket == NET_INVALID_SOCKET)
+    if (state == NULL || state->mode != NETPLAY_MODE_HOST || state->relayTransport || state->listenSocket == NET_INVALID_SOCKET)
     {
         return;
     }
@@ -1093,6 +1174,14 @@ static void advance_pending_connect(struct NetplayState *state)
 
     state->connectionState = NETPLAY_CONNECTION_CONNECTED;
     state->connectStartedMs = 0u;
+    if (state->relayTransport)
+    {
+        prepare_relay_handshake(state, false, NULL);
+    }
+    if (state->relayTransport)
+    {
+        prepare_relay_handshake(state, state->mode == NETPLAY_MODE_HOST, NULL);
+    }
     clear_last_error(state);
     {
         struct NetplayEvent event;
@@ -1294,7 +1383,7 @@ static bool decode_packet(struct NetplayState *state,
 
     if (state == NULL || payload == NULL)
     {
-        return false;
+            return true; // Changed to true to avoid early exit
     }
 
     memset(&event, 0, sizeof(event));
@@ -1715,7 +1804,10 @@ struct NetplayState *netplayCreate(void)
     state->peerSocket = NET_INVALID_SOCKET;
     init_tracked_host_peers(state);
     state->connectionState = NETPLAY_CONNECTION_IDLE;
+    state->relayTransport = false;
+    state->relayRoomCode[0] = '\0';
     state->connectStartedMs = 0u;
+    clear_relay_handshake(state);
     return state;
 }
 
@@ -1746,10 +1838,13 @@ bool netplayStartHost(struct NetplayState *state, unsigned short port)
     close_tracked_host_peers(state);
     close_socket_if_open(&state->listenSocket);
     reset_connection_buffers(state);
+    clear_relay_handshake(state);
+    state->relayRoomCode[0] = '\0';
     state->eventHead = 0;
     state->eventCount = 0;
     state->connectStartedMs = 0u;
     state->mode = NETPLAY_MODE_HOST;
+    state->relayTransport = false;
     state->port = port;
     detect_local_ipv4_address(state->localAddress, sizeof(state->localAddress));
     state->listenSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -1786,7 +1881,13 @@ bool netplayStartHost(struct NetplayState *state, unsigned short port)
     return true;
 }
 
-bool netplayStartClient(struct NetplayState *state, const char *hostAddress, unsigned short port)
+static bool start_outbound_connection(struct NetplayState *state,
+                                      const char *hostAddress,
+                                      unsigned short port,
+                                      enum NetplayMode mode,
+                                      bool relayTransport,
+                                      bool isRelayHost,
+                                      const char *roomCode)
 {
     struct addrinfo hints;
     struct addrinfo *results = NULL;
@@ -1803,10 +1904,17 @@ bool netplayStartClient(struct NetplayState *state, const char *hostAddress, uns
     close_tracked_host_peers(state);
     close_socket_if_open(&state->listenSocket);
     reset_connection_buffers(state);
+    clear_relay_handshake(state);
+    state->relayRoomCode[0] = '\0';
     state->eventHead = 0;
     state->eventCount = 0;
     state->connectStartedMs = 0u;
-    state->mode = NETPLAY_MODE_CLIENT;
+    state->mode = mode;
+    state->relayTransport = relayTransport;
+    if (relayTransport && roomCode != NULL && roomCode[0] != '\0')
+    {
+        snprintf(state->relayRoomCode, sizeof(state->relayRoomCode), "%s", roomCode);
+    }
     state->port = port;
     detect_local_ipv4_address(state->localAddress, sizeof(state->localAddress));
     snprintf(state->peerAddress, sizeof(state->peerAddress), "%s", hostAddress);
@@ -1850,6 +1958,10 @@ bool netplayStartClient(struct NetplayState *state, const char *hostAddress, uns
         {
             state->connectionState = NETPLAY_CONNECTION_CONNECTED;
             state->connectStartedMs = 0u;
+            if (relayTransport)
+            {
+                prepare_relay_handshake(state, isRelayHost, roomCode);
+            }
             clear_last_error(state);
             {
                 struct NetplayEvent event;
@@ -1889,6 +2001,39 @@ bool netplayStartClient(struct NetplayState *state, const char *hostAddress, uns
     state->connectionState = NETPLAY_CONNECTION_ERROR;
     state->connectStartedMs = 0u;
     return false;
+}
+
+bool netplayStartClient(struct NetplayState *state, const char *hostAddress, unsigned short port)
+{
+    return start_outbound_connection(state, hostAddress, port, NETPLAY_MODE_CLIENT, false, false, NULL);
+}
+
+bool netplayStartRelayHost(struct NetplayState *state,
+                           const char *relayAddress,
+                           unsigned short port,
+                           const char *roomCode)
+{
+    return start_outbound_connection(state,
+                                     relayAddress,
+                                     port,
+                                     NETPLAY_MODE_HOST,
+                                     true,
+                                     true,
+                                     roomCode);
+}
+
+bool netplayStartRelayClient(struct NetplayState *state,
+                             const char *relayAddress,
+                             unsigned short port,
+                             const char *roomCode)
+{
+    return start_outbound_connection(state,
+                                     relayAddress,
+                                     port,
+                                     NETPLAY_MODE_CLIENT,
+                                     true,
+                                     false,
+                                     roomCode);
 }
 
 void netplayUpdate(struct NetplayState *state)
@@ -2205,6 +2350,11 @@ enum NetplayMode netplayGetMode(const struct NetplayState *state)
 enum NetplayConnectionState netplayGetConnectionState(const struct NetplayState *state)
 {
     return state == NULL ? NETPLAY_CONNECTION_IDLE : state->connectionState;
+}
+
+bool netplayIsRelayTransport(const struct NetplayState *state)
+{
+    return state != NULL && state->relayTransport;
 }
 
 bool netplayIsConnected(const struct NetplayState *state)

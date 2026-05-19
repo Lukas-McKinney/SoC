@@ -7,6 +7,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define MATCH_SESSION_MAX_RELAY_ROOM_CODE 31
+
 struct GameActionContext;
 struct GameActionResult;
 struct NetplayState;
@@ -64,6 +66,10 @@ struct MatchSession
     int reconnectAttempts;
     bool reconnectEnabled;
     bool reconnectNotified;
+    bool relayTransport;
+    char relayServerAddress[64];
+    unsigned short relayServerPort;
+    char relayRoomCode[MATCH_SESSION_MAX_RELAY_ROOM_CODE + 1];
     uint32_t peerCapabilityFlags;
     uint32_t peerProtocolMinVersion;
     uint32_t peerProtocolMaxVersion;
@@ -77,8 +83,24 @@ void matchSessionConfigureHotseat(struct MatchSession *session);
 void matchSessionConfigureSinglePlayer(struct MatchSession *session, enum PlayerType localPlayer);
 void matchSessionConfigurePrivateHost(struct MatchSession *session, enum PlayerType localPlayer);
 void matchSessionConfigurePrivateClient(struct MatchSession *session, enum PlayerType localPlayer);
+void matchSessionConfigurePrivateHostRelay(struct MatchSession *session,
+                                           enum PlayerType localPlayer,
+                                           const char *relayServerAddress,
+                                           unsigned short relayServerPort,
+                                           const char *roomCode);
+void matchSessionConfigurePrivateClientRelay(struct MatchSession *session,
+                                             enum PlayerType localPlayer,
+                                             const char *relayServerAddress,
+                                             unsigned short relayServerPort,
+                                             const char *roomCode);
 bool matchSessionOpenPrivateHost(struct MatchSession *session, unsigned short port);
 bool matchSessionOpenPrivateClient(struct MatchSession *session, const char *hostAddress, unsigned short port);
+bool matchSessionOpenPrivateHostRelay(struct MatchSession *session,
+                                      unsigned short relayServerPort,
+                                      const char *roomCode);
+bool matchSessionOpenPrivateClientRelay(struct MatchSession *session,
+                                        unsigned short relayServerPort,
+                                        const char *roomCode);
 void matchSessionUpdate(struct MatchSession *session);
 void matchSessionSetSeatAuthority(struct MatchSession *session, enum PlayerType player, enum MatchSeatAuthority authority);
 enum MatchSeatAuthority matchSessionGetSeatAuthority(const struct MatchSession *session, enum PlayerType player);

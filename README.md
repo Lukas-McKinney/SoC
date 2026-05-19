@@ -209,6 +209,49 @@ The macOS build path uses `pkg-config` to discover Raylib automatically. If your
 make RAYLIB_CFLAGS="..." RAYLIB_LIBS="..."
 ```
 
+## Internet Relay
+
+If your friends are not on the same LAN, you can run the bundled relay server on a public machine or VPS and connect both game clients to it.
+
+Build the relay server:
+
+```bash
+make relay-server
+```
+
+Run the relay server on the default port:
+
+```bash
+./soc_relay
+```
+
+### Render
+
+Render can host the relay server as a free web service.
+
+Use these settings:
+
+- Build command: `make relay-server`
+- Start command: `./soc_relay`
+
+Render will provide a `PORT` environment variable automatically, and the relay server uses it when present.
+
+If you want to run multiple rooms, you only need one Render instance; each room is identified by its room code.
+
+Launch the host through the relay:
+
+```bash
+./settlers --relay-host <relay-address> --room <code> --player red --remote-player blue --port 24680
+```
+
+Launch the joiner through the same relay and room:
+
+```bash
+./settlers --relay-join <relay-address> --room <code> --player blue --remote-player red --port 24680
+```
+
+Use the same room code on both sides. The relay server just forwards traffic; it does not need the game installed.
+
 ## Validation
 
 Run the headless rules suite:

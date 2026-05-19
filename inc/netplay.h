@@ -13,6 +13,7 @@
 #define NETPLAY_MAX_PAYLOAD_SIZE 65536u
 #define NETPLAY_MAX_STATUS_TEXT 96
 #define NETPLAY_MAX_PEER_ADDRESS 63
+#define NETPLAY_MAX_RELAY_ROOM_CODE 31
 #define NETPLAY_MAX_HOST_REMOTE_PLAYERS 3
 
 #define NETPLAY_CAPABILITY_HEARTBEAT 0x00000001u
@@ -103,6 +104,14 @@ void netplayDestroy(struct NetplayState *state);
 
 bool netplayStartHost(struct NetplayState *state, unsigned short port);
 bool netplayStartClient(struct NetplayState *state, const char *hostAddress, unsigned short port);
+bool netplayStartRelayHost(struct NetplayState *state,
+                           const char *relayAddress,
+                           unsigned short port,
+                           const char *roomCode);
+bool netplayStartRelayClient(struct NetplayState *state,
+                             const char *relayAddress,
+                             unsigned short port,
+                             const char *roomCode);
 void netplayUpdate(struct NetplayState *state);
 bool netplayPollEvent(struct NetplayState *state, struct NetplayEvent *event);
 
@@ -152,6 +161,7 @@ bool netplayQueueResyncRequest(struct NetplayState *state, uint32_t stateHash, c
 
 enum NetplayMode netplayGetMode(const struct NetplayState *state);
 enum NetplayConnectionState netplayGetConnectionState(const struct NetplayState *state);
+bool netplayIsRelayTransport(const struct NetplayState *state);
 bool netplayIsConnected(const struct NetplayState *state);
 const char *netplayGetLastError(const struct NetplayState *state);
 const char *netplayGetPeerAddress(const struct NetplayState *state);

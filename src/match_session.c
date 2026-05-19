@@ -55,6 +55,10 @@ static void reset_reconnect_state(struct MatchSession *session);
 static void schedule_client_reconnect(struct MatchSession *session, double delaySeconds);
 static void attempt_client_reconnect(struct MatchSession *session);
 static bool queue_local_capabilities(struct MatchSession *session);
+static void configure_relay_settings(struct MatchSession *session,
+                                     const char *relayServerAddress,
+                                     unsigned short relayServerPort,
+                                     const char *roomCode);
 static void request_snapshot_resync(struct MatchSession *session, const char *reason);
 static void reset_remote_peer_assignments(struct MatchSession *session);
 static void clear_remote_peer_assignment_for_peer(struct MatchSession *session, int peerId);
@@ -63,6 +67,28 @@ static enum PlayerType assign_remote_player_to_peer(struct MatchSession *session
 static bool send_hello_to_peer(struct MatchSession *session, int peerId, enum PlayerType assignedPlayer);
 static bool send_lobby_state_to_peer(struct MatchSession *session, int peerId);
 static bool broadcast_lobby_state(struct MatchSession *session);
+
+static void configure_relay_settings(struct MatchSession *session,
+                                     const char *relayServerAddress,
+                                     unsigned short relayServerPort,
+                                     const char *roomCode)
+{
+    if (session == NULL)
+    {
+        return;
+    }
+
+    session->relayTransport = relayServerAddress != NULL && relayServerAddress[0] != '\0';
+    session->relayServerPort = relayServerPort;
+    snprintf(session->relayServerAddress,
+             sizeof(session->relayServerAddress),
+             "%s",
+             relayServerAddress != NULL ? relayServerAddress : "");
+    snprintf(session->relayRoomCode,
+             sizeof(session->relayRoomCode),
+             "%s",
+             roomCode != NULL ? roomCode : "");
+}
 
 #define CLIENT_RECONNECT_DELAY_SECONDS 2.5
 #define CLIENT_RECONNECT_MAX_ATTEMPTS 20
@@ -194,7 +220,9 @@ static void attempt_client_reconnect(struct MatchSession *session)
              session->reconnectHost,
              (unsigned int)session->reconnectPort);
 
-    if (netplayStartClient(session->netplay, session->reconnectHost, session->reconnectPort))
+        if (session->relayTransport
+            ? netplayStartRelayClient(session->netplay, session->reconnectHost, session->reconnectPort, session->relayRoomCode)
+            : netplayStartClient(session->netplay, session->reconnectHost, session->reconnectPort))
     {
         session->connectionStatus = netplayGetConnectionState(session->netplay) == NETPLAY_CONNECTION_CONNECTED
                                         ? MATCH_CONNECTION_SYNCING
@@ -809,6 +837,10 @@ void matchSessionInit(struct MatchSession *session)
     session->reconnectHost[0] = '\0';
     session->reconnectPort = 0u;
     session->reconnectEnabled = false;
+    session->relayTransport = false;
+    session->relayServerAddress[0] = '\0';
+    session->relayServerPort = 0u;
+    session->relayRoomCode[0] = '\0';
     session->peerCapabilityFlags = 0u;
     session->peerProtocolMinVersion = 0u;
     session->peerProtocolMaxVersion = 0u;
@@ -846,6 +878,10 @@ void matchSessionShutdown(struct MatchSession *session)
     session->peerCapabilitiesReceived = false;
     reset_remote_peer_assignments(session);
     reset_reconnect_state(session);
+    session->relayTransport = false;
+    session->relayServerAddress[0] = '\0';
+    session->relayServerPort = 0u;
+    session->relayRoomCode[0] = '\0';
 }
 
 void matchSessionConfigureHotseat(struct MatchSession *session)
@@ -861,6 +897,10 @@ void matchSessionConfigureHotseat(struct MatchSession *session)
     session->reconnectHost[0] = '\0';
     session->reconnectPort = 0u;
     session->reconnectEnabled = false;
+    session->relayTransport = false;
+    session->relayServerAddress[0] = '\0';
+    session->relayServerPort = 0u;
+    session->relayRoomCode[0] = '\0';
     reset_reconnect_state(session);
     for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
     {
@@ -882,6 +922,10 @@ void matchSessionConfigureSinglePlayer(struct MatchSession *session, enum Player
     session->reconnectHost[0] = '\0';
     session->reconnectPort = 0u;
     session->reconnectEnabled = false;
+    session->relayTransport = false;
+    session->relayServerAddress[0] = '\0';
+    session->relayServerPort = 0u;
+    session->relayRoomCode[0] = '\0';
     reset_reconnect_state(session);
     for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
     {
@@ -903,6 +947,10 @@ void matchSessionConfigurePrivateHost(struct MatchSession *session, enum PlayerT
     session->reconnectHost[0] = '\0';
     session->reconnectPort = 0u;
     session->reconnectEnabled = false;
+    session->relayTransport = false;
+    session->relayServerAddress[0] = '\0';
+    session->relayServerPort = 0u;
+    session->relayRoomCode[0] = '\0';
     reset_reconnect_state(session);
     session->networkMode = MATCH_NETWORK_PRIVATE_HOST;
     session->connectionStatus = MATCH_CONNECTION_WAITING_FOR_PLAYER;
@@ -912,6 +960,110 @@ void matchSessionConfigurePrivateHost(struct MatchSession *session, enum PlayerT
     {
         session->seatAuthority[player] = player == localPlayer ? MATCH_SEAT_LOCAL : MATCH_SEAT_REMOTE;
     }
+}
+
+void matchSessionConfigurePrivateHostRelay(struct MatchSession *session,
+                                           enum PlayerType localPlayer,
+                                           const char *relayServerAddress,
+                                           unsigned short relayServerPort,
+                                           const char *roomCode)
+{
+    matchSessionConfigurePrivateHost(session, localPlayer);
+    configure_relay_settings(session, relayServerAddress, relayServerPort, roomCode);
+}
+
+void matchSessionConfigurePrivateClientRelay(struct MatchSession *session,
+                                             enum PlayerType localPlayer,
+                                             const char *relayServerAddress,
+                                             unsigned short relayServerPort,
+                                             const char *roomCode)
+{
+    matchSessionConfigurePrivateClient(session, localPlayer);
+    configure_relay_settings(session, relayServerAddress, relayServerPort, roomCode);
+}
+
+bool matchSessionOpenPrivateHostRelay(struct MatchSession *session,
+                                      unsigned short relayServerPort,
+                                      const char *roomCode)
+{
+    if (session == NULL || session->networkMode != MATCH_NETWORK_PRIVATE_HOST || !configure_default_private_host_seats(session) || !session->relayTransport)
+    {
+        return false;
+    }
+
+    debugLog("NET", "opening relay host to %s:%u room=%s",
+             session->relayServerAddress,
+             (unsigned int)relayServerPort,
+             roomCode == NULL ? "" : roomCode);
+    if (session->netplay == NULL)
+    {
+        session->netplay = netplayCreate();
+    }
+
+    if (session->netplay == NULL || !netplayStartRelayHost(session->netplay, session->relayServerAddress, relayServerPort, roomCode))
+    {
+        session->connectionStatus = MATCH_CONNECTION_ERROR;
+        set_connection_error(session, session->netplay != NULL ? netplayGetLastError(session->netplay) : "socket init failed");
+        return false;
+    }
+
+    session->relayServerPort = relayServerPort;
+    session->connectionStatus = MATCH_CONNECTION_WAITING_FOR_PLAYER;
+    session->ready = false;
+    session->matchStarted = false;
+    session->awaitingAuthoritativeUpdate = false;
+    clear_pending_trade_offer(session);
+    session->peerCapabilityFlags = 0u;
+    session->peerProtocolMinVersion = 0u;
+    session->peerProtocolMaxVersion = 0u;
+    session->peerCapabilitiesReceived = false;
+    clear_connection_error(session);
+    return true;
+}
+
+bool matchSessionOpenPrivateClientRelay(struct MatchSession *session,
+                                        unsigned short relayServerPort,
+                                        const char *roomCode)
+{
+    if (session == NULL || session->networkMode != MATCH_NETWORK_PRIVATE_CLIENT || !session->relayTransport)
+    {
+        return false;
+    }
+
+    debugLog("NET", "opening relay client to %s:%u room=%s",
+             session->relayServerAddress,
+             (unsigned int)relayServerPort,
+             roomCode == NULL ? "" : roomCode);
+    if (session->netplay == NULL)
+    {
+        session->netplay = netplayCreate();
+    }
+
+    if (session->netplay == NULL || !netplayStartRelayClient(session->netplay, session->relayServerAddress, relayServerPort, roomCode))
+    {
+        session->connectionStatus = MATCH_CONNECTION_ERROR;
+        set_connection_error(session, session->netplay != NULL ? netplayGetLastError(session->netplay) : "socket init failed");
+        return false;
+    }
+
+    snprintf(session->reconnectHost, sizeof(session->reconnectHost), "%s", session->relayServerAddress);
+    session->reconnectPort = relayServerPort;
+    session->reconnectEnabled = true;
+    reset_reconnect_state(session);
+
+    session->connectionStatus = netplayGetConnectionState(session->netplay) == NETPLAY_CONNECTION_CONNECTED
+                                    ? MATCH_CONNECTION_SYNCING
+                                    : MATCH_CONNECTION_CONNECTING;
+    session->ready = false;
+    session->matchStarted = false;
+    session->awaitingAuthoritativeUpdate = false;
+    clear_pending_trade_offer(session);
+    session->peerCapabilityFlags = 0u;
+    session->peerProtocolMinVersion = 0u;
+    session->peerProtocolMaxVersion = 0u;
+    session->peerCapabilitiesReceived = false;
+    clear_connection_error(session);
+    return true;
 }
 
 void matchSessionConfigurePrivateClient(struct MatchSession *session, enum PlayerType localPlayer)
@@ -1679,12 +1831,32 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
         break;
 
     case NETPLAY_EVENT_CONNECTED:
-        session->connectionStatus = MATCH_CONNECTION_SYNCING;
-        reset_reconnect_state(session);
-        clear_connection_error(session);
-        debugLog("NET", "client connected to host; waiting for hello/lobby");
-        uiShowCenteredStatus(loc("Connected to host."), UI_NOTIFICATION_NEUTRAL);
-        queue_local_capabilities(session);
+        if (session->isHost && session->relayTransport)
+        {
+            const enum PlayerType remotePlayer = assign_remote_player_to_peer(session, 0);
+
+            session->connectionStatus = MATCH_CONNECTION_CONNECTED;
+            session->ready = true;
+            session->matchStarted = false;
+            clear_connection_error(session);
+            debugLog("NET",
+                     "relay host connected (local=%d remote=%d)",
+                     (int)session->localPlayer,
+                     (int)remotePlayer);
+            uiShowCenteredStatus(loc("Remote player connected."), UI_NOTIFICATION_POSITIVE);
+            send_hello_to_peer(session, 0, remotePlayer);
+            queue_local_capabilities(session);
+            broadcast_lobby_state(session);
+        }
+        else
+        {
+            session->connectionStatus = MATCH_CONNECTION_SYNCING;
+            reset_reconnect_state(session);
+            clear_connection_error(session);
+            debugLog("NET", "client connected to host; waiting for hello/lobby");
+            uiShowCenteredStatus(loc("Connected to host."), UI_NOTIFICATION_NEUTRAL);
+            queue_local_capabilities(session);
+        }
         break;
 
     case NETPLAY_EVENT_DISCONNECTED:

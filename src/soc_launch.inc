@@ -109,6 +109,55 @@ static void ConfigurePrivateMatch(struct MatchSession *session,
     }
 }
 
+static void ConfigurePrivateRelayMatch(struct MatchSession *session,
+                                       enum PlayerType hostPlayer,
+                                       enum PlayerType remotePlayer,
+                                       enum AiDifficulty difficulty,
+                                       bool localIsHost,
+                                       const char *relayServerAddress,
+                                       unsigned short relayServerPort,
+                                       const char *roomCode)
+{
+    if (session == NULL)
+    {
+        return;
+    }
+
+    aiConfigureHotseatMatch(&session->map);
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        if (player == hostPlayer || player == remotePlayer)
+        {
+            session->map.players[player].controlMode = PLAYER_CONTROL_HUMAN;
+            session->map.players[player].aiDifficulty = AI_DIFFICULTY_EASY;
+        }
+        else
+        {
+            session->map.players[player].controlMode = PLAYER_CONTROL_AI;
+            session->map.players[player].aiDifficulty = difficulty;
+        }
+    }
+
+    if (localIsHost)
+    {
+        matchSessionConfigurePrivateHostRelay(session, hostPlayer, relayServerAddress, relayServerPort, roomCode);
+        matchSessionSetSeatAuthority(session, remotePlayer, MATCH_SEAT_REMOTE);
+    }
+    else
+    {
+        matchSessionConfigurePrivateClientRelay(session, PLAYER_NONE, relayServerAddress, relayServerPort, roomCode);
+        matchSessionSetSeatAuthority(session, hostPlayer, MATCH_SEAT_REMOTE);
+    }
+
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        if (player != hostPlayer && player != remotePlayer)
+        {
+            matchSessionSetSeatAuthority(session, (enum PlayerType)player, MATCH_SEAT_AI);
+        }
+    }
+}
+
 static void LoadPersistedSettings(void)
 {
     struct PersistedSettings settings;
@@ -141,7 +190,10 @@ static void InitLaunchOptions(struct LaunchOptions *options)
     options->localPlayer = PLAYER_RED;
     options->remotePlayer = PLAYER_BLUE;
     options->aiDifficulty = AI_DIFFICULTY_MEDIUM;
+    options->relayMode = false;
     options->hostAddress[0] = '\0';
+    options->relayAddress[0] = '\0';
+    options->roomCode[0] = '\0';
 }
 
 static void PrintUsage(const char *programName)
@@ -150,6 +202,8 @@ static void PrintUsage(const char *programName)
     fprintf(stderr, "  %s\n", programName);
     fprintf(stderr, "  %s --host [--player red|blue|green|black] [--remote-player color] [--port number] [--ai-difficulty easy|medium|hard]\n", programName);
     fprintf(stderr, "  %s --join <ip-or-hostname> [--player red|blue|green|black] [--remote-player color] [--port number]\n", programName);
+    fprintf(stderr, "  %s --relay-host <relay-address> --room <code> [--player red|blue|green|black] [--remote-player color] [--port number]\n", programName);
+    fprintf(stderr, "  %s --relay-join <relay-address> --room <code> [--player red|blue|green|black] [--remote-player color] [--port number]\n", programName);
 }
 
 static bool ParsePlayerType(const char *value, enum PlayerType *player)
@@ -235,6 +289,34 @@ static bool ParseLaunchOptions(int argc, char **argv, struct LaunchOptions *opti
             options->clientMode = true;
             snprintf(options->hostAddress, sizeof(options->hostAddress), "%s", argv[++i]);
         }
+        else if (strcmp(arg, "--relay-host") == 0)
+        {
+            if (i + 1 >= argc)
+            {
+                return false;
+            }
+            options->hostMode = true;
+            options->relayMode = true;
+            snprintf(options->relayAddress, sizeof(options->relayAddress), "%s", argv[++i]);
+        }
+        else if (strcmp(arg, "--relay-join") == 0)
+        {
+            if (i + 1 >= argc)
+            {
+                return false;
+            }
+            options->clientMode = true;
+            options->relayMode = true;
+            snprintf(options->relayAddress, sizeof(options->relayAddress), "%s", argv[++i]);
+        }
+        else if (strcmp(arg, "--room") == 0)
+        {
+            if (i + 1 >= argc)
+            {
+                return false;
+            }
+            snprintf(options->roomCode, sizeof(options->roomCode), "%s", argv[++i]);
+        }
         else if (strcmp(arg, "--player") == 0 || strcmp(arg, "--local-player") == 0)
         {
             if (i + 1 >= argc || !ParsePlayerType(argv[++i], &options->localPlayer))
@@ -279,6 +361,16 @@ static bool ParseLaunchOptions(int argc, char **argv, struct LaunchOptions *opti
     }
 
     if (options->hostMode && options->clientMode)
+    {
+        return false;
+    }
+
+    if (options->relayMode && options->roomCode[0] == '\0')
+    {
+        return false;
+    }
+
+    if (options->relayMode && options->relayAddress[0] == '\0')
     {
         return false;
     }

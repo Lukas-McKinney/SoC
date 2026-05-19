@@ -42,11 +42,14 @@ struct LaunchOptions
 {
     bool hostMode;
     bool clientMode;
+    bool relayMode;
     unsigned short port;
     enum PlayerType localPlayer;
     enum PlayerType remotePlayer;
     enum AiDifficulty aiDifficulty;
     char hostAddress[64];
+    char relayAddress[64];
+    char roomCode[32];
 };
 
 static void DrawSceneBackground(void);
@@ -132,9 +135,23 @@ int main(int argc, char **argv)
         const enum PlayerType remotePlayer = localIsHost ? launchOptions.remotePlayer : launchOptions.localPlayer;
 
         setupMap(&session.map);
-        ConfigurePrivateMatch(&session, hostPlayer, remotePlayer, launchOptions.aiDifficulty, localIsHost);
+        if (launchOptions.relayMode)
+        {
+            ConfigurePrivateRelayMatch(&session,
+                                       hostPlayer,
+                                       remotePlayer,
+                                       launchOptions.aiDifficulty,
+                                       localIsHost,
+                                       launchOptions.relayAddress,
+                                       launchOptions.port,
+                                       launchOptions.roomCode);
+        }
+        else
+        {
+            ConfigurePrivateMatch(&session, hostPlayer, remotePlayer, launchOptions.aiDifficulty, localIsHost);
+        }
         aiResetController();
-        if (launchOptions.hostMode)
+        if (launchOptions.hostMode && !launchOptions.relayMode)
         {
             if (!matchSessionOpenPrivateHost(&session, launchOptions.port))
             {
@@ -145,9 +162,31 @@ int main(int argc, char **argv)
                 return 1;
             }
         }
-        else if (!matchSessionOpenPrivateClient(&session, launchOptions.hostAddress, launchOptions.port))
+        else if (launchOptions.clientMode && !launchOptions.relayMode)
         {
-            fprintf(stderr, "failed to join private match: %s\n", matchSessionGetConnectionError(&session));
+            if (!matchSessionOpenPrivateClient(&session, launchOptions.hostAddress, launchOptions.port))
+            {
+                fprintf(stderr, "failed to join private match: %s\n", matchSessionGetConnectionError(&session));
+                settingsStoreSaveCurrent();
+                UnloadRendererAssets();
+                CloseWindow();
+                return 1;
+            }
+        }
+        else if (launchOptions.hostMode)
+        {
+            if (!matchSessionOpenPrivateHostRelay(&session, launchOptions.port, launchOptions.roomCode))
+            {
+                fprintf(stderr, "failed to host relay match: %s\n", matchSessionGetConnectionError(&session));
+                settingsStoreSaveCurrent();
+                UnloadRendererAssets();
+                CloseWindow();
+                return 1;
+            }
+        }
+        else if (!matchSessionOpenPrivateClientRelay(&session, launchOptions.port, launchOptions.roomCode))
+        {
+            fprintf(stderr, "failed to join relay match: %s\n", matchSessionGetConnectionError(&session));
             settingsStoreSaveCurrent();
             UnloadRendererAssets();
             CloseWindow();
