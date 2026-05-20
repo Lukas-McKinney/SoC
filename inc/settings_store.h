@@ -19,7 +19,7 @@ struct PersistedSettings
     unsigned long long totalWins;
     unsigned long long totalLosses;
     char profileName[32];
-    char multiplayerHostAddress[64];
+    char multiplayerHostAddress[128];
     unsigned short multiplayerPort;
 };
 

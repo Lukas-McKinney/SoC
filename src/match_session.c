@@ -1007,7 +1007,11 @@ bool matchSessionOpenPrivateHostRelay(struct MatchSession *session,
         return false;
     }
 
-    session->relayServerPort = relayServerPort;
+    snprintf(session->relayServerAddress,
+             sizeof(session->relayServerAddress),
+             "%s",
+             netplayGetPeerAddress(session->netplay));
+    session->relayServerPort = netplayGetPort(session->netplay);
     session->connectionStatus = MATCH_CONNECTION_WAITING_FOR_PLAYER;
     session->ready = false;
     session->matchStarted = false;
@@ -1046,8 +1050,13 @@ bool matchSessionOpenPrivateClientRelay(struct MatchSession *session,
         return false;
     }
 
+    snprintf(session->relayServerAddress,
+             sizeof(session->relayServerAddress),
+             "%s",
+             netplayGetPeerAddress(session->netplay));
+    session->relayServerPort = netplayGetPort(session->netplay);
     snprintf(session->reconnectHost, sizeof(session->reconnectHost), "%s", session->relayServerAddress);
-    session->reconnectPort = relayServerPort;
+    session->reconnectPort = session->relayServerPort;
     session->reconnectEnabled = true;
     reset_reconnect_state(session);
 

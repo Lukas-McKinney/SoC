@@ -191,6 +191,7 @@ static void InitLaunchOptions(struct LaunchOptions *options)
     options->remotePlayer = PLAYER_BLUE;
     options->aiDifficulty = AI_DIFFICULTY_MEDIUM;
     options->relayMode = false;
+    options->portSpecified = false;
     options->hostAddress[0] = '\0';
     options->relayAddress[0] = '\0';
     options->roomCode[0] = '\0';
@@ -346,6 +347,7 @@ static bool ParseLaunchOptions(int argc, char **argv, struct LaunchOptions *opti
                 return false;
             }
             options->port = (unsigned short)parsedPort;
+            options->portSpecified = true;
         }
         else if (strcmp(arg, "--ai-difficulty") == 0)
         {
@@ -375,7 +377,12 @@ static bool ParseLaunchOptions(int argc, char **argv, struct LaunchOptions *opti
         return false;
     }
 
-    if (options->clientMode && options->hostAddress[0] == '\0')
+    if (options->relayMode && !options->portSpecified)
+    {
+        options->port = 443u;
+    }
+
+    if (options->clientMode && !options->relayMode && options->hostAddress[0] == '\0')
     {
         return false;
     }

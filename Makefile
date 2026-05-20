@@ -5,14 +5,14 @@ SRC = $(wildcard src/*.c)
 GAME_SRC = $(filter-out src/console_game.c src/relay_server.c,$(SRC))
 RULE_TEST_SRC = tests/rule_validation.c src/board_rules.c src/game_logic.c src/map.c src/debug_log.c
 CONSOLE_SRC = src/console_game.c src/board_rules.c src/game_logic.c src/map.c src/debug_log.c
-RELAY_SERVER_SRC = src/relay_server.c
+RELAY_SERVER_SRC = src/relay_server.c src/websocket.c
 
 ifeq ($(OS),Windows_NT)
 RAYLIB_INCLUDE ?= C:/raylib/w64devkit/x86_64-w64-mingw32/include
 RAYLIB_LIB ?= C:/raylib/w64devkit/x86_64-w64-mingw32/lib
 
 CFLAGS = $(COMMON_CFLAGS) -Wno-expansion-to-defined -isystem $(RAYLIB_INCLUDE)
-GAME_LDFLAGS = -L$(RAYLIB_LIB) -lraylib -lopengl32 -lgdi32 -lwinmm -lws2_32
+GAME_LDFLAGS = -L$(RAYLIB_LIB) -lraylib -lopengl32 -lgdi32 -lwinmm -lws2_32 -lwinhttp
 RULE_TEST_LDFLAGS = $(GAME_LDFLAGS) -lm
 RELAY_SERVER_CFLAGS = $(COMMON_CFLAGS) -Wno-expansion-to-defined -isystem $(RAYLIB_INCLUDE)
 RELAY_SERVER_LDFLAGS = -lws2_32

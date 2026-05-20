@@ -236,21 +236,25 @@ Use these settings:
 
 Render will provide a `PORT` environment variable automatically, and the relay server uses it when present.
 
+The Render endpoint is exposed over `wss://`, so the game client should use the relay mode against the Render hostname on port `443`.
+
 If you want to run multiple rooms, you only need one Render instance; each room is identified by its room code.
 
 Launch the host through the relay:
 
 ```bash
-./settlers --relay-host <relay-address> --room <code> --player red --remote-player blue --port 24680
+./settlers --relay-host <relay-address> --room <code> --player red --remote-player blue --port 443
 ```
 
 Launch the joiner through the same relay and room:
 
 ```bash
-./settlers --relay-join <relay-address> --room <code> --player blue --remote-player red --port 24680
+./settlers --relay-join <relay-address> --room <code> --player blue --remote-player red --port 443
 ```
 
 Use the same room code on both sides. The relay server just forwards traffic; it does not need the game installed.
+
+In the in-app `Multiplayer` popup, entering a room code enables relay mode. Both `Host` and `Join` can then use the `Relay Address` field for the Render hostname, and pasted `ws://` / `wss://` URLs are normalized automatically. The UI also defaults relay mode to port `443` unless you override it.
 
 ## Validation
 

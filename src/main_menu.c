@@ -2,6 +2,7 @@
 
 #include "ai_controller.h"
 #include "localization.h"
+#include "netplay.h"
 #include "renderer_ui.h"
 #include "settings_store.h"
 #include "ui_state.h"
@@ -22,7 +23,8 @@ enum MainMenuMultiplayerField
 {
     MAIN_MENU_MULTIPLAYER_FIELD_NONE,
     MAIN_MENU_MULTIPLAYER_FIELD_HOST_ADDRESS,
-    MAIN_MENU_MULTIPLAYER_FIELD_PORT
+    MAIN_MENU_MULTIPLAYER_FIELD_PORT,
+    MAIN_MENU_MULTIPLAYER_FIELD_ROOM_CODE
 };
 
 struct MultiplayerPopupLayout
@@ -35,6 +37,7 @@ struct MultiplayerPopupLayout
     Rectangle aiDifficultyButton;
     Rectangle hostAddressField;
     Rectangle portField;
+    Rectangle roomCodeField;
     Rectangle confirmButton;
     Rectangle cancelButton;
     Rectangle closeButton;
@@ -94,6 +97,8 @@ static void AppendMultiplayerFieldChar(char *buffer, size_t bufferSize, int code
 static void RemoveMultiplayerFieldChar(char *buffer);
 static bool ValidateMultiplayerConfig(char *message, size_t messageSize);
 static void TrimMultiplayerHostAddress(void);
+static bool MultiplayerRelayModeRequested(void);
+static void SyncMultiplayerRelayDefaults(void);
 static const char *MultiplayerJoinDiagnosis(const char *errorMessage);
 static void HandleProfileNameKeyboardInput(void);
 static void AppendProfileNameChar(char *buffer, size_t bufferSize, int codepoint);
@@ -116,8 +121,9 @@ static enum MainMenuMultiplayerField gMainMenuMultiplayerField = MAIN_MENU_MULTI
 static enum PlayerType gMainMenuMultiplayerLocalColor = PLAYER_RED;
 static enum PlayerType gMainMenuMultiplayerRemoteColor = PLAYER_BLUE;
 static enum AiDifficulty gMainMenuMultiplayerAiDifficulty = AI_DIFFICULTY_MEDIUM;
-static char gMainMenuMultiplayerHostAddress[64] = "127.0.0.1";
+static char gMainMenuMultiplayerHostAddress[128] = "127.0.0.1";
 static char gMainMenuMultiplayerPortText[8] = "24680";
+static char gMainMenuMultiplayerRoomCode[32] = "";
 static char gMainMenuMultiplayerError[96] = {0};
 static bool gMainMenuProfileNameEditing = false;
 static char gMainMenuProfileNameBuffer[32] = "Player";
@@ -212,7 +218,9 @@ enum MainMenuAction HandleMainMenuInput(void)
         if (CheckCollisionPointRec(mouse, layout.hostModeButton))
         {
             gMainMenuMultiplayerMode = MAIN_MENU_MULTIPLAYER_HOST;
-            gMainMenuMultiplayerField = MAIN_MENU_MULTIPLAYER_FIELD_PORT;
+            gMainMenuMultiplayerField = MultiplayerRelayModeRequested()
+                                            ? MAIN_MENU_MULTIPLAYER_FIELD_HOST_ADDRESS
+                                            : MAIN_MENU_MULTIPLAYER_FIELD_PORT;
             gMainMenuMultiplayerError[0] = '\0';
             NormalizeMultiplayerSelection();
             return MAIN_MENU_ACTION_NONE;
@@ -243,7 +251,7 @@ enum MainMenuAction HandleMainMenuInput(void)
             gMainMenuMultiplayerError[0] = '\0';
             return MAIN_MENU_ACTION_NONE;
         }
-        if (gMainMenuMultiplayerMode == MAIN_MENU_MULTIPLAYER_JOIN && CheckCollisionPointRec(mouse, layout.hostAddressField))
+        if (CheckCollisionPointRec(mouse, layout.hostAddressField))
         {
             gMainMenuMultiplayerField = MAIN_MENU_MULTIPLAYER_FIELD_HOST_ADDRESS;
             return MAIN_MENU_ACTION_NONE;
@@ -251,6 +259,11 @@ enum MainMenuAction HandleMainMenuInput(void)
         if (CheckCollisionPointRec(mouse, layout.portField))
         {
             gMainMenuMultiplayerField = MAIN_MENU_MULTIPLAYER_FIELD_PORT;
+            return MAIN_MENU_ACTION_NONE;
+        }
+        if (CheckCollisionPointRec(mouse, layout.roomCodeField))
+        {
+            gMainMenuMultiplayerField = MAIN_MENU_MULTIPLAYER_FIELD_ROOM_CODE;
             return MAIN_MENU_ACTION_NONE;
         }
         if (CheckCollisionPointRec(mouse, layout.confirmButton))
@@ -780,24 +793,39 @@ static struct MultiplayerPopupLayout BuildMultiplayerPopupLayout(void)
 {
     const bool joinMode = gMainMenuMultiplayerMode == MAIN_MENU_MULTIPLAYER_JOIN;
     const float panelWidth = 468.0f;
-    const float panelHeight = joinMode ? 498.0f : 442.0f;
     const float fieldWidth = panelWidth - 52.0f;
     const float modeButtonWidth = (fieldWidth - 10.0f) * 0.5f;
+    const float modeButtonY = 102.0f;
+    const float localColorY = 164.0f;
+    const float remoteColorY = 218.0f;
+    const float controlsTopY = 272.0f;
+    const float smallFieldH = 42.0f;
+    const float largeFieldH = 50.0f;
+    /* gap removed; spacing tuned explicitly below */
+    struct MultiplayerPopupLayout layout;
+
+    /* Compute heights so ai-difficulty, address, port, and room remain readable in both modes. */
+    const float aiDifficultyY = controlsTopY; /* used when hosting */
+    const float hostAddressY = joinMode ? controlsTopY : aiDifficultyY + smallFieldH + 20.0f;
+    const float portY = hostAddressY + largeFieldH + 36.0f;
+    const float roomY = portY + largeFieldH + 28.0f;
+    const float bottomMargin = 58.0f + 20.0f; /* space for buttons + padding */
+    const float panelHeight = (roomY + largeFieldH + bottomMargin) - 0.0f; /* will center later */
     const Rectangle panel = {
         (float)GetScreenWidth() * 0.5f - panelWidth * 0.5f,
         (float)GetScreenHeight() * 0.5f - panelHeight * 0.5f,
         panelWidth,
         panelHeight};
-    struct MultiplayerPopupLayout layout;
 
     layout.panel = panel;
-    layout.hostModeButton = (Rectangle){panel.x + 26.0f, panel.y + 102.0f, modeButtonWidth, 42.0f};
-    layout.joinModeButton = (Rectangle){layout.hostModeButton.x + modeButtonWidth + 10.0f, panel.y + 102.0f, modeButtonWidth, 42.0f};
-    layout.localColorButton = (Rectangle){panel.x + 26.0f, panel.y + 164.0f, fieldWidth, 42.0f};
-    layout.remoteColorButton = (Rectangle){panel.x + 26.0f, panel.y + 218.0f, fieldWidth, 42.0f};
-    layout.aiDifficultyButton = (Rectangle){panel.x + 26.0f, panel.y + 272.0f, fieldWidth, 42.0f};
-    layout.hostAddressField = (Rectangle){panel.x + 26.0f, panel.y + 272.0f, fieldWidth, 50.0f};
-    layout.portField = (Rectangle){panel.x + 26.0f, panel.y + (joinMode ? 346.0f : 326.0f), fieldWidth, 50.0f};
+    layout.hostModeButton = (Rectangle){panel.x + 26.0f, panel.y + modeButtonY, modeButtonWidth, 42.0f};
+    layout.joinModeButton = (Rectangle){layout.hostModeButton.x + modeButtonWidth + 10.0f, panel.y + modeButtonY, modeButtonWidth, 42.0f};
+    layout.localColorButton = (Rectangle){panel.x + 26.0f, panel.y + localColorY, fieldWidth, smallFieldH};
+    layout.remoteColorButton = (Rectangle){panel.x + 26.0f, panel.y + remoteColorY, fieldWidth, smallFieldH};
+    layout.aiDifficultyButton = (Rectangle){panel.x + 26.0f, panel.y + aiDifficultyY, fieldWidth, smallFieldH};
+    layout.hostAddressField = (Rectangle){panel.x + 26.0f, panel.y + hostAddressY, fieldWidth, largeFieldH};
+    layout.portField = (Rectangle){panel.x + 26.0f, panel.y + portY, fieldWidth, largeFieldH};
+    layout.roomCodeField = (Rectangle){panel.x + 26.0f, panel.y + roomY, fieldWidth, largeFieldH};
     layout.confirmButton = (Rectangle){panel.x + 26.0f, panel.y + panel.height - 58.0f, panel.width - 168.0f, 38.0f};
     layout.cancelButton = (Rectangle){panel.x + panel.width - 122.0f, panel.y + panel.height - 58.0f, 94.0f, 38.0f};
     layout.closeButton = (Rectangle){panel.x + panel.width - 42.0f, panel.y + 14.0f, 24.0f, 24.0f};
@@ -874,7 +902,9 @@ enum AiDifficulty MainMenuGetMultiplayerAiDifficulty(void)
 unsigned short MainMenuGetMultiplayerPort(void)
 {
     const long parsed = strtol(gMainMenuMultiplayerPortText, NULL, 10);
-    return parsed > 0L && parsed <= 65535L ? (unsigned short)parsed : 24680u;
+    return parsed > 0L && parsed <= 65535L
+               ? (unsigned short)parsed
+               : (MultiplayerRelayModeRequested() ? 443u : NETPLAY_DEFAULT_PORT);
 }
 
 const char *MainMenuGetMultiplayerHostAddress(void)
@@ -886,7 +916,7 @@ void MainMenuSetMultiplayerPort(unsigned short port)
 {
     if (port == 0u)
     {
-        port = 24680u;
+        port = MultiplayerRelayModeRequested() ? 443u : NETPLAY_DEFAULT_PORT;
     }
 
     snprintf(gMainMenuMultiplayerPortText, sizeof(gMainMenuMultiplayerPortText), "%u", (unsigned int)port);
@@ -898,6 +928,7 @@ void MainMenuSetMultiplayerHostAddress(const char *address)
              sizeof(gMainMenuMultiplayerHostAddress),
              "%s",
              (address != NULL && address[0] != '\0') ? address : "127.0.0.1");
+    TrimMultiplayerHostAddress();
 }
 
 void MainMenuSetMultiplayerOpen(bool open)
@@ -908,7 +939,7 @@ void MainMenuSetMultiplayerOpen(bool open)
         gMainMenuSettingsOpen = false;
     }
     gMainMenuMultiplayerField = open
-                                    ? (gMainMenuMultiplayerMode == MAIN_MENU_MULTIPLAYER_JOIN
+                                    ? ((gMainMenuMultiplayerMode == MAIN_MENU_MULTIPLAYER_JOIN || MultiplayerRelayModeRequested())
                                            ? MAIN_MENU_MULTIPLAYER_FIELD_HOST_ADDRESS
                                            : MAIN_MENU_MULTIPLAYER_FIELD_PORT)
                                     : MAIN_MENU_MULTIPLAYER_FIELD_NONE;
@@ -922,6 +953,26 @@ void MainMenuSetMultiplayerOpen(bool open)
 void MainMenuSetMultiplayerError(const char *message)
 {
     snprintf(gMainMenuMultiplayerError, sizeof(gMainMenuMultiplayerError), "%s", message == NULL ? "" : message);
+}
+
+bool MainMenuIsUsingRelay(void)
+{
+    return MultiplayerRelayModeRequested();
+}
+
+const char *MainMenuGetMultiplayerRoomCode(void)
+{
+    return gMainMenuMultiplayerRoomCode;
+}
+
+void MainMenuSetMultiplayerRoomCode(const char *code)
+{
+    const bool relayModeBefore = MultiplayerRelayModeRequested();
+    snprintf(gMainMenuMultiplayerRoomCode, sizeof(gMainMenuMultiplayerRoomCode), "%s", code != NULL ? code : "");
+    if (!relayModeBefore && MultiplayerRelayModeRequested())
+    {
+        SyncMultiplayerRelayDefaults();
+    }
 }
 
 static void DrawLocalLobbyPopup(void)
@@ -1189,6 +1240,7 @@ static void DrawMultiplayerPopup(void)
     char difficultyLabel[48];
     const bool darkTheme = uiGetTheme() == UI_THEME_DARK;
     const bool joinMode = gMainMenuMultiplayerMode == MAIN_MENU_MULTIPLAYER_JOIN;
+    const bool relayMode = MultiplayerRelayModeRequested();
     const Color panelColor = darkTheme ? (Color){35, 43, 55, 252} : (Color){245, 237, 217, 252};
     const Color borderColor = darkTheme ? (Color){132, 151, 176, 255} : (Color){118, 88, 56, 255};
     const Color textColor = darkTheme ? (Color){236, 241, 246, 255} : (Color){54, 39, 29, 255};
@@ -1196,6 +1248,17 @@ static void DrawMultiplayerPopup(void)
     const Color accentColor = darkTheme ? (Color){188, 135, 83, 255} : (Color){171, 82, 54, 255};
     const Color sectionFill = darkTheme ? (Color){63, 77, 95, 255} : (Color){233, 226, 207, 255};
     const char *joinDiagnosis = NULL;
+    const char *addressLabel = relayMode
+                                   ? loc("Relay Address")
+                                   : (joinMode ? loc("Host Address") : loc("Relay Address"));
+    const char *addressPlaceholder = relayMode
+                                         ? "wss://your-service.onrender.com"
+                                         : (joinMode ? "127.0.0.1" : "wss://your-service.onrender.com");
+    const char *addressHelpText = relayMode
+                                      ? loc("Paste the relay hostname or a ws:// / wss:// URL. Render usually uses port 443.")
+                                      : (joinMode
+                                             ? loc("For another machine, use host LAN IP (not 127.0.0.1).")
+                                             : loc("Optional: add a room code to use a relay such as Render."));
 
     if (!gMainMenuMultiplayerOpen)
     {
@@ -1239,28 +1302,40 @@ static void DrawMultiplayerPopup(void)
         DrawUiText(loc("You will receive your seat after connecting."), layout.panel.x + 26.0f, layout.localColorButton.y + 34.0f, 17, bodyColor);
     }
 
-    if (joinMode)
-    {
-        DrawUiText(loc("For another machine, use host LAN IP (not 127.0.0.1)."), layout.panel.x + 26.0f, layout.hostAddressField.y - 44.0f, 15, bodyColor);
-        DrawTextField(layout.hostAddressField, loc("Host Address"),
-                      gMainMenuMultiplayerHostAddress,
-                      "127.0.0.1",
-                      gMainMenuMultiplayerField == MAIN_MENU_MULTIPLAYER_FIELD_HOST_ADDRESS,
-                      darkTheme ? (Color){51, 63, 79, 255} : (Color){236, 229, 210, 255},
-                      borderColor,
-                      textColor,
-                      bodyColor);
-        DrawUiText(loc("Press Ctrl+V to paste."), layout.panel.x + 26.0f, layout.hostAddressField.y + layout.hostAddressField.height + 8.0f, 15, bodyColor);
-    }
-    else
+    if (!joinMode)
     {
         DrawMenuButton(layout.aiDifficultyButton, difficultyLabel, sectionFill, borderColor, textColor, false);
     }
 
+    DrawTextField(layout.hostAddressField,
+                  addressLabel,
+                  gMainMenuMultiplayerHostAddress,
+                  addressPlaceholder,
+                  gMainMenuMultiplayerField == MAIN_MENU_MULTIPLAYER_FIELD_HOST_ADDRESS,
+                  darkTheme ? (Color){51, 63, 79, 255} : (Color){236, 229, 210, 255},
+                  borderColor,
+                  textColor,
+                  bodyColor);
+    DrawUiText(addressHelpText,
+               layout.panel.x + 26.0f,
+               layout.hostAddressField.y + layout.hostAddressField.height + 12.0f,
+               15,
+               bodyColor);
+
     DrawTextField(layout.portField, loc("Port"),
                   gMainMenuMultiplayerPortText,
-                  "24680",
+                  relayMode ? "443" : "24680",
                   gMainMenuMultiplayerField == MAIN_MENU_MULTIPLAYER_FIELD_PORT,
+                  darkTheme ? (Color){51, 63, 79, 255} : (Color){236, 229, 210, 255},
+                  borderColor,
+                  textColor,
+                  bodyColor);
+
+    DrawTextField(layout.roomCodeField,
+                  loc("Room Code"),
+                  gMainMenuMultiplayerRoomCode,
+                  loc("Optional"),
+                  gMainMenuMultiplayerField == MAIN_MENU_MULTIPLAYER_FIELD_ROOM_CODE,
                   darkTheme ? (Color){51, 63, 79, 255} : (Color){236, 229, 210, 255},
                   borderColor,
                   textColor,
@@ -1275,9 +1350,18 @@ static void DrawMultiplayerPopup(void)
             joinDiagnosis = MultiplayerJoinDiagnosis(gMainMenuMultiplayerError);
             DrawUiText(joinDiagnosis, layout.panel.x + 26.0f, layout.confirmButton.y - 14.0f, 15, bodyColor);
             DrawUiText(loc("Quick checks:"), layout.panel.x + 26.0f, layout.confirmButton.y + 4.0f, 15, bodyColor);
-            DrawUiText(loc("1) Host clicked Open Lobby."), layout.panel.x + 34.0f, layout.confirmButton.y + 20.0f, 14, bodyColor);
-            DrawUiText(loc("2) Use host LAN IP on same network."), layout.panel.x + 34.0f, layout.confirmButton.y + 36.0f, 14, bodyColor);
-            DrawUiText(loc("3) Allow app through host firewall."), layout.panel.x + 34.0f, layout.confirmButton.y + 52.0f, 14, bodyColor);
+            if (relayMode)
+            {
+                DrawUiText(loc("1) Use the same room code on both sides."), layout.panel.x + 34.0f, layout.confirmButton.y + 20.0f, 14, bodyColor);
+                DrawUiText(loc("2) Use the relay hostname, not a LAN IP."), layout.panel.x + 34.0f, layout.confirmButton.y + 36.0f, 14, bodyColor);
+                DrawUiText(loc("3) Render usually needs port 443."), layout.panel.x + 34.0f, layout.confirmButton.y + 52.0f, 14, bodyColor);
+            }
+            else
+            {
+                DrawUiText(loc("1) Host clicked Open Lobby."), layout.panel.x + 34.0f, layout.confirmButton.y + 20.0f, 14, bodyColor);
+                DrawUiText(loc("2) Use host LAN IP on same network."), layout.panel.x + 34.0f, layout.confirmButton.y + 36.0f, 14, bodyColor);
+                DrawUiText(loc("3) Allow app through host firewall."), layout.panel.x + 34.0f, layout.confirmButton.y + 52.0f, 14, bodyColor);
+            }
         }
     }
 
@@ -1428,15 +1512,17 @@ static void HandleMultiplayerKeyboardInput(void)
 
     if (IsKeyPressed(KEY_TAB))
     {
-        if (gMainMenuMultiplayerMode == MAIN_MENU_MULTIPLAYER_JOIN)
+        if (gMainMenuMultiplayerField == MAIN_MENU_MULTIPLAYER_FIELD_HOST_ADDRESS)
         {
-            gMainMenuMultiplayerField = gMainMenuMultiplayerField == MAIN_MENU_MULTIPLAYER_FIELD_HOST_ADDRESS
-                                            ? MAIN_MENU_MULTIPLAYER_FIELD_PORT
-                                            : MAIN_MENU_MULTIPLAYER_FIELD_HOST_ADDRESS;
+            gMainMenuMultiplayerField = MAIN_MENU_MULTIPLAYER_FIELD_PORT;
+        }
+        else if (gMainMenuMultiplayerField == MAIN_MENU_MULTIPLAYER_FIELD_PORT)
+        {
+            gMainMenuMultiplayerField = MAIN_MENU_MULTIPLAYER_FIELD_ROOM_CODE;
         }
         else
         {
-            gMainMenuMultiplayerField = MAIN_MENU_MULTIPLAYER_FIELD_PORT;
+            gMainMenuMultiplayerField = MAIN_MENU_MULTIPLAYER_FIELD_HOST_ADDRESS;
         }
     }
 
@@ -1449,6 +1535,11 @@ static void HandleMultiplayerKeyboardInput(void)
     {
         activeBuffer = gMainMenuMultiplayerPortText;
         activeBufferSize = sizeof(gMainMenuMultiplayerPortText);
+    }
+    else if (gMainMenuMultiplayerField == MAIN_MENU_MULTIPLAYER_FIELD_ROOM_CODE)
+    {
+        activeBuffer = gMainMenuMultiplayerRoomCode;
+        activeBufferSize = sizeof(gMainMenuMultiplayerRoomCode);
     }
 
     if (activeBuffer == NULL)
@@ -1470,7 +1561,8 @@ static void HandleMultiplayerKeyboardInput(void)
                 if ((c >= '0' && c <= '9') ||
                     (c >= 'A' && c <= 'Z') ||
                     (c >= 'a' && c <= 'z') ||
-                    c == '.' || c == '-' || c == ':')
+                    c == '.' || c == '-' || c == ':' ||
+                    c == '/' || c == '?' || c == '#')
                 {
                     activeBuffer[writeIndex++] = (char)c;
                 }
@@ -1483,14 +1575,28 @@ static void HandleMultiplayerKeyboardInput(void)
 
     if (IsKeyPressed(KEY_BACKSPACE))
     {
+        const bool relayModeBeforeEdit = MultiplayerRelayModeRequested();
         RemoveMultiplayerFieldChar(activeBuffer);
+        if (gMainMenuMultiplayerField == MAIN_MENU_MULTIPLAYER_FIELD_ROOM_CODE &&
+            !relayModeBeforeEdit &&
+            MultiplayerRelayModeRequested())
+        {
+            SyncMultiplayerRelayDefaults();
+        }
         gMainMenuMultiplayerError[0] = '\0';
     }
 
     codepoint = GetCharPressed();
     while (codepoint > 0)
     {
+        const bool relayModeBeforeEdit = MultiplayerRelayModeRequested();
         AppendMultiplayerFieldChar(activeBuffer, activeBufferSize, codepoint);
+        if (gMainMenuMultiplayerField == MAIN_MENU_MULTIPLAYER_FIELD_ROOM_CODE &&
+            !relayModeBeforeEdit &&
+            MultiplayerRelayModeRequested())
+        {
+            SyncMultiplayerRelayDefaults();
+        }
         codepoint = GetCharPressed();
     }
 }
@@ -1515,10 +1621,25 @@ static void AppendMultiplayerFieldChar(char *buffer, size_t bufferSize, int code
         return;
     }
 
+    if (gMainMenuMultiplayerField == MAIN_MENU_MULTIPLAYER_FIELD_ROOM_CODE)
+    {
+        if ((codepoint >= '0' && codepoint <= '9') ||
+            (codepoint >= 'A' && codepoint <= 'Z') ||
+            (codepoint >= 'a' && codepoint <= 'z') ||
+            codepoint == '.' || codepoint == '-' || codepoint == '_')
+        {
+            buffer[length] = (char)codepoint;
+            buffer[length + 1u] = '\0';
+            gMainMenuMultiplayerError[0] = '\0';
+        }
+        return;
+    }
+
     if ((codepoint >= '0' && codepoint <= '9') ||
         (codepoint >= 'A' && codepoint <= 'Z') ||
         (codepoint >= 'a' && codepoint <= 'z') ||
-        codepoint == '.' || codepoint == '-' || codepoint == ':')
+        codepoint == '.' || codepoint == '-' || codepoint == ':' ||
+        codepoint == '/' || codepoint == '?' || codepoint == '#')
     {
         buffer[length] = (char)codepoint;
         buffer[length + 1u] = '\0';
@@ -1606,10 +1727,38 @@ static void ApplyProfileNameFromBuffer(void)
     settingsStoreSaveCurrent();
 }
 
+static bool MultiplayerRelayModeRequested(void)
+{
+    return gMainMenuMultiplayerRoomCode[0] != '\0';
+}
+
+static void SyncMultiplayerRelayDefaults(void)
+{
+    const long parsedPort = strtol(gMainMenuMultiplayerPortText, NULL, 10);
+
+    if (!MultiplayerRelayModeRequested())
+    {
+        return;
+    }
+
+    if (gMainMenuMultiplayerPortText[0] == '\0' || parsedPort == (long)NETPLAY_DEFAULT_PORT)
+    {
+        MainMenuSetMultiplayerPort(443u);
+    }
+
+    if (strcmp(gMainMenuMultiplayerHostAddress, "127.0.0.1") == 0 ||
+        strcmp(gMainMenuMultiplayerHostAddress, "localhost") == 0 ||
+        strcmp(gMainMenuMultiplayerHostAddress, "::1") == 0)
+    {
+        gMainMenuMultiplayerHostAddress[0] = '\0';
+    }
+}
+
 static bool ValidateMultiplayerConfig(char *message, size_t messageSize)
 {
     char *end = NULL;
     long parsedPort = 0L;
+    const bool relayMode = MultiplayerRelayModeRequested();
 
     NormalizeMultiplayerSelection();
     TrimMultiplayerHostAddress();
@@ -1631,18 +1780,25 @@ static bool ValidateMultiplayerConfig(char *message, size_t messageSize)
         return false;
     }
 
-    if (gMainMenuMultiplayerMode == MAIN_MENU_MULTIPLAYER_JOIN && gMainMenuMultiplayerHostAddress[0] == '\0')
+    if ((gMainMenuMultiplayerMode == MAIN_MENU_MULTIPLAYER_JOIN || relayMode) &&
+        gMainMenuMultiplayerHostAddress[0] == '\0')
     {
-        snprintf(message, messageSize, "%s", loc("Host address is required."));
+        snprintf(message,
+                 messageSize,
+                 "%s",
+                 relayMode ? loc("Relay address is required.") : loc("Host address is required."));
         return false;
     }
 
-    if (gMainMenuMultiplayerMode == MAIN_MENU_MULTIPLAYER_JOIN)
+    if (gMainMenuMultiplayerMode == MAIN_MENU_MULTIPLAYER_JOIN || relayMode)
     {
         const size_t hostLength = strlen(gMainMenuMultiplayerHostAddress);
-        if (hostLength > 63u)
+        if (hostLength >= sizeof(gMainMenuMultiplayerHostAddress))
         {
-            snprintf(message, messageSize, "%s", loc("Host address is too long."));
+            snprintf(message,
+                     messageSize,
+                     "%s",
+                     relayMode ? loc("Relay address is too long.") : loc("Host address is too long."));
             return false;
         }
     }
@@ -1674,6 +1830,10 @@ static const char *MultiplayerJoinDiagnosis(const char *errorMessage)
     {
         return loc("Likely issue: version mismatch between host and client.");
     }
+    if (strstr(lowered, "websocket") != NULL || strstr(lowered, "upgrade") != NULL)
+    {
+        return loc("Likely issue: use the relay hostname and port 443.");
+    }
     if (strstr(lowered, "lan ip") != NULL || strstr(lowered, "localhost") != NULL || strstr(lowered, "127.0.0.1") != NULL)
     {
         return loc("Likely issue: use host LAN IP, not localhost.");
@@ -1696,9 +1856,14 @@ static const char *MultiplayerJoinDiagnosis(const char *errorMessage)
 
 static void TrimMultiplayerHostAddress(void)
 {
+    char normalized[sizeof(gMainMenuMultiplayerHostAddress)];
+    size_t writeLength = 0u;
     size_t start = 0u;
     size_t end = 0u;
     size_t length = 0u;
+    bool secureScheme = false;
+    char *delimiter = NULL;
+    char *colon = NULL;
 
     if (gMainMenuMultiplayerHostAddress[0] == '\0')
     {
@@ -1717,11 +1882,93 @@ static void TrimMultiplayerHostAddress(void)
         end--;
     }
 
-    if (start > 0u)
+    if (end <= start)
     {
-        memmove(gMainMenuMultiplayerHostAddress,
-                gMainMenuMultiplayerHostAddress + start,
-                end - start);
+        gMainMenuMultiplayerHostAddress[0] = '\0';
+        return;
     }
-    gMainMenuMultiplayerHostAddress[end - start] = '\0';
+
+    writeLength = end - start;
+    if (writeLength >= sizeof(normalized))
+    {
+        writeLength = sizeof(normalized) - 1u;
+    }
+
+    memcpy(normalized, gMainMenuMultiplayerHostAddress + start, writeLength);
+    normalized[writeLength] = '\0';
+
+    if (((normalized[0] == 'w' || normalized[0] == 'W') &&
+         (normalized[1] == 's' || normalized[1] == 'S') &&
+         normalized[2] == ':' &&
+         normalized[3] == '/' &&
+         normalized[4] == '/'))
+    {
+        memmove(normalized, normalized + 5, strlen(normalized + 5) + 1u);
+    }
+    else if (((normalized[0] == 'w' || normalized[0] == 'W') &&
+              (normalized[1] == 's' || normalized[1] == 'S') &&
+              (normalized[2] == 's' || normalized[2] == 'S') &&
+              normalized[3] == ':' &&
+              normalized[4] == '/' &&
+              normalized[5] == '/'))
+    {
+        secureScheme = true;
+        memmove(normalized, normalized + 6, strlen(normalized + 6) + 1u);
+    }
+    else if (((normalized[0] == 'h' || normalized[0] == 'H') &&
+              (normalized[1] == 't' || normalized[1] == 'T') &&
+              (normalized[2] == 't' || normalized[2] == 'T') &&
+              (normalized[3] == 'p' || normalized[3] == 'P') &&
+              normalized[4] == ':' &&
+              normalized[5] == '/' &&
+              normalized[6] == '/'))
+    {
+        memmove(normalized, normalized + 7, strlen(normalized + 7) + 1u);
+    }
+    else if (((normalized[0] == 'h' || normalized[0] == 'H') &&
+              (normalized[1] == 't' || normalized[1] == 'T') &&
+              (normalized[2] == 't' || normalized[2] == 'T') &&
+              (normalized[3] == 'p' || normalized[3] == 'P') &&
+              (normalized[4] == 's' || normalized[4] == 'S') &&
+              normalized[5] == ':' &&
+              normalized[6] == '/' &&
+              normalized[7] == '/'))
+    {
+        secureScheme = true;
+        memmove(normalized, normalized + 8, strlen(normalized + 8) + 1u);
+    }
+
+    while (normalized[0] == '/' && normalized[1] == '/')
+    {
+        memmove(normalized, normalized + 2, strlen(normalized + 2) + 1u);
+    }
+
+    delimiter = strpbrk(normalized, "/?#");
+    if (delimiter != NULL)
+    {
+        *delimiter = '\0';
+    }
+
+    colon = strrchr(normalized, ':');
+    if (colon != NULL && strchr(normalized, '[') == NULL && strchr(colon + 1, ':') == NULL)
+    {
+        char *portEnd = NULL;
+        const long parsedPort = strtol(colon + 1, &portEnd, 10);
+        if (colon[1] != '\0' &&
+            portEnd != NULL &&
+            *portEnd == '\0' &&
+            parsedPort > 0L &&
+            parsedPort <= 65535L)
+        {
+            *colon = '\0';
+            MainMenuSetMultiplayerPort((unsigned short)parsedPort);
+        }
+    }
+
+    if (secureScheme && MainMenuGetMultiplayerPort() == NETPLAY_DEFAULT_PORT)
+    {
+        MainMenuSetMultiplayerPort(443u);
+    }
+
+    snprintf(gMainMenuMultiplayerHostAddress, sizeof(gMainMenuMultiplayerHostAddress), "%s", normalized);
 }

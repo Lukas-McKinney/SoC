@@ -4,10 +4,13 @@
 #define NOUSER
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <winhttp.h>
 #endif
 
 #include "netplay.h"
+#include "websocket.h"
 
+#include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,6 +30,7 @@ typedef int NetSockLen;
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <sys/ioctl.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -179,6 +183,12 @@ struct NetplayState
     char relayHandshake[NETPLAY_RELAY_HANDSHAKE_MAX];
     size_t relayHandshakeLength;
     size_t relayHandshakeOffset;
+#ifdef _WIN32
+    HINTERNET relaySession;
+    HINTERNET relayConnection;
+    HINTERNET relayRequest;
+    HINTERNET relayWebSocket;
+#endif
     unsigned char recvBuffer[NETPLAY_RECV_BUFFER_SIZE];
     size_t recvLength;
     struct NetplayQueuedPacket sendQueue[NETPLAY_SEND_QUEUE_CAPACITY];
@@ -205,12 +215,27 @@ static bool gSocketLayerReady = false;
 static bool net_socket_layer_init(void);
 static uint64_t netplay_now_ms(void);
 static bool is_loopback_host(const char *hostAddress);
+static bool parse_relay_endpoint(const char *input,
+                                 unsigned short fallbackPort,
+                                 char *hostBuffer,
+                                 size_t hostBufferSize,
+                                 unsigned short *resolvedPort,
+                                 bool *secureTransport);
 static void detect_local_ipv4_address(char *buffer, size_t bufferSize);
 static void clear_last_error(struct NetplayState *state);
 static void set_last_error(struct NetplayState *state, const char *message);
 static bool set_socket_nonblocking(NetSocket socketHandle);
 static void set_socket_nodelay(NetSocket socketHandle);
 static void close_socket_if_open(NetSocket *socketHandle);
+static void close_relay_transport(struct NetplayState *state);
+static bool open_relay_transport(struct NetplayState *state,
+                                 const char *hostAddress,
+                                 unsigned short port,
+                                 bool secureTransport,
+                                 bool isRelayHost,
+                                 const char *roomCode);
+static int send_relay_message(struct NetplayState *state, const unsigned char *buffer, size_t length, bool binaryMessage);
+static int receive_relay_message(struct NetplayState *state, unsigned char *buffer, size_t bufferSize);
 static NetSocket get_host_peer_socket_by_id(const struct NetplayState *state, int peerId);
 static bool socket_is_writable(NetSocket socketHandle);
 static void reset_connection_buffers(struct NetplayState *state);
@@ -223,6 +248,9 @@ static bool start_outbound_connection(struct NetplayState *state,
                                       bool relayTransport,
                                       bool isRelayHost,
                                       const char *roomCode);
+static int transport_send(NetSocket socketHandle, const char *buffer, int length);
+static int transport_recv(NetSocket socketHandle, char *buffer, int length, int flags);
+static int transport_accept(NetSocket socketHandle, struct sockaddr_in *address, NetSockLen *addressLength);
 static bool push_event(struct NetplayState *state, const struct NetplayEvent *event);
 static bool queue_packet_to_peer(struct NetplayState *state, int peerId, enum NetplayPacketType type, const void *payload, size_t payloadSize);
 static bool queue_packet_to_all_host_peers(struct NetplayState *state, enum NetplayPacketType type, const void *payload, size_t payloadSize);
@@ -310,6 +338,15 @@ static int count_tracked_host_peers(const struct NetplayState *state)
     if (state == NULL)
     {
         return 0;
+    }
+
+    if (state->relayTransport)
+    {
+#ifdef _WIN32
+        return state->relayWebSocket != NULL ? 1 : 0;
+#else
+        return 0;
+#endif
     }
 
     if (state->peerSocket != NET_INVALID_SOCKET)
@@ -500,6 +537,135 @@ static bool is_loopback_host(const char *hostAddress)
            strcmp(hostAddress, "::1") == 0;
 }
 
+static bool parse_relay_endpoint(const char *input,
+                                 unsigned short fallbackPort,
+                                 char *hostBuffer,
+                                 size_t hostBufferSize,
+                                 unsigned short *resolvedPort,
+                                 bool *secureTransport)
+{
+    char buffer[256];
+    const char *source = input;
+    size_t length = 0u;
+    char *delimiter = NULL;
+    char *colon = NULL;
+    bool secure = false;
+    unsigned short port = fallbackPort;
+
+    if (input == NULL || hostBuffer == NULL || hostBufferSize == 0u)
+    {
+        return false;
+    }
+
+    while (*source != '\0' && isspace((unsigned char)*source))
+    {
+        source++;
+    }
+
+    length = strlen(source);
+    while (length > 0u && isspace((unsigned char)source[length - 1u]))
+    {
+        length--;
+    }
+
+    if (length == 0u || length >= sizeof(buffer))
+    {
+        return false;
+    }
+
+    memcpy(buffer, source, length);
+    buffer[length] = '\0';
+
+    if (((buffer[0] == 'w' || buffer[0] == 'W') &&
+         (buffer[1] == 's' || buffer[1] == 'S') &&
+         buffer[2] == ':' &&
+         buffer[3] == '/' &&
+         buffer[4] == '/'))
+    {
+        memmove(buffer, buffer + 5, strlen(buffer + 5) + 1u);
+    }
+    else if (((buffer[0] == 'w' || buffer[0] == 'W') &&
+              (buffer[1] == 's' || buffer[1] == 'S') &&
+              (buffer[2] == 's' || buffer[2] == 'S') &&
+              buffer[3] == ':' &&
+              buffer[4] == '/' &&
+              buffer[5] == '/'))
+    {
+        secure = true;
+        memmove(buffer, buffer + 6, strlen(buffer + 6) + 1u);
+    }
+    else if (((buffer[0] == 'h' || buffer[0] == 'H') &&
+              (buffer[1] == 't' || buffer[1] == 'T') &&
+              (buffer[2] == 't' || buffer[2] == 'T') &&
+              (buffer[3] == 'p' || buffer[3] == 'P') &&
+              buffer[4] == ':' &&
+              buffer[5] == '/' &&
+              buffer[6] == '/'))
+    {
+        memmove(buffer, buffer + 7, strlen(buffer + 7) + 1u);
+    }
+    else if (((buffer[0] == 'h' || buffer[0] == 'H') &&
+              (buffer[1] == 't' || buffer[1] == 'T') &&
+              (buffer[2] == 't' || buffer[2] == 'T') &&
+              (buffer[3] == 'p' || buffer[3] == 'P') &&
+              (buffer[4] == 's' || buffer[4] == 'S') &&
+              buffer[5] == ':' &&
+              buffer[6] == '/' &&
+              buffer[7] == '/'))
+    {
+        secure = true;
+        memmove(buffer, buffer + 8, strlen(buffer + 8) + 1u);
+    }
+
+    while (buffer[0] == '/' && buffer[1] == '/')
+    {
+        memmove(buffer, buffer + 2, strlen(buffer + 2) + 1u);
+    }
+
+    delimiter = strpbrk(buffer, "/?#");
+    if (delimiter != NULL)
+    {
+        *delimiter = '\0';
+    }
+
+    colon = strrchr(buffer, ':');
+    if (colon != NULL && strchr(buffer, '[') == NULL && strchr(colon + 1, ':') == NULL)
+    {
+        char *portEnd = NULL;
+        const long parsedPort = strtol(colon + 1, &portEnd, 10);
+        if (colon[1] != '\0' &&
+            portEnd != NULL &&
+            *portEnd == '\0' &&
+            parsedPort > 0L &&
+            parsedPort <= 65535L)
+        {
+            *colon = '\0';
+            port = (unsigned short)parsedPort;
+        }
+    }
+
+    if (buffer[0] == '\0' || strlen(buffer) >= hostBufferSize)
+    {
+        return false;
+    }
+
+    if (secure && port == NETPLAY_DEFAULT_PORT)
+    {
+        port = 443u;
+    }
+
+    snprintf(hostBuffer, hostBufferSize, "%s", buffer);
+    if (resolvedPort != NULL)
+    {
+        *resolvedPort = port;
+    }
+    if (secureTransport != NULL)
+    {
+        *secureTransport = secure;
+    }
+    return true;
+}
+
 static void detect_local_ipv4_address(char *buffer, size_t bufferSize)
 {
     struct addrinfo hints;
@@ -601,6 +767,750 @@ static void close_socket_if_open(NetSocket *socketHandle)
     *socketHandle = NET_INVALID_SOCKET;
 }
 
+static void close_relay_transport(struct NetplayState *state)
+{
+#ifdef _WIN32
+    if (state == NULL)
+    {
+        return;
+    }
+
+    if (state->relayWebSocket != NULL)
+    {
+        WinHttpWebSocketClose(state->relayWebSocket, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, NULL, 0);
+        WinHttpCloseHandle(state->relayWebSocket);
+        state->relayWebSocket = NULL;
+    }
+
+    if (state->relayRequest != NULL)
+    {
+        WinHttpCloseHandle(state->relayRequest);
+        state->relayRequest = NULL;
+    }
+
+    if (state->relayConnection != NULL)
+    {
+        WinHttpCloseHandle(state->relayConnection);
+        state->relayConnection = NULL;
+    }
+
+    if (state->relaySession != NULL)
+    {
+        WinHttpCloseHandle(state->relaySession);
+        state->relaySession = NULL;
+    }
+#else
+    (void)state;
+#endif
+}
+
+static bool open_relay_transport(struct NetplayState *state,
+                                 const char *hostAddress,
+                                 unsigned short port,
+                                 bool secureTransport,
+                                 bool isRelayHost,
+                                 const char *roomCode)
+{
+#ifdef _WIN32
+    char requestPath[128];
+    wchar_t wideHost[256];
+    wchar_t widePath[256];
+    DWORD statusCode = 0;
+    DWORD statusSize = (DWORD)sizeof(statusCode);
+    const char *roleText = isRelayHost ? "HOST" : "CLIENT";
+    const DWORD requestFlags = secureTransport ? WINHTTP_FLAG_SECURE : 0;
+
+    if (state == NULL || hostAddress == NULL || hostAddress[0] == '\0')
+    {
+        return false;
+    }
+
+    close_relay_transport(state);
+
+    if (MultiByteToWideChar(CP_UTF8, 0, "SoC Relay", -1, widePath, (int)(sizeof(widePath) / sizeof(widePath[0]))) == 0)
+    {
+        set_last_error(state, "websocket session open failed");
+        return false;
+    }
+
+    if (MultiByteToWideChar(CP_UTF8, 0, hostAddress, -1, wideHost, (int)(sizeof(wideHost) / sizeof(wideHost[0]))) == 0)
+    {
+        set_last_error(state, "websocket host conversion failed");
+        return false;
+    }
+
+    state->relaySession = WinHttpOpen(widePath, WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (state->relaySession == NULL)
+    {
+        set_last_error(state, "websocket session open failed");
+        return false;
+    }
+
+    if (!WinHttpSetTimeouts(state->relaySession, 5000, 5000, 5000, 1))
+    {
+        set_last_error(state, "websocket timeout setup failed");
+        close_relay_transport(state);
+        return false;
+    }
+
+    state->relayConnection = WinHttpConnect(state->relaySession, wideHost, port, 0);
+    if (state->relayConnection == NULL)
+    {
+        set_last_error(state, "websocket connect failed");
+        close_relay_transport(state);
+        return false;
+    }
+
+    snprintf(requestPath, sizeof(requestPath), "/?room=%s&role=%s", roomCode != NULL && roomCode[0] != '\0' ? roomCode : "default", roleText);
+    if (MultiByteToWideChar(CP_UTF8, 0, requestPath, -1, widePath, (int)(sizeof(widePath) / sizeof(widePath[0]))) == 0)
+    {
+        set_last_error(state, "websocket path conversion failed");
+        close_relay_transport(state);
+        return false;
+    }
+
+    state->relayRequest = WinHttpOpenRequest(state->relayConnection,
+                                             L"GET",
+                                             widePath,
+                                             NULL,
+                                             WINHTTP_NO_REFERER,
+                                             WINHTTP_DEFAULT_ACCEPT_TYPES,
+                                             requestFlags);
+    if (state->relayRequest == NULL)
+    {
+        set_last_error(state, "websocket request failed");
+        close_relay_transport(state);
+        return false;
+    }
+
+    if (!WinHttpSetOption(state->relayRequest, WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, NULL, 0))
+    {
+        set_last_error(state, "websocket upgrade option failed");
+        close_relay_transport(state);
+        return false;
+    }
+
+    if (!WinHttpSendRequest(state->relayRequest,
+                            WINHTTP_NO_ADDITIONAL_HEADERS,
+                            0,
+                            WINHTTP_NO_REQUEST_DATA,
+                            0,
+                            0,
+                            0) ||
+        !WinHttpReceiveResponse(state->relayRequest, NULL))
+    {
+        set_last_error(state, "websocket handshake failed");
+        close_relay_transport(state);
+        return false;
+    }
+
+    if (!WinHttpQueryHeaders(state->relayRequest,
+                             WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                             WINHTTP_HEADER_NAME_BY_INDEX,
+                             &statusCode,
+                             &statusSize,
+                             WINHTTP_NO_HEADER_INDEX) ||
+        statusCode != 101u)
+    {
+        set_last_error(state, "websocket upgrade rejected");
+        close_relay_transport(state);
+        return false;
+    }
+
+    state->relayWebSocket = WinHttpWebSocketCompleteUpgrade(state->relayRequest, 0);
+    if (state->relayWebSocket == NULL)
+    {
+        set_last_error(state, "websocket upgrade complete failed");
+        close_relay_transport(state);
+        return false;
+    }
+
+    WinHttpCloseHandle(state->relayRequest);
+    state->relayRequest = NULL;
+    clear_last_error(state);
+    return true;
+#else
+    int sock = NET_INVALID_SOCKET;
+    struct addrinfo hints;
+    struct addrinfo *results = NULL;
+    struct addrinfo *cur = NULL;
+    char portText[16];
+    int lookup = 0;
+    char requestPath[128];
+    char keyBase64[64];
+    unsigned char keyRaw[16];
+
+    if (state == NULL || hostAddress == NULL || hostAddress[0] == '\0')
+    {
+        return false;
+    }
+
+    if (secureTransport)
+    {
+        set_last_error(state, "secure relay transport is supported only on Windows builds");
+        return false;
+    }
+
+    close_relay_transport(state);
+
+    snprintf(requestPath, sizeof(requestPath), "/?room=%s&role=%s", roomCode != NULL && roomCode[0] != '\0' ? roomCode : "default", isRelayHost ? "HOST" : "CLIENT");
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+
+    snprintf(portText, sizeof(portText), "%hu", port);
+    lookup = getaddrinfo(hostAddress, portText, &hints, &results);
+    if (lookup != 0 || results == NULL)
+    {
+        set_last_error(state, "relay lookup failed");
+        return false;
+    }
+
+    for (cur = results; cur != NULL; cur = cur->ai_next)
+    {
+        sock = socket(cur->ai_family, cur->ai_socktype, cur->ai_protocol);
+        if (sock == NET_INVALID_SOCKET)
+        {
+            continue;
+        }
+
+        if (connect(sock, cur->ai_addr, (NetSockLen)cur->ai_addrlen) != 0)
+        {
+            net_close_socket(sock);
+            sock = NET_INVALID_SOCKET;
+            continue;
+        }
+
+        break;
+    }
+
+    freeaddrinfo(results);
+
+    if (sock == NET_INVALID_SOCKET)
+    {
+        set_last_error(state, "relay connect failed");
+        return false;
+    }
+
+    set_socket_nodelay(sock);
+
+    /* generate a random Sec-WebSocket-Key (base64 of 16 bytes) */
+    {
+        FILE *ur = fopen("/dev/urandom", "rb");
+        if (ur != NULL)
+        {
+            fread(keyRaw, 1, sizeof(keyRaw), ur);
+            fclose(ur);
+        }
+        else
+        {
+            for (size_t i = 0; i < sizeof(keyRaw); i++)
+            {
+                keyRaw[i] = (unsigned char)(rand() & 0xff);
+            }
+        }
+        /* simple base64 encode */
+        static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        int v = 0, val = 0, idx = 0;
+        for (size_t i = 0; i < sizeof(keyRaw); i++)
+        {
+            val = (val << 8) | keyRaw[i];
+            v += 8;
+            while (v >= 6)
+            {
+                keyBase64[idx++] = b64[(val >> (v - 6)) & 0x3f];
+                v -= 6;
+            }
+        }
+        if (v > 0)
+        {
+            keyBase64[idx++] = b64[(val << (6 - v)) & 0x3f];
+        }
+        while (idx % 4 != 0)
+        {
+            keyBase64[idx++] = '=';
+        }
+        keyBase64[idx] = '\0';
+    }
+
+    {
+        char request[512];
+        int written = snprintf(request, sizeof(request),
+                               "GET %s HTTP/1.1\r\n"
+                               "Host: %s:%hu\r\n"
+                               "Upgrade: websocket\r\n"
+                               "Connection: Upgrade\r\n"
+                               "Sec-WebSocket-Version: 13\r\n"
+                               "Sec-WebSocket-Key: %s\r\n"
+                               "\r\n",
+                               requestPath, hostAddress, port, keyBase64);
+
+        if (written <= 0 || (size_t)written >= sizeof(request))
+        {
+            net_close_socket(sock);
+            set_last_error(state, "relay handshake build failed");
+            return false;
+        }
+
+        if (send(sock, request, written, 0) != written)
+        {
+            net_close_socket(sock);
+            set_last_error(state, "relay handshake send failed");
+            return false;
+        }
+
+        /* receive response headers */
+        {
+            char response[2048];
+            size_t received = 0;
+            while (received + 1 < sizeof(response))
+            {
+                int r = recv(sock, response + received, (int)(sizeof(response) - received - 1), 0);
+                if (r == 0)
+                {
+                    net_close_socket(sock);
+                    set_last_error(state, "relay handshake closed");
+                    return false;
+                }
+                if (r < 0)
+                {
+                    net_close_socket(sock);
+                    set_last_error(state, "relay handshake recv failed");
+                    return false;
+                }
+                received += (size_t)r;
+                response[received] = '\0';
+                if (strstr(response, "\r\n\r\n") != NULL)
+                {
+                    break;
+                }
+            }
+
+            /* check status line */
+            if (strncmp(response, "HTTP/1.1 101", 12) != 0 && strncmp(response, "HTTP/1.0 101", 12) != 0)
+            {
+                net_close_socket(sock);
+                set_last_error(state, "relay upgrade rejected");
+                return false;
+            }
+
+            /* verify Sec-WebSocket-Accept matches our key */
+            {
+                char expectedAccept[128];
+                char *acceptHeader = NULL;
+                char *line = response;
+                size_t lineLen = 0;
+
+                if (!websocket_accept_key(keyBase64, expectedAccept, sizeof(expectedAccept)))
+                {
+                    net_close_socket(sock);
+                    set_last_error(state, "relay accept key compute failed");
+                    return false;
+                }
+
+                /* find header line */
+                acceptHeader = strstr(response, "Sec-WebSocket-Accept:");
+                if (acceptHeader == NULL)
+                {
+                    net_close_socket(sock);
+                    set_last_error(state, "relay missing accept header");
+                    return false;
+                }
+
+                acceptHeader += strlen("Sec-WebSocket-Accept:");
+                while (*acceptHeader == ' ' || *acceptHeader == '\t') acceptHeader++;
+                line = acceptHeader;
+                while (*line != '\0' && *line != '\r' && *line != '\n') line++;
+                lineLen = (size_t)(line - acceptHeader);
+                if (lineLen == 0 || lineLen >= sizeof(expectedAccept))
+                {
+                    net_close_socket(sock);
+                    set_last_error(state, "relay invalid accept header");
+                    return false;
+                }
+
+                char acceptValue[128];
+                memcpy(acceptValue, acceptHeader, lineLen);
+                acceptValue[lineLen] = '\0';
+                if (strcmp(acceptValue, expectedAccept) != 0)
+                {
+                    net_close_socket(sock);
+                    set_last_error(state, "relay accept mismatch");
+                    return false;
+                }
+            }
+        }
+    }
+
+    /* set non-blocking for normal operation */
+    if (!set_socket_nonblocking(sock))
+    {
+        net_close_socket(sock);
+        set_last_error(state, "relay set nonblocking failed");
+        return false;
+    }
+
+    state->peerSocket = sock;
+    clear_last_error(state);
+    return true;
+#endif
+}
+
+static int send_relay_message(struct NetplayState *state, const unsigned char *buffer, size_t length, bool binaryMessage)
+{
+#ifdef _WIN32
+    DWORD result = 0;
+
+    if (state == NULL || state->relayWebSocket == NULL)
+    {
+        return NET_SOCKET_ERROR;
+    }
+
+    result = WinHttpWebSocketSend(state->relayWebSocket,
+                                  binaryMessage ? WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE : WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE,
+                                  (PVOID)buffer,
+                                  (DWORD)length);
+    if (result != NO_ERROR)
+    {
+        return NET_SOCKET_ERROR;
+    }
+
+    return (int)length;
+#else
+    if (state == NULL || buffer == NULL || length == 0u || state->peerSocket == NET_INVALID_SOCKET)
+    {
+        return NET_SOCKET_ERROR;
+    }
+
+    /* Build a single-frame unfragmented client-to-server masked frame (clients MUST mask) */
+    {
+        unsigned char header[14];
+        size_t headerLen = 0;
+        uint64_t payloadLen = length;
+
+        header[0] = binaryMessage ? 0x82u : 0x81u; /* FIN + opcode */
+
+        if (payloadLen <= 125u)
+        {
+            header[1] = 0x80u | (unsigned char)payloadLen; /* MASK bit set */
+            headerLen = 2;
+        }
+        else if (payloadLen <= 0xFFFFu)
+        {
+            header[1] = 0x80u | 126u;
+            header[2] = (unsigned char)((payloadLen >> 8) & 0xFFu);
+            header[3] = (unsigned char)(payloadLen & 0xFFu);
+            headerLen = 4;
+        }
+        else
+        {
+            header[1] = 0x80u | 127u;
+            /* network byte order 64-bit length */
+            for (int i = 0; i < 8; i++)
+            {
+                header[2 + i] = (unsigned char)((payloadLen >> (8 * (7 - i))) & 0xFFu);
+            }
+            headerLen = 10;
+        }
+
+        /* generate mask key */
+        unsigned char maskKey[4];
+        FILE *ur = fopen("/dev/urandom", "rb");
+        if (ur != NULL)
+        {
+            fread(maskKey, 1, 4, ur);
+            fclose(ur);
+        }
+        else
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                maskKey[i] = (unsigned char)(rand() & 0xFF);
+            }
+        }
+
+        /* append mask key */
+        for (int i = 0; i < 4; i++)
+        {
+            header[headerLen + i] = maskKey[i];
+        }
+        headerLen += 4;
+
+        /* prepare masked payload in a temporary buffer if necessary */
+        unsigned char *sendBuffer = NULL;
+        size_t sendSize = headerLen + payloadLen;
+        sendBuffer = (unsigned char *)malloc(sendSize);
+        if (sendBuffer == NULL)
+        {
+            return NET_SOCKET_ERROR;
+        }
+
+        memcpy(sendBuffer, header, headerLen);
+        for (size_t i = 0; i < payloadLen; i++)
+        {
+            sendBuffer[headerLen + i] = ((unsigned char *)buffer)[i] ^ maskKey[i & 3];
+        }
+
+        /* Temporarily clear non-blocking so send_all_socket can block until complete */
+        /* Get flags */
+#ifdef _WIN32
+        (void)0;
+#else
+        int flags = fcntl(state->peerSocket, F_GETFL, 0);
+        if (flags >= 0)
+        {
+            fcntl(state->peerSocket, F_SETFL, flags & ~O_NONBLOCK);
+        }
+#endif
+
+        /* send all */
+        size_t sentTotal = 0u;
+        while (sentTotal < sendSize)
+        {
+            int s = send(state->peerSocket, (const char *)(sendBuffer + sentTotal), (int)(sendSize - sentTotal), 0);
+            if (s == NET_SOCKET_ERROR)
+            {
+                free(sendBuffer);
+                return NET_SOCKET_ERROR;
+            }
+            if (s <= 0)
+            {
+                free(sendBuffer);
+                return NET_SOCKET_ERROR;
+            }
+            sentTotal += (size_t)s;
+        }
+
+#ifdef _WIN32
+        (void)0;
+#else
+        /* restore flags */
+        if (flags >= 0)
+        {
+            fcntl(state->peerSocket, F_SETFL, flags);
+        }
+#endif
+
+        free(sendBuffer);
+        return (int)length;
+    }
+#endif
+}
+
+static int receive_relay_message(struct NetplayState *state, unsigned char *buffer, size_t bufferSize)
+{
+#ifdef _WIN32
+    WINHTTP_WEB_SOCKET_BUFFER_TYPE bufferType = WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE;
+    DWORD bytesRead = 0;
+    size_t totalBytes = 0u;
+
+    if (state == NULL || buffer == NULL || bufferSize == 0u || state->relayWebSocket == NULL)
+    {
+        return NET_SOCKET_ERROR;
+    }
+
+    do
+    {
+        bytesRead = 0u;
+        bufferType = WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE;
+        if (WinHttpWebSocketReceive(state->relayWebSocket,
+                                    buffer + totalBytes,
+                                    (DWORD)(bufferSize - totalBytes),
+                                    &bytesRead,
+                                    &bufferType) != NO_ERROR)
+        {
+            if (GetLastError() == ERROR_WINHTTP_TIMEOUT)
+            {
+                return -2;
+            }
+            return NET_SOCKET_ERROR;
+        }
+
+        if (bufferType == WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE)
+        {
+            return 0;
+        }
+
+        totalBytes += (size_t)bytesRead;
+        if (totalBytes > bufferSize)
+        {
+            return NET_SOCKET_ERROR;
+        }
+    }
+    while (bufferType == WINHTTP_WEB_SOCKET_BINARY_FRAGMENT_BUFFER_TYPE ||
+           bufferType == WINHTTP_WEB_SOCKET_UTF8_FRAGMENT_BUFFER_TYPE);
+
+    return (int)totalBytes;
+#else
+    if (state == NULL || buffer == NULL || bufferSize == 0u || state->peerSocket == NET_INVALID_SOCKET)
+    {
+        return NET_SOCKET_ERROR;
+    }
+
+    /* Peek header (2 bytes) */
+    unsigned char hdr[2];
+    int r = recv(state->peerSocket, (char *)hdr, 2, MSG_PEEK);
+    if (r == 0)
+    {
+        return 0; /* closed */
+    }
+    if (r < 0)
+    {
+        const int err = net_last_error_code();
+        if (NET_WOULD_BLOCK(err))
+        {
+            return -2;
+        }
+        return NET_SOCKET_ERROR;
+    }
+    if (r < 2)
+    {
+        return -2;
+    }
+
+    const unsigned char b0 = hdr[0];
+    const unsigned char b1 = hdr[1];
+    const bool fin = (b0 & 0x80u) != 0;
+    const unsigned char opcode = b0 & 0x0Fu;
+    const bool masked = (b1 & 0x80u) != 0;
+    uint64_t payloadLen = b1 & 0x7Fu;
+    size_t headerLen = 2;
+
+    if (payloadLen == 126u)
+    {
+        unsigned char ext[2];
+        r = recv(state->peerSocket, (char *)ext, 2, MSG_PEEK | MSG_WAITALL);
+        if (r < 2)
+        {
+            return -2;
+        }
+        payloadLen = ((uint64_t)ext[0] << 8) | (uint64_t)ext[1];
+        headerLen += 2;
+    }
+    else if (payloadLen == 127u)
+    {
+        unsigned char ext[8];
+        r = recv(state->peerSocket, (char *)ext, 8, MSG_PEEK | MSG_WAITALL);
+        if (r < 8)
+        {
+            return -2;
+        }
+        payloadLen = 0;
+        for (int i = 0; i < 8; i++)
+        {
+            payloadLen = (payloadLen << 8) | ext[i];
+        }
+        headerLen += 8;
+    }
+
+    if (masked)
+    {
+        headerLen += 4;
+    }
+
+    /* Ensure we have the whole frame available */
+    size_t bytesNeeded = headerLen + (size_t)payloadLen;
+    /* Peek available bytes */
+    {
+        /* Use ioctl(FIONREAD) to check available bytes */
+        int available = 0;
+#ifdef _WIN32
+        unsigned long avail = 0;
+        if (ioctlsocket(state->peerSocket, FIONREAD, &avail) != 0)
+        {
+            return NET_SOCKET_ERROR;
+        }
+        available = (int)avail;
+#else
+        if (ioctl(state->peerSocket, FIONREAD, &available) != 0)
+        {
+            const int err = net_last_error_code();
+            if (NET_WOULD_BLOCK(err))
+            {
+                return -2;
+            }
+            return NET_SOCKET_ERROR;
+        }
+#endif
+        if ((size_t)available < bytesNeeded)
+        {
+            return -2;
+        }
+    }
+
+    /* Read full frame into temp buffer */
+    size_t toRead = bytesNeeded;
+    unsigned char *tmp = (unsigned char *)malloc(toRead);
+    if (tmp == NULL)
+    {
+        return NET_SOCKET_ERROR;
+    }
+    size_t readTotal = 0;
+    while (readTotal < toRead)
+    {
+        int rr = recv(state->peerSocket, (char *)(tmp + readTotal), (int)(toRead - readTotal), 0);
+        if (rr == 0)
+        {
+            free(tmp);
+            return 0;
+        }
+        if (rr < 0)
+        {
+            const int err = net_last_error_code();
+            if (NET_WOULD_BLOCK(err))
+            {
+                free(tmp);
+                return -2;
+            }
+            free(tmp);
+            return NET_SOCKET_ERROR;
+        }
+        readTotal += (size_t)rr;
+    }
+
+    /* parse payload from tmp */
+    size_t offset = 2;
+    if ((b1 & 0x7Fu) == 126u)
+    {
+        offset += 2;
+    }
+    else if ((b1 & 0x7Fu) == 127u)
+    {
+        offset += 8;
+    }
+
+    unsigned char maskKey[4] = {0, 0, 0, 0};
+    if (masked)
+    {
+        for (int i = 0; i < 4; i++)
+        {
+            maskKey[i] = tmp[offset + i];
+        }
+        offset += 4;
+    }
+
+    if (payloadLen > bufferSize)
+    {
+        free(tmp);
+        return NET_SOCKET_ERROR;
+    }
+
+    for (uint64_t i = 0; i < payloadLen; i++)
+    {
+        unsigned char val = tmp[offset + (size_t)i];
+        if (masked)
+        {
+            val ^= maskKey[i & 3];
+        }
+        buffer[i] = val;
+    }
+
+    free(tmp);
+    return (int)payloadLen;
+#endif
+}
+
 static NetSocket get_host_peer_socket_by_id(const struct NetplayState *state, int peerId)
 {
     if (state == NULL || peerId < 0 || peerId >= NETPLAY_MAX_HOST_REMOTE_PLAYERS)
@@ -661,6 +1571,21 @@ static void clear_relay_handshake(struct NetplayState *state)
     state->relayHandshakeOffset = 0u;
 }
 
+static int transport_send(NetSocket socketHandle, const char *buffer, int length)
+{
+    return send(socketHandle, buffer, length, 0);
+}
+
+static int transport_recv(NetSocket socketHandle, char *buffer, int length, int flags)
+{
+    return recv(socketHandle, buffer, length, flags);
+}
+
+static int transport_accept(NetSocket socketHandle, struct sockaddr_in *address, NetSockLen *addressLength)
+{
+    return accept(socketHandle, (struct sockaddr *)address, addressLength);
+}
+
 static bool prepare_relay_handshake(struct NetplayState *state, bool isHost, const char *roomCode)
 {
     const char *normalizedRoom = NULL;
@@ -712,6 +1637,7 @@ static bool queue_packet_to_peer(struct NetplayState *state,
     struct NetplayQueuedPacket *packet = NULL;
     struct NetplayPacketHeader header;
     NetSocket peerSocket = NET_INVALID_SOCKET;
+    bool relayPeerAvailable = false;
 
     if (state == NULL || payloadSize > NETPLAY_MAX_PAYLOAD_SIZE || peerId < 0)
     {
@@ -724,7 +1650,15 @@ static bool queue_packet_to_peer(struct NetplayState *state,
         return false;
     }
 
-    if (state->mode == NETPLAY_MODE_HOST)
+    if (state->relayTransport)
+    {
+#ifdef _WIN32
+        relayPeerAvailable = (peerId == 0 && state->relayWebSocket != NULL);
+#else
+        relayPeerAvailable = false;
+#endif
+    }
+    else if (state->mode == NETPLAY_MODE_HOST)
     {
         peerSocket = get_host_peer_socket_by_id(state, peerId);
     }
@@ -733,7 +1667,7 @@ static bool queue_packet_to_peer(struct NetplayState *state,
         peerSocket = (peerId == 0) ? state->peerSocket : NET_INVALID_SOCKET;
     }
 
-    if (peerSocket == NET_INVALID_SOCKET)
+    if (!relayPeerAvailable && peerSocket == NET_INVALID_SOCKET)
     {
         set_last_error(state, "queue failed: peer unavailable");
         return false;
@@ -781,6 +1715,11 @@ static bool queue_packet_to_all_host_peers(struct NetplayState *state,
         return false;
     }
 
+    if (state->relayTransport)
+    {
+        return queue_packet_to_peer(state, 0, type, payload, payloadSize);
+    }
+
     for (int peerId = 0; peerId < NETPLAY_MAX_HOST_REMOTE_PLAYERS; peerId++)
     {
         if (get_host_peer_socket_by_id(state, peerId) == NET_INVALID_SOCKET)
@@ -814,6 +1753,7 @@ static void disconnect_peer(struct NetplayState *state, bool keepListening, cons
 
     close_socket_if_open(&state->peerSocket);
     close_tracked_host_peers(state);
+    close_relay_transport(state);
     reset_connection_buffers(state);
     clear_relay_handshake(state);
     state->connectStartedMs = 0u;
@@ -869,6 +1809,12 @@ static void disconnect_host_peer(struct NetplayState *state, int peerId, const c
 
     if (state == NULL || state->mode != NETPLAY_MODE_HOST || peerId < 0)
     {
+        return;
+    }
+
+    if (state->relayTransport)
+    {
+        disconnect_peer(state, false, message);
         return;
     }
 
@@ -935,7 +1881,7 @@ static void poll_tracked_host_peers(struct NetplayState *state)
         if (state->trackedHostPeers[i] != NET_INVALID_SOCKET)
         {
             unsigned char peekByte = 0u;
-            const int received = recv(state->trackedHostPeers[i], (char *)&peekByte, 1, MSG_PEEK);
+            const int received = transport_recv(state->trackedHostPeers[i], (char *)&peekByte, 1, MSG_PEEK);
             if (received == 0)
             {
                 disconnect_additional_host_peer(state, i, NULL);
@@ -954,6 +1900,25 @@ static void poll_tracked_host_peers(struct NetplayState *state)
 
 static void flush_send_queue(struct NetplayState *state)
 {
+    if (state != NULL && state->relayTransport)
+    {
+        while (state->connectionState == NETPLAY_CONNECTION_CONNECTED && state->sendCount > 0)
+        {
+            struct NetplayQueuedPacket *packet = &state->sendQueue[state->sendHead];
+            if (send_relay_message(state, packet->bytes, packet->length, true) == NET_SOCKET_ERROR)
+            {
+                disconnect_peer(state, false, "send failed");
+                return;
+            }
+
+            state->sendHead = (state->sendHead + 1) % NETPLAY_SEND_QUEUE_CAPACITY;
+            state->sendCount--;
+            state->lastSendMs = netplay_now_ms();
+        }
+
+        return;
+    }
+
     while (state != NULL && state->connectionState == NETPLAY_CONNECTION_CONNECTED &&
            (state->relayHandshakeOffset < state->relayHandshakeLength || state->sendCount > 0))
     {
@@ -997,7 +1962,7 @@ static void flush_send_queue(struct NetplayState *state)
             bytesRemaining = (int)(packet->length - packet->offset);
         }
 
-        sent = send(targetSocket, bytes, bytesRemaining, 0);
+        sent = transport_send(targetSocket, bytes, bytesRemaining);
         if (sent == NET_SOCKET_ERROR)
         {
             const int errorCode = net_last_error_code();
@@ -1076,7 +2041,7 @@ static void accept_pending_client(struct NetplayState *state)
         return;
     }
 
-    accepted = accept(state->listenSocket, (struct sockaddr *)&address, &addressLength);
+    accepted = transport_accept(state->listenSocket, &address, &addressLength);
     if (accepted == NET_INVALID_SOCKET)
     {
         const int errorCode = net_last_error_code();
@@ -1194,12 +2159,44 @@ static void advance_pending_connect(struct NetplayState *state)
 
 static void read_from_peer(struct NetplayState *state)
 {
+    if (state != NULL && state->relayTransport)
+    {
+        const int remainingCapacity = (int)(sizeof(state->recvBuffer) - state->recvLength);
+        const int received = receive_relay_message(state, state->recvBuffer + state->recvLength, (size_t)remainingCapacity);
+
+        if (received == 0)
+        {
+            disconnect_peer(state, false, "peer disconnected");
+            return;
+        }
+
+        if (received == NET_SOCKET_ERROR)
+        {
+            disconnect_peer(state, false, "receive failed");
+            return;
+        }
+
+        if (received == -2)
+        {
+            return;
+        }
+
+        state->recvLength += (size_t)received;
+        state->lastReceiveMs = netplay_now_ms();
+        if (state->recvLength >= sizeof(state->recvBuffer))
+        {
+            disconnect_peer(state, false, "receive buffer overflow");
+        }
+
+        return;
+    }
+
     while (state != NULL &&
            state->peerSocket != NET_INVALID_SOCKET &&
            state->connectionState == NETPLAY_CONNECTION_CONNECTED)
     {
         const int remainingCapacity = (int)(sizeof(state->recvBuffer) - state->recvLength);
-        const int received = recv(state->peerSocket, (char *)(state->recvBuffer + state->recvLength), remainingCapacity, 0);
+        const int received = transport_recv(state->peerSocket, (char *)(state->recvBuffer + state->recvLength), remainingCapacity, 0);
 
         if (received == 0)
         {
@@ -1383,7 +2380,7 @@ static bool decode_packet(struct NetplayState *state,
 
     if (state == NULL || payload == NULL)
     {
-            return true; // Changed to true to avoid early exit
+    return false;
     }
 
     memset(&event, 0, sizeof(event));
@@ -1680,7 +2677,7 @@ static void read_from_additional_host_peers(struct NetplayState *state)
         while (true)
         {
             const int remainingCapacity = (int)(NETPLAY_RECV_BUFFER_SIZE - state->trackedHostPeerRecvLength[i]);
-            const int received = recv(peerSocket,
+            const int received = transport_recv(peerSocket,
                                       (char *)(state->trackedHostPeerRecvBuffer[i] + state->trackedHostPeerRecvLength[i]),
                                       remainingCapacity,
                                       0);
@@ -1802,6 +2799,12 @@ struct NetplayState *netplayCreate(void)
 
     state->listenSocket = NET_INVALID_SOCKET;
     state->peerSocket = NET_INVALID_SOCKET;
+#ifdef _WIN32
+    state->relaySession = NULL;
+    state->relayConnection = NULL;
+    state->relayRequest = NULL;
+    state->relayWebSocket = NULL;
+#endif
     init_tracked_host_peers(state);
     state->connectionState = NETPLAY_CONNECTION_IDLE;
     state->relayTransport = false;
@@ -1820,6 +2823,7 @@ void netplayDestroy(struct NetplayState *state)
 
     close_socket_if_open(&state->peerSocket);
     close_tracked_host_peers(state);
+    close_relay_transport(state);
     close_socket_if_open(&state->listenSocket);
     free(state);
 }
@@ -1837,6 +2841,7 @@ bool netplayStartHost(struct NetplayState *state, unsigned short port)
     close_socket_if_open(&state->peerSocket);
     close_tracked_host_peers(state);
     close_socket_if_open(&state->listenSocket);
+    close_relay_transport(state);
     reset_connection_buffers(state);
     clear_relay_handshake(state);
     state->relayRoomCode[0] = '\0';
@@ -1892,7 +2897,10 @@ static bool start_outbound_connection(struct NetplayState *state,
     struct addrinfo hints;
     struct addrinfo *results = NULL;
     struct addrinfo *current = NULL;
+    char resolvedHost[NETPLAY_MAX_PEER_ADDRESS + 1];
     char portText[16];
+    unsigned short resolvedPort = port;
+    bool secureRelayTransport = false;
     int lookupResult = 0;
 
     if (state == NULL || hostAddress == NULL || hostAddress[0] == '\0')
@@ -1903,6 +2911,7 @@ static bool start_outbound_connection(struct NetplayState *state,
     close_socket_if_open(&state->peerSocket);
     close_tracked_host_peers(state);
     close_socket_if_open(&state->listenSocket);
+    close_relay_transport(state);
     reset_connection_buffers(state);
     clear_relay_handshake(state);
     state->relayRoomCode[0] = '\0';
@@ -1915,17 +2924,76 @@ static bool start_outbound_connection(struct NetplayState *state,
     {
         snprintf(state->relayRoomCode, sizeof(state->relayRoomCode), "%s", roomCode);
     }
-    state->port = port;
     detect_local_ipv4_address(state->localAddress, sizeof(state->localAddress));
-    snprintf(state->peerAddress, sizeof(state->peerAddress), "%s", hostAddress);
-    snprintf(portText, sizeof(portText), "%hu", port);
+
+    if (relayTransport)
+    {
+        if (!parse_relay_endpoint(hostAddress,
+                                  port,
+                                  resolvedHost,
+                                  sizeof(resolvedHost),
+                                  &resolvedPort,
+                                  &secureRelayTransport))
+        {
+            set_last_error(state, "invalid relay address");
+            state->connectionState = NETPLAY_CONNECTION_ERROR;
+            return false;
+        }
+        state->port = resolvedPort;
+        snprintf(state->peerAddress, sizeof(state->peerAddress), "%s", resolvedHost);
+    }
+    else
+    {
+        state->port = port;
+        snprintf(state->peerAddress, sizeof(state->peerAddress), "%s", hostAddress);
+    }
+
+#ifndef _WIN32
+    if (relayTransport && secureRelayTransport)
+    {
+        set_last_error(state, "secure relay transport is supported only on Windows builds");
+        state->connectionState = NETPLAY_CONNECTION_ERROR;
+        return false;
+    }
+#endif
+
+#ifdef _WIN32
+    if (relayTransport)
+    {
+        if (!open_relay_transport(state,
+                                  state->peerAddress,
+                                  state->port,
+                                  secureRelayTransport,
+                                  isRelayHost,
+                                  roomCode))
+        {
+            state->connectionState = NETPLAY_CONNECTION_ERROR;
+            state->connectStartedMs = 0u;
+            return false;
+        }
+
+        state->connectionState = NETPLAY_CONNECTION_CONNECTED;
+        state->connectStartedMs = 0u;
+        clear_last_error(state);
+        {
+            struct NetplayEvent event;
+            memset(&event, 0, sizeof(event));
+            event.type = NETPLAY_EVENT_CONNECTED;
+            event.peerId = 0;
+            push_event(state, &event);
+        }
+        return true;
+    }
+#endif
+
+    snprintf(portText, sizeof(portText), "%hu", state->port);
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
-    lookupResult = getaddrinfo(hostAddress, portText, &hints, &results);
+    lookupResult = getaddrinfo(state->peerAddress, portText, &hints, &results);
     if (lookupResult != 0 || results == NULL)
     {
-        if (is_loopback_host(hostAddress))
+        if (is_loopback_host(state->peerAddress))
         {
             set_last_error(state, "host lookup failed (use host LAN IP)");
         }
@@ -1990,7 +3058,7 @@ static bool start_outbound_connection(struct NetplayState *state,
     }
 
     freeaddrinfo(results);
-    if (is_loopback_host(hostAddress))
+    if (is_loopback_host(state->peerAddress))
     {
         set_last_error(state, "connect failed (use host LAN IP)");
     }

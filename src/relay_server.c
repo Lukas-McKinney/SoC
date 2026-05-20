@@ -6,10 +6,14 @@
 #include <ws2tcpip.h>
 #endif
 
+#include <ctype.h>
+#include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <signal.h>
 
 #ifdef _WIN32
 typedef SOCKET RelaySocket;
@@ -50,12 +54,20 @@ enum RelayRole
     RELAY_ROLE_CLIENT
 };
 
+enum RelayTransportMode
+{
+    RELAY_TRANSPORT_UNKNOWN,
+    RELAY_TRANSPORT_TCP,
+    RELAY_TRANSPORT_WEBSOCKET
+};
+
 struct RelayClient
 {
     RelaySocket socketHandle;
     bool inUse;
     bool handshakeComplete;
     bool paired;
+    enum RelayTransportMode transportMode;
     enum RelayRole role;
     char roomCode[RELAY_MAX_ROOM_CODE + 1];
     int peerIndex;
@@ -78,6 +90,11 @@ static void process_client_input(struct RelayClient *clients, int index);
 static int find_free_client_slot(const struct RelayClient *clients);
 static bool parse_handshake_line(const char *line, char *roomCode, size_t roomCodeSize, enum RelayRole *role);
 static void normalize_handshake_line(char *line);
+static bool parse_websocket_request(const char *requestText, char *roomCode, size_t roomCodeSize, enum RelayRole *role, char *acceptKey, size_t acceptKeySize);
+static bool send_websocket_upgrade_response(RelaySocket socketHandle, const char *acceptKey);
+static bool websocket_frame_append(struct RelayClient *clients, int index, const unsigned char *payload, size_t payloadSize);
+static bool websocket_frame_send(RelaySocket socketHandle, unsigned char opcode, const unsigned char *payload, size_t payloadSize);
+static bool websocket_frame_parse(struct RelayClient *clients, int index);
 
 static bool relay_socket_layer_init(void)
 {
@@ -158,6 +175,383 @@ static void normalize_handshake_line(char *line)
     }
 }
 
+static bool send_all_socket(RelaySocket socketHandle, const unsigned char *buffer, size_t length)
+{
+    size_t sentTotal = 0u;
+
+    while (sentTotal < length)
+    {
+        const int sent = send(socketHandle, (const char *)(buffer + sentTotal), (int)(length - sentTotal), 0);
+        if (sent == RELAY_SOCKET_ERROR)
+        {
+            const int errorCode = relay_last_error_code();
+            if (RELAY_WOULD_BLOCK(errorCode))
+            {
+                return false;
+            }
+            return false;
+        }
+
+        if (sent <= 0)
+        {
+            return false;
+        }
+
+        sentTotal += (size_t)sent;
+    }
+
+    return true;
+}
+
+/* SHA1 helpers are provided by src/websocket.c; remove local duplicates. */
+
+#include "websocket.h"
+
+static bool copy_query_value(const char *path, const char *name, char *buffer, size_t bufferSize)
+{
+    const char *query = NULL;
+    size_t nameLength = 0u;
+
+    if (path == NULL || name == NULL || buffer == NULL || bufferSize == 0u)
+    {
+        return false;
+    }
+
+    query = strchr(path, '?');
+    if (query == NULL)
+    {
+        return false;
+    }
+
+    nameLength = strlen(name);
+    query++;
+    while (*query != '\0')
+    {
+        const char *equals = strchr(query, '=');
+        const char *ampersand = strchr(query, '&');
+        size_t keyLength = 0u;
+        size_t valueLength = 0u;
+
+        if (equals == NULL)
+        {
+            break;
+        }
+
+        if (ampersand != NULL && ampersand < equals)
+        {
+            query = ampersand + 1;
+            continue;
+        }
+
+        keyLength = (size_t)(equals - query);
+        if (keyLength == nameLength && strncmp(query, name, nameLength) == 0)
+        {
+            const char *valueStart = equals + 1;
+            const char *valueEnd = ampersand != NULL ? ampersand : query + strlen(query);
+            valueLength = (size_t)(valueEnd - valueStart);
+            if (valueLength >= bufferSize)
+            {
+                return false;
+            }
+
+            memcpy(buffer, valueStart, valueLength);
+            buffer[valueLength] = '\0';
+            return true;
+        }
+
+        if (ampersand == NULL)
+        {
+            break;
+        }
+        query = ampersand + 1;
+    }
+
+    return false;
+}
+
+static bool parse_websocket_request(const char *requestText, char *roomCode, size_t roomCodeSize, enum RelayRole *role, char *acceptKey, size_t acceptKeySize)
+{
+    char requestLine[256];
+    const char *lineEnd = NULL;
+    const char *pathStart = NULL;
+    const char *pathEnd = NULL;
+    char path[128];
+    char roleText[16];
+
+    if (requestText == NULL || roomCode == NULL || role == NULL || acceptKey == NULL)
+    {
+        return false;
+    }
+
+    lineEnd = strstr(requestText, "\r\n");
+    if (lineEnd == NULL)
+    {
+        return false;
+    }
+
+    if ((size_t)(lineEnd - requestText) >= sizeof(requestLine))
+    {
+        return false;
+    }
+
+    memcpy(requestLine, requestText, (size_t)(lineEnd - requestText));
+    requestLine[lineEnd - requestText] = '\0';
+    if (sscanf(requestLine, "GET %127s", path) != 1)
+    {
+        return false;
+    }
+
+    if (!copy_query_value(path, "room", roomCode, roomCodeSize))
+    {
+        snprintf(roomCode, roomCodeSize, "%s", "default");
+    }
+
+    if (!copy_query_value(path, "role", roleText, sizeof(roleText)))
+    {
+        return false;
+    }
+
+    if (strcmp(roleText, "HOST") == 0)
+    {
+        *role = RELAY_ROLE_HOST;
+    }
+    else if (strcmp(roleText, "CLIENT") == 0)
+    {
+        *role = RELAY_ROLE_CLIENT;
+    }
+    else
+    {
+        return false;
+    }
+
+    pathStart = strstr(requestText, "Sec-WebSocket-Key:");
+    if (pathStart == NULL)
+    {
+        return false;
+    }
+
+    pathStart += strlen("Sec-WebSocket-Key:");
+    while (*pathStart == ' ' || *pathStart == '\t')
+    {
+        pathStart++;
+    }
+    pathEnd = strstr(pathStart, "\r\n");
+    if (pathEnd == NULL || pathEnd <= pathStart)
+    {
+        return false;
+    }
+
+    if ((size_t)(pathEnd - pathStart) >= acceptKeySize)
+    {
+        return false;
+    }
+
+    memcpy(acceptKey, pathStart, (size_t)(pathEnd - pathStart));
+    acceptKey[pathEnd - pathStart] = '\0';
+    return true;
+}
+
+static bool send_websocket_upgrade_response(RelaySocket socketHandle, const char *acceptKey)
+{
+    char response[256];
+    char computedAcceptKey[128];
+    int responseLength = 0;
+
+    if (acceptKey == NULL)
+    {
+        return false;
+    }
+
+    if (!websocket_accept_key(acceptKey, computedAcceptKey, sizeof(computedAcceptKey)))
+    {
+        return false;
+    }
+
+    responseLength = snprintf(response,
+                              sizeof(response),
+                              "HTTP/1.1 101 Switching Protocols\r\n"
+                              "Upgrade: websocket\r\n"
+                              "Connection: Upgrade\r\n"
+                              "Sec-WebSocket-Accept: %s\r\n\r\n",
+                              computedAcceptKey);
+    if (responseLength <= 0 || (size_t)responseLength >= sizeof(response))
+    {
+        return false;
+    }
+
+    return send_all_socket(socketHandle, (const unsigned char *)response, (size_t)responseLength);
+}
+
+static bool websocket_frame_append(struct RelayClient *clients, int index, const unsigned char *payload, size_t payloadSize)
+{
+    struct RelayClient *client = NULL;
+
+    if (clients == NULL || index < 0 || index >= RELAY_MAX_CLIENTS || payload == NULL)
+    {
+        return false;
+    }
+
+    client = &clients[index];
+    if (payloadSize > sizeof(client->pendingBuffer) - client->pendingLength)
+    {
+        disconnect_client(clients, index, "buffer overflow");
+        return false;
+    }
+
+    memcpy(client->pendingBuffer + client->pendingLength, payload, payloadSize);
+    client->pendingLength += payloadSize;
+    return true;
+}
+
+static bool websocket_frame_send(RelaySocket socketHandle, unsigned char opcode, const unsigned char *payload, size_t payloadSize)
+{
+    unsigned char header[10];
+    size_t headerLength = 2u;
+
+    header[0] = 0x80u | (opcode & 0x0Fu);
+    if (payloadSize <= 125u)
+    {
+        header[1] = (unsigned char)payloadSize;
+    }
+    else if (payloadSize <= 65535u)
+    {
+        header[1] = 126u;
+        header[2] = (unsigned char)((payloadSize >> 8) & 0xFFu);
+        header[3] = (unsigned char)(payloadSize & 0xFFu);
+        headerLength = 4u;
+    }
+    else
+    {
+        header[1] = 127u;
+        header[2] = 0u;
+        header[3] = 0u;
+        header[4] = 0u;
+        header[5] = 0u;
+        header[6] = (unsigned char)((payloadSize >> 24) & 0xFFu);
+        header[7] = (unsigned char)((payloadSize >> 16) & 0xFFu);
+        header[8] = (unsigned char)((payloadSize >> 8) & 0xFFu);
+        header[9] = (unsigned char)(payloadSize & 0xFFu);
+        headerLength = 10u;
+    }
+
+    if (!send_all_socket(socketHandle, header, headerLength))
+    {
+        return false;
+    }
+
+    return payloadSize == 0u || send_all_socket(socketHandle, payload, payloadSize);
+}
+
+static bool websocket_frame_parse(struct RelayClient *clients, int index)
+{
+    struct RelayClient *client = NULL;
+
+    if (clients == NULL || index < 0 || index >= RELAY_MAX_CLIENTS)
+    {
+        return false;
+    }
+
+    client = &clients[index];
+    while (client->recvLength >= 2u)
+    {
+        const unsigned char *buffer = client->recvBuffer;
+        const unsigned char firstByte = buffer[0];
+        const unsigned char secondByte = buffer[1];
+        const bool fin = (firstByte & 0x80u) != 0u;
+        const unsigned char opcode = firstByte & 0x0Fu;
+        const bool masked = (secondByte & 0x80u) != 0u;
+        uint64_t payloadLength = (uint64_t)(secondByte & 0x7Fu);
+        size_t headerLength = 2u;
+        size_t payloadOffset = 0u;
+
+        if (opcode == 0x8u)
+        {
+            disconnect_client(clients, index, "peer disconnected");
+            return false;
+        }
+
+        if (opcode == 0x9u)
+        {
+            disconnect_client(clients, index, "ping unsupported");
+            return false;
+        }
+
+        if (!fin || opcode == 0x0u)
+        {
+            disconnect_client(clients, index, "fragmented frame unsupported");
+            return false;
+        }
+
+        if (!masked)
+        {
+            disconnect_client(clients, index, "unmasked frame");
+            return false;
+        }
+
+        if (payloadLength == 126u)
+        {
+            if (client->recvLength < 4u)
+            {
+                return true;
+            }
+            payloadLength = ((uint64_t)buffer[2] << 8u) | (uint64_t)buffer[3];
+            headerLength = 4u;
+        }
+        else if (payloadLength == 127u)
+        {
+            if (client->recvLength < 10u)
+            {
+                return true;
+            }
+            payloadLength = ((uint64_t)buffer[6] << 24u) |
+                            ((uint64_t)buffer[7] << 16u) |
+                            ((uint64_t)buffer[8] << 8u) |
+                            (uint64_t)buffer[9];
+            headerLength = 10u;
+        }
+
+        payloadOffset = headerLength + 4u;
+        if (client->recvLength < payloadOffset + (size_t)payloadLength)
+        {
+            return true;
+        }
+
+        {
+            unsigned char mask[4];
+            unsigned char *payload = client->recvBuffer + payloadOffset;
+            size_t payloadIndex = 0u;
+
+            fprintf(stderr, "[relay] websocket frame parsed: idx=%d opcode=%u masked=%d payloadLength=%llu\n", index, opcode, masked, (unsigned long long)payloadLength);
+            fflush(stderr);
+
+            mask[0] = buffer[headerLength + 0u];
+            mask[1] = buffer[headerLength + 1u];
+            mask[2] = buffer[headerLength + 2u];
+            mask[3] = buffer[headerLength + 3u];
+
+            for (; payloadIndex < (size_t)payloadLength; payloadIndex++)
+            {
+                payload[payloadIndex] ^= mask[payloadIndex % 4u];
+            }
+
+            fprintf(stderr, "[relay] websocket frame unmasked: idx=%d payloadLen=%zu\n", index, (size_t)payloadLength);
+            fflush(stderr);
+
+            if (!websocket_frame_append(clients, index, payload, (size_t)payloadLength))
+            {
+                return false;
+            }
+
+            memmove(client->recvBuffer,
+                    client->recvBuffer + payloadOffset + (size_t)payloadLength,
+                    client->recvLength - (payloadOffset + (size_t)payloadLength));
+            client->recvLength -= payloadOffset + (size_t)payloadLength;
+        }
+    }
+
+    return true;
+}
+
 static bool parse_handshake_line(const char *line, char *roomCode, size_t roomCodeSize, enum RelayRole *role)
 {
     char version[8];
@@ -201,6 +595,11 @@ static void disconnect_client(struct RelayClient *clients, int index, const char
     int peerIndex = -1;
 
     (void)reason;
+    if (clients != NULL && index >= 0 && index < RELAY_MAX_CLIENTS)
+    {
+        fprintf(stderr, "[relay] disconnect_client called: idx=%d reason=%s peerIndex=%d inUse=%d\n", index, reason ? reason : "(null)", clients[index].peerIndex, clients[index].inUse ? 1 : 0);
+        fflush(stderr);
+    }
     if (clients == NULL || index < 0 || index >= RELAY_MAX_CLIENTS || !clients[index].inUse)
     {
         return;
@@ -211,6 +610,7 @@ static void disconnect_client(struct RelayClient *clients, int index, const char
     clients[index].inUse = false;
     clients[index].handshakeComplete = false;
     clients[index].paired = false;
+    clients[index].transportMode = RELAY_TRANSPORT_UNKNOWN;
     clients[index].role = RELAY_ROLE_NONE;
     clients[index].roomCode[0] = '\0';
     clients[index].peerIndex = -1;
@@ -223,6 +623,7 @@ static void disconnect_client(struct RelayClient *clients, int index, const char
         clients[peerIndex].inUse = false;
         clients[peerIndex].handshakeComplete = false;
         clients[peerIndex].paired = false;
+        clients[peerIndex].transportMode = RELAY_TRANSPORT_UNKNOWN;
         clients[peerIndex].role = RELAY_ROLE_NONE;
         clients[peerIndex].roomCode[0] = '\0';
         clients[peerIndex].peerIndex = -1;
@@ -248,9 +649,29 @@ static void flush_client(struct RelayClient *clients, int index)
         return;
     }
 
-    peer = &clients[client->peerIndex];
-    if (!peer->inUse || peer->socketHandle == RELAY_INVALID_SOCKET || client->pendingLength == 0u)
+    if (client->pendingLength == 0u)
     {
+        return;
+    }
+
+    peer = &clients[client->peerIndex];
+    if (!peer->inUse || peer->socketHandle == RELAY_INVALID_SOCKET)
+    {
+        return;
+    }
+
+    if (client->transportMode == RELAY_TRANSPORT_WEBSOCKET)
+    {
+        fprintf(stderr, "[relay] websocket relay: idx=%d -> peer=%d size=%zu\n", index, client->peerIndex, client->pendingLength);
+        fflush(stderr);
+        /* Send as a text frame so browser/text clients can parse easily */
+        if (!websocket_frame_send(peer->socketHandle, 0x1u, client->pendingBuffer, client->pendingLength))
+        {
+            disconnect_client(clients, index, "send failed");
+            return;
+        }
+
+        client->pendingLength = 0u;
         return;
     }
 
@@ -284,6 +705,24 @@ static void pair_room(struct RelayClient *clients, int index)
     int peerIndex = -1;
     struct RelayClient *client = NULL;
 
+    /* Diagnostic: dump client slot states for debugging pairing */
+    if (clients != NULL)
+    {
+        fprintf(stderr, "[relay] pair_room: dump clients\n");
+        for (int di = 0; di < RELAY_MAX_CLIENTS; di++)
+        {
+            fprintf(stderr, "  slot %d: inUse=%d handshake=%d paired=%d role=%d transport=%d room=%s\n",
+                    di,
+                    clients[di].inUse ? 1 : 0,
+                    clients[di].handshakeComplete ? 1 : 0,
+                    clients[di].paired ? 1 : 0,
+                    (int)clients[di].role,
+                    (int)clients[di].transportMode,
+                    clients[di].inUse ? clients[di].roomCode : "-");
+        }
+        fflush(stderr);
+    }
+
     if (clients == NULL || index < 0 || index >= RELAY_MAX_CLIENTS || !clients[index].inUse || !clients[index].handshakeComplete || clients[index].paired)
     {
         return;
@@ -297,7 +736,7 @@ static void pair_room(struct RelayClient *clients, int index)
             continue;
         }
 
-        if (clients[i].role == RELAY_ROLE_NONE || clients[i].role == client->role)
+        if (clients[i].role == RELAY_ROLE_NONE || clients[i].role == client->role || clients[i].transportMode != client->transportMode)
         {
             continue;
         }
@@ -316,6 +755,9 @@ static void pair_room(struct RelayClient *clients, int index)
         return;
     }
 
+    fprintf(stderr, "[relay] pairing clients: idx=%d peer=%d room=%s\n", index, peerIndex, client->roomCode);
+    fflush(stderr);
+
     client->paired = true;
     client->peerIndex = peerIndex;
     clients[peerIndex].paired = true;
@@ -328,7 +770,6 @@ static void pair_room(struct RelayClient *clients, int index)
 static void process_client_input(struct RelayClient *clients, int index)
 {
     struct RelayClient *client = NULL;
-    char *newline = NULL;
     int received = 0;
 
     if (clients == NULL || index < 0 || index >= RELAY_MAX_CLIENTS)
@@ -347,7 +788,7 @@ static void process_client_input(struct RelayClient *clients, int index)
         const int remaining = (int)(sizeof(client->recvBuffer) - client->recvLength);
         if (remaining <= 0)
         {
-            disconnect_client(clients, index, "handshake too long");
+            disconnect_client(clients, index, client->handshakeComplete ? "frame too long" : "handshake too long");
             return;
         }
 
@@ -378,50 +819,133 @@ static void process_client_input(struct RelayClient *clients, int index)
 
         if (!client->handshakeComplete)
         {
-            newline = memchr(client->recvBuffer, '\n', client->recvLength);
-            if (newline == NULL)
+            if (client->recvLength >= 4u && memcmp(client->recvBuffer, "GET ", 4u) == 0)
             {
-                continue;
-            }
-
-            {
-                char line[128];
-                size_t lineLength = (size_t)(newline - (char *)client->recvBuffer);
-                char roomCode[RELAY_MAX_ROOM_CODE + 1];
-                enum RelayRole role = RELAY_ROLE_NONE;
-                size_t leftover = client->recvLength - lineLength - 1u;
-
-                if (lineLength >= sizeof(line))
+                const char *headerEnd = strstr((const char *)client->recvBuffer, "\r\n\r\n");
+                if (headerEnd == NULL)
                 {
-                    disconnect_client(clients, index, "handshake line too long");
-                    return;
+                    continue;
                 }
 
-                memcpy(line, client->recvBuffer, lineLength);
-                line[lineLength] = '\0';
-                normalize_handshake_line(line);
-                if (!parse_handshake_line(line, roomCode, sizeof(roomCode), &role))
                 {
-                    disconnect_client(clients, index, "invalid handshake");
-                    return;
-                }
+                    const size_t requestLength = (size_t)(headerEnd - (const char *)client->recvBuffer) + 4u;
+                    char requestText[RELAY_RECV_BUFFER_SIZE + 1u];
+                    char roomCode[RELAY_MAX_ROOM_CODE + 1];
+                    char acceptKey[128];
+                    enum RelayRole role = RELAY_ROLE_NONE;
+                    size_t leftover = client->recvLength - requestLength;
 
-                client->handshakeComplete = true;
-                client->role = role;
-                snprintf(client->roomCode, sizeof(client->roomCode), "%s", roomCode);
-
-                if (leftover > 0u)
-                {
-                    if (leftover > sizeof(client->pendingBuffer) - client->pendingLength)
+                    if (requestLength >= sizeof(requestText))
                     {
-                        disconnect_client(clients, index, "buffer overflow");
+                        disconnect_client(clients, index, "websocket request too long");
                         return;
                     }
-                    memcpy(client->pendingBuffer + client->pendingLength, newline + 1, leftover);
-                    client->pendingLength += leftover;
+
+                    memcpy(requestText, client->recvBuffer, requestLength);
+                    requestText[requestLength] = '\0';
+                    if (!parse_websocket_request(requestText, roomCode, sizeof(roomCode), &role, acceptKey, sizeof(acceptKey)))
+                    {
+                        disconnect_client(clients, index, "invalid websocket handshake");
+                        return;
+                    }
+
+                    if (!send_websocket_upgrade_response(client->socketHandle, acceptKey))
+                    {
+                        disconnect_client(clients, index, "websocket upgrade failed");
+                        return;
+                    }
+
+                    client->handshakeComplete = true;
+                    client->transportMode = RELAY_TRANSPORT_WEBSOCKET;
+                    client->role = role;
+                    snprintf(client->roomCode, sizeof(client->roomCode), "%s", roomCode);
+                    fprintf(stderr, "[relay] websocket handshake complete: idx=%d role=%s room=%s leftover=%zu\n", index, (role==RELAY_ROLE_HOST)?"HOST":"CLIENT", client->roomCode, leftover);
+                    fflush(stderr);
+
+                    if (leftover > 0u)
+                    {
+                        memmove(client->recvBuffer, client->recvBuffer + requestLength, leftover);
+                    }
+                    client->recvLength = leftover;
+
+                    if (client->recvLength > 0u && !websocket_frame_parse(clients, index))
+                    {
+                        return;
+                    }
+
+                    pair_room(clients, index);
+                    if (client->paired)
+                    {
+                        flush_client(clients, index);
+                    }
                 }
-                client->recvLength = 0u;
-                pair_room(clients, index);
+            }
+            else
+            {
+                char *newline = memchr(client->recvBuffer, '\n', client->recvLength);
+                if (newline == NULL)
+                {
+                    continue;
+                }
+
+                {
+                    char line[128];
+                    size_t lineLength = (size_t)(newline - (char *)client->recvBuffer);
+                    char roomCode[RELAY_MAX_ROOM_CODE + 1];
+                    enum RelayRole role = RELAY_ROLE_NONE;
+                    size_t leftover = client->recvLength - lineLength - 1u;
+
+                    if (lineLength >= sizeof(line))
+                    {
+                        disconnect_client(clients, index, "handshake line too long");
+                        return;
+                    }
+
+                    memcpy(line, client->recvBuffer, lineLength);
+                    line[lineLength] = '\0';
+                    normalize_handshake_line(line);
+                    if (!parse_handshake_line(line, roomCode, sizeof(roomCode), &role))
+                    {
+                        disconnect_client(clients, index, "invalid handshake");
+                        return;
+                    }
+
+                    client->handshakeComplete = true;
+                    client->transportMode = RELAY_TRANSPORT_TCP;
+                    client->role = role;
+                    snprintf(client->roomCode, sizeof(client->roomCode), "%s", roomCode);
+                    fprintf(stderr, "[relay] tcp handshake complete: idx=%d role=%s room=%s leftover=%zu\n", index, (role==RELAY_ROLE_HOST)?"HOST":"CLIENT", client->roomCode, leftover);
+                    fflush(stderr);
+
+                    if (leftover > 0u)
+                    {
+                        if (leftover > sizeof(client->pendingBuffer) - client->pendingLength)
+                        {
+                            disconnect_client(clients, index, "buffer overflow");
+                            return;
+                        }
+                        memcpy(client->pendingBuffer + client->pendingLength, newline + 1, leftover);
+                        client->pendingLength += leftover;
+                    }
+                    client->recvLength = 0u;
+                    pair_room(clients, index);
+                    if (client->paired)
+                    {
+                        flush_client(clients, index);
+                    }
+                }
+            }
+        }
+        else if (client->transportMode == RELAY_TRANSPORT_WEBSOCKET)
+        {
+            if (!websocket_frame_parse(clients, index))
+            {
+                return;
+            }
+
+            if (client->paired)
+            {
+                flush_client(clients, index);
             }
         }
         else
@@ -448,9 +972,10 @@ static void process_client_input(struct RelayClient *clients, int index)
 
 int main(int argc, char **argv)
 {
+    fprintf(stderr, "[relay] starting main\n");
     RelaySocket listenSocket = RELAY_INVALID_SOCKET;
     struct sockaddr_in listenAddress;
-    struct RelayClient clients[RELAY_MAX_CLIENTS];
+    struct RelayClient *clients = NULL;
     unsigned short port = 24680u;
     const char *portEnv = getenv("PORT");
     fd_set readSet;
@@ -476,11 +1001,18 @@ int main(int argc, char **argv)
 
     if (!relay_socket_layer_init())
     {
-        fprintf(stderr, "failed to initialize socket layer\n");
+        fprintf(stderr, "[relay] failed to initialize socket layer\n");
         return 1;
     }
 
-    memset(clients, 0, sizeof(clients));
+    clients = (struct RelayClient *)calloc(RELAY_MAX_CLIENTS, sizeof(*clients));
+    if (clients == NULL)
+    {
+        fprintf(stderr, "[relay] failed to allocate clients array\n");
+        close_socket_if_open(&listenSocket);
+        return 1;
+    }
+
     for (int i = 0; i < RELAY_MAX_CLIENTS; i++)
     {
         clients[i].socketHandle = RELAY_INVALID_SOCKET;
@@ -490,7 +1022,7 @@ int main(int argc, char **argv)
     listenSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (listenSocket == RELAY_INVALID_SOCKET)
     {
-        fprintf(stderr, "socket failed\n");
+        fprintf(stderr, "[relay] socket failed\n");
         return 1;
     }
 
@@ -501,7 +1033,7 @@ int main(int argc, char **argv)
 
     if (!set_socket_nonblocking(listenSocket))
     {
-        fprintf(stderr, "failed to set nonblocking mode\n");
+        fprintf(stderr, "[relay] failed to set nonblocking mode\n");
         close_socket_if_open(&listenSocket);
         return 1;
     }
@@ -513,23 +1045,26 @@ int main(int argc, char **argv)
 
     if (bind(listenSocket, (struct sockaddr *)&listenAddress, sizeof(listenAddress)) == RELAY_SOCKET_ERROR)
     {
-        fprintf(stderr, "bind failed on port %u\n", (unsigned int)port);
+        fprintf(stderr, "[relay] bind failed on port %u\n", (unsigned int)port);
         close_socket_if_open(&listenSocket);
         return 1;
     }
 
     if (listen(listenSocket, RELAY_MAX_CLIENTS) == RELAY_SOCKET_ERROR)
     {
-        fprintf(stderr, "listen failed\n");
+        fprintf(stderr, "[relay] listen failed\n");
         close_socket_if_open(&listenSocket);
         return 1;
     }
 
-    printf("SoC relay server listening on port %u\n", (unsigned int)port);
+    fprintf(stderr, "[relay] listening on port %u\n", (unsigned int)port);
+    fflush(stderr);
     fflush(stdout);
 
     while (true)
     {
+        /* heartbeat log to show loop alive */
+        /*fprintf(stderr, "[relay] loop tick\n");*/
         struct timeval timeout;
         maxSocket = (int)listenSocket;
 
@@ -609,6 +1144,8 @@ int main(int argc, char **argv)
                 clients[slot].peerIndex = -1;
                 clients[slot].recvLength = 0u;
                 clients[slot].pendingLength = 0u;
+                fprintf(stderr, "[relay] accepted connection: slot=%d socket=%d\n", slot, (int)clientSocket);
+                fflush(stderr);
             }
         }
 
@@ -636,6 +1173,7 @@ int main(int argc, char **argv)
     {
         close_socket_if_open(&clients[i].socketHandle);
     }
+    free(clients);
 
 #ifdef _WIN32
     if (gSocketLayerReady)

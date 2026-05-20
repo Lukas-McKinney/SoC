@@ -59,7 +59,7 @@ struct MatchSession
     int pendingTradePeerId;
     struct NetplayState *netplay;
     char connectionError[96];
-    char reconnectHost[64];
+    char reconnectHost[128];
     unsigned short reconnectPort;
     double reconnectAttemptAtSeconds;
     double nextResyncRequestAtSeconds;
@@ -67,7 +67,7 @@ struct MatchSession
     bool reconnectEnabled;
     bool reconnectNotified;
     bool relayTransport;
-    char relayServerAddress[64];
+    char relayServerAddress[128];
     unsigned short relayServerPort;
     char relayRoomCode[MATCH_SESSION_MAX_RELAY_ROOM_CODE + 1];
     uint32_t peerCapabilityFlags;

@@ -43,12 +43,13 @@ struct LaunchOptions
     bool hostMode;
     bool clientMode;
     bool relayMode;
+    bool portSpecified;
     unsigned short port;
     enum PlayerType localPlayer;
     enum PlayerType remotePlayer;
     enum AiDifficulty aiDifficulty;
-    char hostAddress[64];
-    char relayAddress[64];
+    char hostAddress[128];
+    char relayAddress[128];
     char roomCode[32];
 };
 
@@ -218,18 +219,39 @@ int main(int argc, char **argv)
             case MAIN_MENU_ACTION_START_PRIVATE_HOST:
                 setupMap(&session.map);
                 aiDifficulty = MainMenuGetMultiplayerAiDifficulty();
-                ConfigurePrivateMatch(&session,
-                                      MainMenuGetMultiplayerLocalColor(),
-                                      MainMenuGetMultiplayerRemoteColor(),
-                                      aiDifficulty,
-                                      true);
                 aiResetController();
-                if (!matchSessionOpenPrivateHost(&session, MainMenuGetMultiplayerPort()))
+                if (MainMenuIsUsingRelay())
                 {
-                    MainMenuSetMultiplayerError(matchSessionGetConnectionError(&session));
-                    MainMenuSetMultiplayerOpen(true);
-                    appScreen = APP_SCREEN_MAIN_MENU;
-                    break;
+                    ConfigurePrivateRelayMatch(&session,
+                                               MainMenuGetMultiplayerLocalColor(),
+                                               MainMenuGetMultiplayerRemoteColor(),
+                                               aiDifficulty,
+                                               true,
+                                               MainMenuGetMultiplayerHostAddress(),
+                                               MainMenuGetMultiplayerPort(),
+                                               MainMenuGetMultiplayerRoomCode());
+                    if (!matchSessionOpenPrivateHostRelay(&session, MainMenuGetMultiplayerPort(), MainMenuGetMultiplayerRoomCode()))
+                    {
+                        MainMenuSetMultiplayerError(matchSessionGetConnectionError(&session));
+                        MainMenuSetMultiplayerOpen(true);
+                        appScreen = APP_SCREEN_MAIN_MENU;
+                        break;
+                    }
+                }
+                else
+                {
+                    ConfigurePrivateMatch(&session,
+                                            MainMenuGetMultiplayerLocalColor(),
+                                            MainMenuGetMultiplayerRemoteColor(),
+                                            aiDifficulty,
+                                            true);
+                    if (!matchSessionOpenPrivateHost(&session, MainMenuGetMultiplayerPort()))
+                    {
+                        MainMenuSetMultiplayerError(matchSessionGetConnectionError(&session));
+                        MainMenuSetMultiplayerOpen(true);
+                        appScreen = APP_SCREEN_MAIN_MENU;
+                        break;
+                    }
                 }
 
                 MainMenuSetMultiplayerOpen(false);
@@ -239,20 +261,43 @@ int main(int argc, char **argv)
             case MAIN_MENU_ACTION_START_PRIVATE_JOIN:
                 setupMap(&session.map);
                 aiDifficulty = MainMenuGetMultiplayerAiDifficulty();
-                ConfigurePrivateMatch(&session,
-                                      MainMenuGetMultiplayerRemoteColor(),
-                                      MainMenuGetMultiplayerLocalColor(),
-                                      aiDifficulty,
-                                      false);
                 aiResetController();
-                if (!matchSessionOpenPrivateClient(&session,
-                                                   MainMenuGetMultiplayerHostAddress(),
-                                                   MainMenuGetMultiplayerPort()))
+                if (MainMenuIsUsingRelay())
                 {
-                    MainMenuSetMultiplayerError(matchSessionGetConnectionError(&session));
-                    MainMenuSetMultiplayerOpen(true);
-                    appScreen = APP_SCREEN_MAIN_MENU;
-                    break;
+                    ConfigurePrivateRelayMatch(&session,
+                                               MainMenuGetMultiplayerRemoteColor(),
+                                               MainMenuGetMultiplayerLocalColor(),
+                                               aiDifficulty,
+                                               false,
+                                               MainMenuGetMultiplayerHostAddress(),
+                                               MainMenuGetMultiplayerPort(),
+                                               MainMenuGetMultiplayerRoomCode());
+                    if (!matchSessionOpenPrivateClientRelay(&session,
+                                                            MainMenuGetMultiplayerPort(),
+                                                            MainMenuGetMultiplayerRoomCode()))
+                    {
+                        MainMenuSetMultiplayerError(matchSessionGetConnectionError(&session));
+                        MainMenuSetMultiplayerOpen(true);
+                        appScreen = APP_SCREEN_MAIN_MENU;
+                        break;
+                    }
+                }
+                else
+                {
+                    ConfigurePrivateMatch(&session,
+                                            MainMenuGetMultiplayerRemoteColor(),
+                                            MainMenuGetMultiplayerLocalColor(),
+                                            aiDifficulty,
+                                            false);
+                    if (!matchSessionOpenPrivateClient(&session,
+                                                       MainMenuGetMultiplayerHostAddress(),
+                                                       MainMenuGetMultiplayerPort()))
+                    {
+                        MainMenuSetMultiplayerError(matchSessionGetConnectionError(&session));
+                        MainMenuSetMultiplayerOpen(true);
+                        appScreen = APP_SCREEN_MAIN_MENU;
+                        break;
+                    }
                 }
 
                 MainMenuSetMultiplayerOpen(false);
@@ -901,14 +946,27 @@ static enum NetplayLobbyAction HandleNetplayLobbyInput(struct MatchSession *sess
         CheckCollisionPointRec(mouse, copyButton))
     {
         char endpoint[96];
-        const char *address = matchSessionIsHost(session)
-                                  ? netplayGetLocalAddress(session->netplay)
-                                  : netplayGetPeerAddress(session->netplay);
+        const char *address = NULL;
+        const unsigned short port = session->relayTransport
+                                        ? session->relayServerPort
+                                        : netplayGetPort(session->netplay);
+
+        if (session->relayTransport)
+        {
+            address = session->relayServerAddress;
+        }
+        else
+        {
+            address = matchSessionIsHost(session)
+                          ? netplayGetLocalAddress(session->netplay)
+                          : netplayGetPeerAddress(session->netplay);
+        }
+
         snprintf(endpoint,
                  sizeof(endpoint),
                  "%s:%u",
                  (address != NULL && address[0] != '\0') ? address : "127.0.0.1",
-                 (unsigned int)netplayGetPort(session->netplay));
+                 (unsigned int)port);
         SetClipboardText(endpoint);
         uiShowCenteredStatus(loc("Endpoint copied to clipboard."), UI_NOTIFICATION_POSITIVE);
         return NETPLAY_LOBBY_ACTION_NONE;
@@ -1074,28 +1132,40 @@ static void DrawNetplayLobby(const struct MatchSession *session)
     endpointLine[0] = '\0';
     if (session != NULL && session->netplay != NULL)
     {
-        if (matchSessionIsHost(session))
+        const bool relayTransport = session->relayTransport;
+        const char *hiddenAddress = relayTransport ? "********" : "***.***.***.***";
+        const char *address = relayTransport
+                                  ? session->relayServerAddress
+                                  : (matchSessionIsHost(session)
+                                         ? netplayGetLocalAddress(session->netplay)
+                                         : netplayGetPeerAddress(session->netplay));
+        const unsigned short port = relayTransport
+                                        ? session->relayServerPort
+                                        : netplayGetPort(session->netplay);
+
+        snprintf(endpointValue,
+                 sizeof(endpointValue),
+                 "%s:%u",
+                 gNetplayLobbyRevealEndpoint
+                     ? ((address != NULL && address[0] != '\0') ? address : "127.0.0.1")
+                     : hiddenAddress,
+                 (unsigned int)port);
+
+        if (relayTransport)
         {
-            snprintf(endpointValue,
-                     sizeof(endpointValue),
-                     "%s:%u",
-                     gNetplayLobbyRevealEndpoint ? netplayGetLocalAddress(session->netplay) : "***.***.***.***",
-                     (unsigned int)netplayGetPort(session->netplay));
             snprintf(endpointLine,
                      sizeof(endpointLine),
-                     loc("Open on %s"),
+                     matchSessionIsHost(session)
+                         ? loc("Relay room %s on %s")
+                         : loc("Connected to relay room %s on %s"),
+                     session->relayRoomCode[0] != '\0' ? session->relayRoomCode : loc("default"),
                      endpointValue);
         }
         else
         {
-            snprintf(endpointValue,
-                     sizeof(endpointValue),
-                     "%s:%u",
-                     gNetplayLobbyRevealEndpoint ? netplayGetPeerAddress(session->netplay) : "***.***.***.***",
-                     (unsigned int)netplayGetPort(session->netplay));
             snprintf(endpointLine,
                      sizeof(endpointLine),
-                     loc("Connected to %s"),
+                     matchSessionIsHost(session) ? loc("Open on %s") : loc("Connected to %s"),
                      endpointValue);
         }
     }

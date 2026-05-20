@@ -2,6 +2,7 @@
 #define MAIN_MENU_H
 
 #include "player.h"
+#include <stdbool.h>
 #include <raylib.h>
 
 enum MainMenuAction
@@ -48,5 +49,10 @@ void MainMenuSetMultiplayerPort(unsigned short port);
 void MainMenuSetMultiplayerHostAddress(const char *address);
 void MainMenuSetMultiplayerOpen(bool open);
 void MainMenuSetMultiplayerError(const char *message);
+
+/* Relay room accessors: non-empty room code implies relay usage. */
+bool MainMenuIsUsingRelay(void);
+const char *MainMenuGetMultiplayerRoomCode(void);
+void MainMenuSetMultiplayerRoomCode(const char *code);
 
 #endif
