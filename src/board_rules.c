@@ -92,9 +92,49 @@ bool boardIsValidRoadPlacement(const struct Map *map, int tileId, int sideIndex,
     return false;
 }
 
+/* Count how many settlements a player has built on the board */
+static int count_player_settlements(const struct Map *map, enum PlayerType player)
+{
+    int count = 0;
+    for (int i = 0; i < LAND_TILE_COUNT; i++)
+    {
+        for (int j = 0; j < HEX_CORNERS; j++)
+        {
+            if (map->tiles[i].corners[j].owner == player && map->tiles[i].corners[j].structure == STRUCTURE_TOWN)
+            {
+                count++;
+            }
+        }
+    }
+    return count;
+}
+
+/* Count how many cities a player has built on the board */
+static int count_player_cities(const struct Map *map, enum PlayerType player)
+{
+    int count = 0;
+    for (int i = 0; i < LAND_TILE_COUNT; i++)
+    {
+        for (int j = 0; j < HEX_CORNERS; j++)
+        {
+            if (map->tiles[i].corners[j].owner == player && map->tiles[i].corners[j].structure == STRUCTURE_CITY)
+            {
+                count++;
+            }
+        }
+    }
+    return count;
+}
+
 bool boardIsValidSettlementPlacement(const struct Map *map, int tileId, int cornerIndex, enum PlayerType player, Vector2 origin, float radius)
 {
     if (tileId < 0 || cornerIndex < 0)
+    {
+        return false;
+    }
+
+    /* Check if player has reached their 5-settlement limit */
+    if (count_player_settlements(map, player) >= 5)
     {
         return false;
     }
@@ -125,6 +165,12 @@ bool boardIsValidCityPlacement(const struct Map *map, int tileId, int cornerInde
     }
 
     if (map->phase != GAME_PHASE_PLAY)
+    {
+        return false;
+    }
+
+    /* Check if player has reached their 4-city limit */
+    if (count_player_cities(map, player) >= 4)
     {
         return false;
     }

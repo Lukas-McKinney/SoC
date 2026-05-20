@@ -14,10 +14,11 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define AI_BUILD_ACTIONS_EASY 1
 #define AI_BUILD_ACTIONS_MEDIUM 2
-#define AI_BUILD_ACTIONS_HARD 3
+#define AI_BUILD_ACTIONS_HARD 12
 #define AI_SEARCH_WIN_SCORE 100000.0f
 
 static const int kRoadCost[5] = {1, 0, 1, 0, 0};
@@ -160,6 +161,8 @@ void aiResetController(void)
     gTrackedTurnPlayer = PLAYER_NONE;
     gNextAiActionTime = 0.0;
     reset_ai_turn_state();
+    /* seed RNG for tie-breaking to avoid deterministic top-left bias */
+    srand((unsigned)time(NULL));
 }
 
 void aiConfigureHotseatMatch(struct Map *map)
@@ -499,18 +502,18 @@ bool aiShouldAcceptPlayerTradeOffer(const struct Map *map, enum PlayerType aiPla
     threshold = -0.55f;
     if (difficulty == AI_DIFFICULTY_MEDIUM)
     {
-        threshold = 0.35f;
+        threshold = 0.45f;  /* Slightly more selective */
     }
     else if (difficulty == AI_DIFFICULTY_HARD)
     {
-        threshold = 1.05f;
+        threshold = 2.50f;  /* Hard AI is extremely selective about trades */
         if (offeringPlayerPoints >= aiVisiblePoints)
         {
-            threshold += 0.55f;
+            threshold += 0.75f;  /* More defensive against leading players */
         }
         if (offeringPlayerPoints >= 8)
         {
-            threshold += 0.45f;
+            threshold += 0.65f;  /* Strongly avoid helping players near victory */
         }
     }
 
@@ -601,12 +604,13 @@ static double ai_search_time_budget(enum AiDifficulty difficulty)
     switch (difficulty)
     {
     case AI_DIFFICULTY_HARD:
-        return 0.100;
+        /* give Hard AI substantially more planning time for deeper lookahead and better move selection */
+        return 4.000;
     case AI_DIFFICULTY_MEDIUM:
-        return 0.065;
+        return 0.400;
     case AI_DIFFICULTY_EASY:
     default:
-        return 0.040;
+        return 0.080;
     }
 }
 
@@ -963,6 +967,83 @@ static bool find_corner_key(int tileId, int cornerIndex, int *x, int *y)
     return true;
 }
 
+static float positional_priority_for_corner(const struct Map *map, int tileId, int cornerIndex, enum AiDifficulty difficulty, enum PlayerType player)
+{
+    int tx = 0, ty = 0;
+    Vector2 origin;
+    float dx, dy, dist, invDist;
+    int roads = 0;
+
+    if (map == NULL || !find_corner_key(tileId, cornerIndex, &tx, &ty))
+    {
+        return 0.0f;
+    }
+
+    origin = (Vector2){(float)GetScreenWidth() * BOARD_ORIGIN_X_FACTOR, (float)GetScreenHeight() * BOARD_ORIGIN_Y_FACTOR};
+    const int cx = (int)roundf(origin.x * 10.0f);
+    const int cy = (int)roundf(origin.y * 10.0f);
+
+    dx = (float)(tx - cx) / (float)GetScreenWidth();
+    dy = (float)(ty - cy) / (float)GetScreenHeight();
+    dist = sqrtf(dx * dx + dy * dy);
+    invDist = 1.0f / (1.0f + dist); /* prefer closer to center */
+
+    roads = count_player_roads_touching_corner(map, player, tileId, cornerIndex);
+
+    /* Weighted combination: centrality + connectivity, stronger at higher difficulties */
+    if (difficulty == AI_DIFFICULTY_HARD)
+    {
+        return invDist * 1.8f + (float)roads * 0.55f;  /* Prefer central, connected positions */
+    }
+    else if (difficulty == AI_DIFFICULTY_MEDIUM)
+    {
+        return invDist * 1.2f + (float)roads * 0.35f;
+    }
+
+    return invDist * 0.7f + (float)roads * 0.15f;
+}
+
+static float positional_priority_for_edge(const struct Map *map, int tileId, int sideIndex, enum AiDifficulty difficulty, enum PlayerType player)
+{
+    int a = 0, b = 1;
+    int ax = 0, ay = 0, bx = 0, by = 0;
+    float mx, my;
+
+    GetSideCornerIndices(sideIndex, &a, &b);
+    if (!find_corner_key(tileId, a, &ax, &ay) || !find_corner_key(tileId, b, &bx, &by))
+    {
+        return 0.0f;
+    }
+
+    mx = ((float)ax + (float)bx) * 0.5f;
+    my = ((float)ay + (float)by) * 0.5f;
+
+    Vector2 origin = (Vector2){(float)GetScreenWidth() * BOARD_ORIGIN_X_FACTOR, (float)GetScreenHeight() * BOARD_ORIGIN_Y_FACTOR};
+    const float cx = origin.x * 10.0f;
+    const float cy = origin.y * 10.0f;
+
+    const float dx = (mx - cx) / (float)GetScreenWidth();
+    const float dy = (my - cy) / (float)GetScreenHeight();
+    const float dist = sqrtf(dx * dx + dy * dy);
+    const float invDist = 1.0f / (1.0f + dist);
+
+    /* connectivity: sum of player roads touching both corners */
+    const int roadsA = count_player_roads_touching_corner(map, player, tileId, a);
+    const int roadsB = count_player_roads_touching_corner(map, player, tileId, b);
+    const int roads = roadsA + roadsB;
+
+    if (difficulty == AI_DIFFICULTY_HARD)
+    {
+        return invDist * 1.6f + (float)roads * 0.48f;  /* Strong preference for connectivity and central roads */
+    }
+    else if (difficulty == AI_DIFFICULTY_MEDIUM)
+    {
+        return invDist * 1.1f + (float)roads * 0.3f;
+    }
+
+    return invDist * 0.6f + (float)roads * 0.1f;
+}
+
 static float evaluate_corner_value(const struct Map *map, int tileId, int cornerIndex, enum AiDifficulty difficulty)
 {
     int tx = 0;
@@ -1159,25 +1240,37 @@ static float evaluate_road_candidate(const struct Map *map, int tileId, int side
     GetSideCornerIndices(sideIndex, &cornerA, &cornerB);
     if (corner_can_host_future_settlement(map, tileId, cornerA))
     {
-        score += evaluate_corner_value(map, tileId, cornerA, difficulty) * 0.9f;
+        const float cornerMultiplier = difficulty == AI_DIFFICULTY_HARD ? 1.9f : (difficulty == AI_DIFFICULTY_MEDIUM ? 1.3f : 1.0f);
+        score += evaluate_corner_value(map, tileId, cornerA, difficulty) * cornerMultiplier;
     }
     else if (map->tiles[tileId].corners[cornerA].owner == player)
     {
-        score += 1.0f + 0.4f * count_player_roads_touching_corner(map, player, tileId, cornerA);
+        score += 2.4f + 0.85f * count_player_roads_touching_corner(map, player, tileId, cornerA);
     }
 
     if (corner_can_host_future_settlement(map, tileId, cornerB))
     {
-        score += evaluate_corner_value(map, tileId, cornerB, difficulty) * 0.9f;
+        const float cornerMultiplier = difficulty == AI_DIFFICULTY_HARD ? 1.9f : (difficulty == AI_DIFFICULTY_MEDIUM ? 1.3f : 1.0f);
+        score += evaluate_corner_value(map, tileId, cornerB, difficulty) * cornerMultiplier;
     }
     else if (map->tiles[tileId].corners[cornerB].owner == player)
     {
-        score += 1.0f + 0.4f * count_player_roads_touching_corner(map, player, tileId, cornerB);
+        score += 2.4f + 0.85f * count_player_roads_touching_corner(map, player, tileId, cornerB);
     }
 
     if (difficulty == AI_DIFFICULTY_HARD && gameGetLongestRoadOwner(map) != player)
     {
-        score += 0.8f;
+        score += 12.5f;  /* Aggressively pursue longest road on hard difficulty */
+    }
+
+    /* scaled bonus to encourage road construction on smarter AIs */
+    if (difficulty == AI_DIFFICULTY_HARD)
+    {
+        score += 8.0f;  /* Strongly encourage road expansion on hard difficulty */
+    }
+    else if (difficulty == AI_DIFFICULTY_MEDIUM)
+    {
+        score += 1.8f;
     }
 
     return score;
@@ -1206,12 +1299,24 @@ static bool find_best_settlement_candidate(const struct Map *map, enum PlayerTyp
             }
 
             score = evaluate_corner_value(map, tileId, cornerIndex, difficulty);
-            if (!found || score > candidate->score)
+            if (!found || score > candidate->score + 1e-6f)
             {
                 candidate->tileId = tileId;
                 candidate->cornerIndex = cornerIndex;
                 candidate->score = score;
                 found = true;
+            }
+            else if (found && fabsf(score - candidate->score) < 1e-6f)
+            {
+                /* deterministic tie-break: prefer central + connected corners */
+                float curPri = positional_priority_for_corner(map, tileId, cornerIndex, difficulty, player);
+                float prevPri = positional_priority_for_corner(map, candidate->tileId, candidate->cornerIndex, difficulty, player);
+                if (curPri > prevPri + 1e-6f)
+                {
+                    candidate->tileId = tileId;
+                    candidate->cornerIndex = cornerIndex;
+                    candidate->score = score;
+                }
             }
         }
     }
@@ -1240,12 +1345,23 @@ static bool find_best_city_candidate(const struct Map *map, enum PlayerType play
             }
 
             score = evaluate_corner_value(map, tileId, cornerIndex, difficulty) * 1.35f;
-            if (!found || score > candidate->score)
+            if (!found || score > candidate->score + 1e-6f)
             {
                 candidate->tileId = tileId;
                 candidate->cornerIndex = cornerIndex;
                 candidate->score = score;
                 found = true;
+            }
+            else if (found && fabsf(score - candidate->score) < 1e-6f)
+            {
+                float curPri = positional_priority_for_corner(map, tileId, cornerIndex, difficulty, player);
+                float prevPri = positional_priority_for_corner(map, candidate->tileId, candidate->cornerIndex, difficulty, player);
+                if (curPri > prevPri + 1e-6f)
+                {
+                    candidate->tileId = tileId;
+                    candidate->cornerIndex = cornerIndex;
+                    candidate->score = score;
+                }
             }
         }
     }
@@ -1283,12 +1399,23 @@ static bool find_best_road_candidate(const struct Map *map, enum PlayerType play
             }
 
             score = evaluate_road_candidate(map, tileId, sideIndex, player, difficulty);
-            if (!found || score > candidate->score)
+            if (!found || score > candidate->score + 1e-6f)
             {
                 candidate->tileId = tileId;
                 candidate->sideIndex = sideIndex;
                 candidate->score = score;
                 found = true;
+            }
+            else if (found && fabsf(score - candidate->score) < 1e-6f)
+            {
+                float curPri = positional_priority_for_edge(map, tileId, sideIndex, difficulty, player);
+                float prevPri = positional_priority_for_edge(map, candidate->tileId, candidate->sideIndex, difficulty, player);
+                if (curPri > prevPri + 1e-6f)
+                {
+                    candidate->tileId = tileId;
+                    candidate->sideIndex = sideIndex;
+                    candidate->score = score;
+                }
             }
         }
     }
@@ -1471,12 +1598,13 @@ static int ai_maritime_trade_budget(enum AiDifficulty difficulty)
     switch (difficulty)
     {
     case AI_DIFFICULTY_HARD:
-        return 2;
+        /* allow extra maritime trades for Hard AI to enable flexible builds and combo strategies */
+        return 12;
     case AI_DIFFICULTY_MEDIUM:
-        return 1;
+        return 4;
     case AI_DIFFICULTY_EASY:
     default:
-        return 0;
+        return 1;
     }
 }
 
@@ -1494,36 +1622,46 @@ static float evaluate_player_strength(const struct Map *map, enum PlayerType pla
     }
 
     totalResources = resource_total_for_player(map, player);
-    score += (float)gameComputeVictoryPoints(map, player) * 140.0f;
-    score += (float)gameComputeVisibleVictoryPoints(map, player) * 22.0f;
-    score += evaluate_hand_value(map, player, map->players[player].resources, difficulty) * 4.2f;
+    score += (float)gameComputeVictoryPoints(map, player) * 160.0f;
+    score += (float)gameComputeVisibleVictoryPoints(map, player) * 28.0f;
+    score += evaluate_hand_value(map, player, map->players[player].resources, difficulty) * 5.5f;
 
     if (find_best_city_candidate(map, player, difficulty, &cityCandidate))
     {
-        score += cityCandidate.score * 2.7f;
+        /* make cities significantly more attractive on Hard */
+        score += cityCandidate.score * 4.0f;
     }
     if (find_best_settlement_candidate(map, player, difficulty, &settlementCandidate))
     {
-        score += settlementCandidate.score * 2.0f;
+        score += settlementCandidate.score * 3.0f;
     }
     if (find_best_road_candidate(map, player, difficulty, false, &roadCandidate))
     {
-        score += roadCandidate.score * 1.35f;
+        /* Hard AI values road candidates significantly higher for strategic expansion */
+        const float roadWeight = difficulty == AI_DIFFICULTY_HARD ? 14.5f : (difficulty == AI_DIFFICULTY_MEDIUM ? 5.0f : 2.0f);
+        score += roadCandidate.score * roadWeight;
     }
 
-    score += (float)gameGetDevelopmentCardCount(map, player, DEVELOPMENT_CARD_KNIGHT) * 2.8f;
-    score += (float)gameGetDevelopmentCardCount(map, player, DEVELOPMENT_CARD_ROAD_BUILDING) * 4.6f;
-    score += (float)gameGetDevelopmentCardCount(map, player, DEVELOPMENT_CARD_YEAR_OF_PLENTY) * 4.2f;
-    score += (float)gameGetDevelopmentCardCount(map, player, DEVELOPMENT_CARD_MONOPOLY) * 4.9f;
+    score += (float)gameGetDevelopmentCardCount(map, player, DEVELOPMENT_CARD_KNIGHT) * 7.2f;
+    score += (float)gameGetDevelopmentCardCount(map, player, DEVELOPMENT_CARD_ROAD_BUILDING) * 13.5f;  /* Strong value for road building */
+    score += (float)gameGetDevelopmentCardCount(map, player, DEVELOPMENT_CARD_YEAR_OF_PLENTY) * 11.0f;  /* High value for flexibility */
+    score += (float)gameGetDevelopmentCardCount(map, player, DEVELOPMENT_CARD_MONOPOLY) * 12.0f;      /* Strong blocking potential */
     score += (float)map->players[player].playedKnightCount * 1.3f;
 
     if (gameGetLargestArmyOwner(map) == player)
     {
-        score += 22.0f;
+        score += 35.0f;  /* Increased value for largest army */
     }
     if (gameGetLongestRoadOwner(map) == player)
     {
-        score += 24.0f + (float)gameGetLongestRoadLength(map) * 1.8f;
+        score += 38.0f + (float)gameGetLongestRoadLength(map) * 2.5f;  /* Higher bonus for long roads */
+    }
+
+    /* Incentive to build roads when affordable - scaled by difficulty */
+    if (gameCanAffordRoad(map))
+    {
+        /* Hard AI strongly prioritizes connected road networks for strategy expansion */
+        score += difficulty == AI_DIFFICULTY_HARD ? 50.0f : (difficulty == AI_DIFFICULTY_MEDIUM ? 22.0f : 5.0f);
     }
 
     score -= (float)max_int(totalResources - 7, 0) * 1.1f;
@@ -1807,6 +1945,21 @@ static float search_free_road_score(const struct Map *map, enum PlayerType playe
                     bestAction->sideIndex = sideIndex;
                 }
             }
+            else if (found && fabsf(score - bestScore) < epsilon)
+            {
+                float curPri = positional_priority_for_edge(map, tileId, sideIndex, difficulty, player);
+                float prevPri = positional_priority_for_edge(map, bestAction != NULL ? bestAction->tileId : tileId, bestAction != NULL ? bestAction->sideIndex : sideIndex, difficulty, player);
+                if (curPri > prevPri + 1e-6f)
+                {
+                    bestScore = score;
+                    if (bestAction != NULL)
+                    {
+                        bestAction->type = AI_ACTION_BUILD_ROAD;
+                        bestAction->tileId = tileId;
+                        bestAction->sideIndex = sideIndex;
+                    }
+                }
+            }
         }
     }
 
@@ -1990,7 +2143,25 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
                 }
 
                 {
-                    const float score = search_turn_score(&simulatedMap, player, difficulty, nextState, NULL);
+                    /* Reward trades that immediately enable builds the player couldn't afford before */
+                    bool enabledRoad = !gameCanAffordRoad(map) && gameCanAffordRoad(&simulatedMap);
+                    bool enabledSettlement = !gameCanAffordSettlement(map) && gameCanAffordSettlement(&simulatedMap);
+                    bool enabledCity = !gameCanAffordCity(map) && gameCanAffordCity(&simulatedMap);
+                    float tradeBonus = 0.0f;
+                    if (enabledCity)
+                    {
+                        tradeBonus += difficulty == AI_DIFFICULTY_HARD ? 70.0f : 36.0f;  /* Highly value city-enabling trades */
+                    }
+                    if (enabledSettlement)
+                    {
+                        tradeBonus += difficulty == AI_DIFFICULTY_HARD ? 48.0f : 28.0f;  /* Strongly encourage settlements */
+                    }
+                    if (enabledRoad)
+                    {
+                        tradeBonus += difficulty == AI_DIFFICULTY_HARD ? 30.0f : 15.0f;  /* Road trades valuable for expansion */
+                    }
+
+                    const float score = search_turn_score(&simulatedMap, player, difficulty, nextState, NULL) + tradeBonus;
                     if (score > bestScore + epsilon)
                     {
                         bestScore = score;
@@ -2389,6 +2560,21 @@ static float search_setup_road_score(const struct Map *map, enum PlayerType play
                     bestAction->sideIndex = sideIndex;
                 }
             }
+            else if (found && fabsf(score - bestScore) < epsilon)
+            {
+                float curPri = positional_priority_for_edge(map, tileId, sideIndex, difficulty, player);
+                float prevPri = positional_priority_for_edge(map, bestAction != NULL ? bestAction->tileId : tileId, bestAction != NULL ? bestAction->sideIndex : sideIndex, difficulty, player);
+                if (curPri > prevPri + 1e-6f)
+                {
+                    bestScore = score;
+                    if (bestAction != NULL)
+                    {
+                        bestAction->type = AI_ACTION_SETUP_ROAD;
+                        bestAction->tileId = tileId;
+                        bestAction->sideIndex = sideIndex;
+                    }
+                }
+            }
         }
     }
 
@@ -2435,6 +2621,18 @@ static bool choose_best_setup_settlement_action(const struct Map *map, enum Play
                 action->type = AI_ACTION_SETUP_SETTLEMENT;
                 action->tileId = tileId;
                 action->cornerIndex = cornerIndex;
+            }
+            else if (found && fabsf(score - bestScore) < epsilon)
+            {
+                float curPri = positional_priority_for_corner(map, tileId, cornerIndex, difficulty, player);
+                float prevPri = positional_priority_for_corner(map, action != NULL ? action->tileId : tileId, action != NULL ? action->cornerIndex : cornerIndex, difficulty, player);
+                if (curPri > prevPri + 1e-6f)
+                {
+                    bestScore = score;
+                    action->type = AI_ACTION_SETUP_SETTLEMENT;
+                    action->tileId = tileId;
+                    action->cornerIndex = cornerIndex;
+                }
             }
         }
     }

@@ -1446,7 +1446,8 @@ static void begin_discard_phase(struct Map *map)
     }
 
     const int total = total_resources_for_player(map, (enum PlayerType)player);
-    map->discardRemaining[player] = total > 7 ? total / 2 : 0;
+    /* require discard when player has 7 or more cards */
+    map->discardRemaining[player] = total >= 7 ? total / 2 : 0;
     debugLog("GAME", "discard requirement player=%d total=%d discard=%d",
              player,
              total,

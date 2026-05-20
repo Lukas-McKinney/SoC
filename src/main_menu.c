@@ -219,9 +219,8 @@ enum MainMenuAction HandleMainMenuInput(void)
         if (CheckCollisionPointRec(mouse, layout.hostModeButton))
         {
             gMainMenuMultiplayerMode = MAIN_MENU_MULTIPLAYER_HOST;
-            gMainMenuMultiplayerField = MultiplayerRelayModeRequested()
-                                            ? MAIN_MENU_MULTIPLAYER_FIELD_HOST_ADDRESS
-                                            : MAIN_MENU_MULTIPLAYER_FIELD_PORT;
+            /* default to host address so users can enter a websocket/relay address immediately */
+            gMainMenuMultiplayerField = MAIN_MENU_MULTIPLAYER_FIELD_HOST_ADDRESS;
             gMainMenuMultiplayerError[0] = '\0';
             NormalizeMultiplayerSelection();
             return MAIN_MENU_ACTION_NONE;

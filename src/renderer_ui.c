@@ -2,6 +2,7 @@
 
 #include "game_logic.h"
 #include "localization.h"
+#include "match_session.h"
 #include "renderer.h"
 #include "ui_state.h"
 #include "netplay.h"
@@ -116,10 +117,37 @@ void DrawBuildPanel(const struct Map *map)
     const Color disabledText = UiDisabledTextColor();
     const bool setupSettlementMode = gameIsSetupSettlementTurn(map);
     const bool setupRoadMode = gameIsSetupRoadTurn(map);
-    const bool canBuyRoad = setupRoadMode || gameCanAffordRoad(map);
-    const bool canBuySettlement = setupSettlementMode || gameCanAffordSettlement(map);
-    const bool canBuyCity = map->phase == GAME_PHASE_PLAY && gameCanAffordCity(map);
-    const bool canBuyDevelopment = gameCanBuyDevelopment(map);
+    
+    /* Get local player to show their affordances, not the current player's */
+    const struct MatchSession *session = matchSessionGetActive();
+    const enum PlayerType localPlayer = session != NULL ? matchSessionGetLocalPlayer(session) : map->currentPlayer;
+    
+    /* Check what the LOCAL PLAYER can afford, not what the current player can afford */
+    bool canBuyRoad = false;
+    bool canBuySettlement = false;
+    bool canBuyCity = false;
+    bool canBuyDevelopment = false;
+    
+    if (localPlayer >= PLAYER_RED && localPlayer <= PLAYER_BLACK)
+    {
+        const struct PlayerState *localPlayerState = &map->players[localPlayer];
+        canBuyRoad = setupRoadMode || (localPlayerState->resources[RESOURCE_WOOD] >= 1 && localPlayerState->resources[RESOURCE_CLAY] >= 1);
+        canBuySettlement = setupSettlementMode || (localPlayerState->resources[RESOURCE_WOOD] >= 1 && localPlayerState->resources[RESOURCE_WHEAT] >= 1 && 
+                                                    localPlayerState->resources[RESOURCE_CLAY] >= 1 && localPlayerState->resources[RESOURCE_SHEEP] >= 1);
+        canBuyCity = map->phase == GAME_PHASE_PLAY && (localPlayerState->resources[RESOURCE_WHEAT] >= 2 && localPlayerState->resources[RESOURCE_STONE] >= 3);
+        canBuyDevelopment = map->developmentDeckCount > 0 && (localPlayerState->resources[RESOURCE_WHEAT] >= 1 && 
+                                                              localPlayerState->resources[RESOURCE_SHEEP] >= 1 && 
+                                                              localPlayerState->resources[RESOURCE_STONE] >= 1);
+    }
+    else
+    {
+        /* Fallback to current player if local player is invalid */
+        canBuyRoad = setupRoadMode || gameCanAffordRoad(map);
+        canBuySettlement = setupSettlementMode || gameCanAffordSettlement(map);
+        canBuyCity = map->phase == GAME_PHASE_PLAY && gameCanAffordCity(map);
+        canBuyDevelopment = gameCanBuyDevelopment(map);
+    }
+    
     const unsigned char contentAlpha = (unsigned char)(255.0f * ((openAmount - 0.55f) / 0.45f < 0.0f ? 0.0f : ((openAmount - 0.55f) / 0.45f > 1.0f ? 1.0f : (openAmount - 0.55f) / 0.45f)));
     const float contentFade = contentAlpha / 255.0f;
 

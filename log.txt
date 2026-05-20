@@ -1,0 +1,1019 @@
+[21:34:25.354 +347.354][GAME] move thief start player=2 tile=17
+[21:34:25.356 +347.356][GAME] move thief end player=2 tile=17 elapsed=0.002 thiefVictim=1
+[21:34:25.423 +347.424][GAME] move thief start player=2 tile=18
+[21:34:25.425 +347.426][GAME] move thief end player=2 tile=18 elapsed=0.002 thiefVictim=1
+[21:34:25.510 +347.511][AI] thief move planning end player=2 tile=0 elapsed=1.681
+[21:34:25.512 +347.513][AI] action execute start current=2 actor=0 type=move_thief tile=0 corner=0 side=0 target=0 resA=0 resB=0 discard=[0,0,0,0,0]
+[21:34:25.516 +347.516][GAME] move thief start player=2 tile=0
+[21:34:26.518 +347.519][GAME] move thief end player=2 tile=0 elapsed=0.002 thiefVictim=1
+[21:34:26.522 +347.523][AI] action execute end type=move_thief success=1 elapsed=0.010
+[21:34:26.524 +347.525][AI] thief move execute player=2 tile=0 success=1 elapsed=0.012
+[21:34:26.598 +347.598][AI] thief victim planning end player=2 victim=0 elapsed=0.064
+[21:34:26.600 +347.600][AI] action execute start current=2 actor=0 type=choose_thief_victim tile=0 corner=0 side=0 target=0 resA=0 resB=0 discard=[0,0,0,0,0]
+[21:34:26.605 +347.605][GAME] steal resource player=2 victim=0 resource=3
+[21:34:26.606 +347.607][AI] action execute end type=choose_thief_victim success=1 elapsed=0.007
+[21:34:26.609 +347.609][AI] thief victim execute player=2 victim=0 success=1 elapsed=0.009
+[21:34:26.316 +348.317][AI] play phase search action=none score=-274.047 elapsed=0.050 budget=0.100 nodes=3 timedOut=0
+[21:34:26.321 +348.321][AI] play phase no action elapsed=0.054
+[21:34:26.326 +348.326][AI] end turn player=2
+[21:34:26.333 +348.334][AI] roll animation start player=3
+[21:34:26.341 +348.341][UI] dice animation start pending=3+3 total=6
+[21:34:27.200 +349.201][UI] dice animation resolve total=6
+[21:34:27.203 +349.203][GAME] gameRollDice start player=3 total=6
+[21:34:27.205 +349.205][GAME] gameRollDice end player=3 total=6 elapsed=0.002 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:34:27.209 +349.209][UI] dice animation resolved total=6 elapsed=0.008 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:34:27.329 +349.329][AI] play phase search action=none score=-430.055 elapsed=0.116 budget=0.100 nodes=7 timedOut=1
+[21:34:27.332 +349.332][AI] play phase no action elapsed=0.119
+[21:34:27.334 +349.334][AI] end turn player=3
+[21:34:28.445 +350.445][UI] dice animation start pending=2+2 total=4
+[21:34:29.296 +351.296][UI] dice animation resolve total=4
+[21:34:29.297 +351.298][GAME] gameRollDice start player=0 total=4
+[21:34:29.299 +351.299][GAME] gameRollDice end player=0 total=4 elapsed=0.001 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:34:29.302 +351.302][UI] dice animation resolved total=4 elapsed=0.006 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:34:42.110 +364.111][AI] decision start current=1 decision=1 difficulty=2 phase=1 rolled=0 discards=0 thiefPlacement=0 thiefVictim=0 delay=0.386
+[21:34:42.511 +364.511][AI] roll animation start player=1
+[21:34:42.512 +364.513][UI] dice animation start pending=1+2 total=3
+[21:34:43.378 +365.379][UI] dice animation resolve total=3
+[21:34:43.380 +365.380][GAME] gameRollDice start player=1 total=3
+[21:34:43.382 +365.382][GAME] gameRollDice end player=1 total=3 elapsed=0.002 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:34:43.386 +365.386][UI] dice animation resolved total=3 elapsed=0.008 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:34:43.506 +365.506][AI] play phase search action=none score=-654.526 elapsed=0.115 budget=0.100 nodes=7 timedOut=1
+[21:34:43.509 +365.509][AI] play phase no action elapsed=0.118
+[21:34:43.511 +365.511][AI] end turn player=1
+[21:34:43.518 +365.518][AI] roll animation start player=2
+[21:34:44.519 +365.520][UI] dice animation start pending=4+5 total=9
+[21:34:44.369 +366.370][UI] dice animation resolve total=9
+[21:34:44.371 +366.371][GAME] gameRollDice start player=2 total=9
+[21:34:44.372 +366.373][GAME] gameRollDice end player=2 total=9 elapsed=0.001 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:34:44.377 +366.378][UI] dice animation resolved total=9 elapsed=0.008 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:34:44.497 +366.497][AI] play phase search action=none score=-420.059 elapsed=0.112 budget=0.100 nodes=7 timedOut=1
+[21:34:44.500 +366.500][AI] play phase no action elapsed=0.116
+[21:34:44.502 +366.502][AI] end turn player=2
+[21:34:44.508 +366.509][AI] roll animation start player=3
+[21:34:44.510 +366.510][UI] dice animation start pending=3+4 total=7
+[21:34:45.376 +367.376][UI] dice animation resolve total=7
+[21:34:45.377 +367.378][GAME] gameRollDice start player=3 total=7
+[21:34:45.380 +367.380][GAME] begin discard phase currentPlayer=3
+[21:34:45.385 +367.385][GAME] discard requirement player=0 total=5 discard=0
+[21:34:45.387 +367.387][GAME] discard requirement player=1 total=10 discard=5
+[21:34:45.388 +367.389][GAME] discard requirement player=2 total=8 discard=4
+[21:34:45.390 +367.390][GAME] discard requirement player=3 total=6 discard=0
+[21:34:45.392 +367.393][GAME] gameRollDice end player=3 total=7 elapsed=0.015 pendingDiscards=1 thiefPlacement=0 thiefVictim=0
+[21:34:45.396 +367.397][UI] dice animation resolved total=7 elapsed=0.021 pendingDiscards=1 thiefPlacement=0 thiefVictim=0
+[21:34:45.402 +367.402][AI] decision start current=3 decision=1 difficulty=2 phase=1 rolled=1 discards=1 thiefPlacement=0 thiefVictim=0 delay=0.000
+[21:34:45.407 +367.407][AI] discard planning start player=1 required=5
+[21:34:45.409 +367.409][AI] discard planning end player=1 elapsed=0.002 plan=[0,2,0,2,1]
+[21:34:45.411 +367.412][AI] action execute start current=3 actor=1 type=discard tile=0 corner=0 side=0 target=1 resA=0 resB=0 discard=[0,2,0,2,1]
+[21:34:45.420 +367.421][GAME] discard submitted player=1 plan=[0,2,0,2,1] thiefPlacement=0
+[21:34:45.422 +367.423][AI] action execute end type=discard success=1 elapsed=0.011
+[21:34:45.424 +367.425][AI] discard execute player=1 success=1 elapsed=0.013
+[21:34:45.431 +367.432][AI] decision start current=3 decision=2 difficulty=2 phase=1 rolled=1 discards=1 thiefPlacement=0 thiefVictim=0 delay=0.000
+[21:34:45.439 +367.439][AI] discard planning start player=2 required=4
+[21:34:45.441 +367.441][AI] discard planning end player=2 elapsed=0.002 plan=[0,3,0,0,1]
+[21:34:45.443 +367.443][AI] action execute start current=3 actor=2 type=discard tile=0 corner=0 side=0 target=2 resA=0 resB=0 discard=[0,3,0,0,1]
+[21:34:45.447 +367.447][GAME] discard submitted player=2 plan=[0,3,0,0,1] thiefPlacement=1
+[21:34:45.449 +367.449][AI] action execute end type=discard success=1 elapsed=0.006
+[21:34:45.451 +367.451][AI] discard execute player=2 success=1 elapsed=0.008
+[21:34:45.458 +367.459][AI] decision start current=3 decision=3 difficulty=2 phase=1 rolled=1 discards=0 thiefPlacement=1 thiefVictim=0 delay=0.000
+[21:34:45.478 +367.478][GAME] move thief start player=3 tile=1
+[21:34:45.480 +367.480][GAME] move thief end player=3 tile=1 elapsed=0.002 thiefVictim=1
+[21:34:46.563 +367.563][GAME] move thief start player=3 tile=2
+[21:34:46.565 +367.565][GAME] move thief end player=3 tile=2 elapsed=0.002 thiefVictim=1
+[21:34:46.648 +367.648][GAME] move thief start player=3 tile=3
+[21:34:46.650 +367.650][GAME] move thief end player=3 tile=3 elapsed=0.002 thiefVictim=1
+[21:34:46.733 +367.734][GAME] move thief start player=3 tile=4
+[21:34:46.736 +367.736][GAME] move thief end player=3 tile=4 elapsed=0.002 thiefVictim=1
+[21:34:46.818 +367.819][GAME] move thief start player=3 tile=5
+[21:34:46.820 +367.821][GAME] move thief end player=3 tile=5 elapsed=0.002 thiefVictim=1
+[21:34:46.982 +367.982][GAME] move thief start player=3 tile=6
+[21:34:46.984 +367.984][GAME] move thief end player=3 tile=6 elapsed=0.002 thiefVictim=1
+[21:34:46.065 +368.065][GAME] move thief start player=3 tile=7
+[21:34:46.067 +368.067][GAME] move thief end player=3 tile=7 elapsed=0.002 thiefVictim=1
+[21:34:46.230 +368.231][GAME] move thief start player=3 tile=8
+[21:34:46.233 +368.233][GAME] move thief end player=3 tile=8 elapsed=0.002 thiefVictim=1
+[21:34:46.334 +368.334][GAME] move thief start player=3 tile=9
+[21:34:46.336 +368.336][GAME] move thief end player=3 tile=9 elapsed=0.002 thiefVictim=1
+[21:34:46.483 +368.483][GAME] move thief start player=3 tile=10
+[21:34:46.485 +368.486][GAME] move thief end player=3 tile=10 elapsed=0.003 thiefVictim=1
+[21:34:47.633 +368.634][GAME] move thief start player=3 tile=11
+[21:34:47.636 +368.636][GAME] move thief end player=3 tile=11 elapsed=0.003 thiefVictim=1
+[21:34:47.703 +368.703][GAME] move thief start player=3 tile=12
+[21:34:47.705 +368.706][GAME] move thief end player=3 tile=12 elapsed=0.002 thiefVictim=1
+[21:34:47.804 +368.804][GAME] move thief start player=3 tile=13
+[21:34:47.805 +368.806][GAME] move thief end player=3 tile=13 elapsed=0.002 thiefVictim=1
+[21:34:47.938 +368.938][GAME] move thief start player=3 tile=14
+[21:34:47.940 +368.940][GAME] move thief end player=3 tile=14 elapsed=0.002 thiefVictim=1
+[21:34:47.007 +369.008][GAME] move thief start player=3 tile=15
+[21:34:47.022 +369.022][GAME] move thief end player=3 tile=15 elapsed=0.014 thiefVictim=1
+[21:34:47.112 +369.113][GAME] move thief start player=3 tile=16
+[21:34:47.115 +369.116][GAME] move thief end player=3 tile=16 elapsed=0.003 thiefVictim=1
+[21:34:47.197 +369.198][GAME] move thief start player=3 tile=17
+[21:34:47.212 +369.213][GAME] move thief end player=3 tile=17 elapsed=0.015 thiefVictim=1
+[21:34:47.296 +369.297][GAME] move thief start player=3 tile=18
+[21:34:47.298 +369.298][GAME] move thief end player=3 tile=18 elapsed=0.002 thiefVictim=0
+[21:34:47.316 +369.317][AI] thief move planning end player=3 tile=4 elapsed=1.855
+[21:34:47.320 +369.320][AI] action execute start current=3 actor=0 type=move_thief tile=4 corner=0 side=0 target=0 resA=0 resB=0 discard=[0,0,0,0,0]
+[21:34:47.324 +369.324][GAME] move thief start player=3 tile=4
+[21:34:47.326 +369.326][GAME] move thief end player=3 tile=4 elapsed=0.002 thiefVictim=1
+[21:34:47.328 +369.328][AI] action execute end type=move_thief success=1 elapsed=0.008
+[21:34:47.330 +369.330][AI] thief move execute player=3 tile=4 success=1 elapsed=0.010
+[21:34:47.423 +369.424][AI] thief victim planning end player=3 victim=0 elapsed=0.082
+[21:34:47.426 +369.426][AI] action execute start current=3 actor=0 type=choose_thief_victim tile=0 corner=0 side=0 target=0 resA=0 resB=0 discard=[0,0,0,0,0]
+[21:34:47.439 +369.440][GAME] steal resource player=3 victim=0 resource=4
+[21:34:47.441 +369.442][AI] action execute end type=choose_thief_victim success=1 elapsed=0.016
+[21:34:47.443 +369.444][AI] thief victim execute player=3 victim=0 success=1 elapsed=0.018
+[21:34:48.216 +370.217][AI] play phase search action=none score=-521.116 elapsed=0.115 budget=0.100 nodes=7 timedOut=1
+[21:34:48.219 +370.220][AI] play phase no action elapsed=0.118
+[21:34:48.221 +370.222][AI] end turn player=3
+[21:34:49.162 +371.162][UI] dice animation start pending=2+3 total=5
+[21:34:50.012 +372.013][UI] dice animation resolve total=5
+[21:34:50.014 +372.014][GAME] gameRollDice start player=0 total=5
+[21:34:50.015 +372.015][GAME] gameRollDice end player=0 total=5 elapsed=0.001 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:34:50.019 +372.020][UI] dice animation resolved total=5 elapsed=0.007 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:00.617 +381.618][AI] decision start current=1 decision=1 difficulty=2 phase=1 rolled=0 discards=0 thiefPlacement=0 thiefVictim=0 delay=0.386
+[21:35:00.018 +382.018][AI] roll animation start player=1
+[21:35:00.019 +382.020][UI] dice animation start pending=3+3 total=6
+[21:35:01.884 +382.885][UI] dice animation resolve total=6
+[21:35:01.886 +382.886][GAME] gameRollDice start player=1 total=6
+[21:35:01.887 +382.888][GAME] gameRollDice end player=1 total=6 elapsed=0.001 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:01.891 +382.892][UI] dice animation resolved total=6 elapsed=0.007 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:01.002 +383.003][AI] play phase search action=none score=-657.345 elapsed=0.101 budget=0.100 nodes=6 timedOut=1
+[21:35:01.006 +383.006][AI] play phase no action elapsed=0.104
+[21:35:01.007 +383.007][AI] end turn player=1
+[21:35:01.015 +383.015][AI] roll animation start player=2
+[21:35:01.018 +383.018][UI] dice animation start pending=4+4 total=8
+[21:35:02.881 +383.882][UI] dice animation resolve total=8
+[21:35:02.884 +383.884][GAME] gameRollDice start player=2 total=8
+[21:35:02.886 +383.886][GAME] gameRollDice end player=2 total=8 elapsed=0.002 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:02.893 +383.894][UI] dice animation resolved total=8 elapsed=0.012 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:02.936 +383.936][AI] play phase search action=none score=-456.582 elapsed=0.033 budget=0.100 nodes=2 timedOut=0
+[21:35:02.938 +383.939][AI] play phase no action elapsed=0.036
+[21:35:02.940 +383.940][AI] end turn player=2
+[21:35:02.946 +383.947][AI] roll animation start player=3
+[21:35:02.953 +383.954][UI] dice animation start pending=4+5 total=9
+[21:35:03.815 +384.815][UI] dice animation resolve total=9
+[21:35:03.816 +384.817][GAME] gameRollDice start player=3 total=9
+[21:35:03.818 +384.818][GAME] gameRollDice end player=3 total=9 elapsed=0.001 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:03.821 +384.822][UI] dice animation resolved total=9 elapsed=0.006 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:03.941 +384.941][AI] play phase search action=none score=-520.095 elapsed=0.115 budget=0.100 nodes=7 timedOut=1
+[21:35:03.943 +384.944][AI] play phase no action elapsed=0.117
+[21:35:03.945 +384.945][AI] end turn player=3
+[21:35:05.640 +386.640][UI] dice animation start pending=2+2 total=4
+[21:35:05.491 +387.491][UI] dice animation resolve total=4
+[21:35:05.493 +387.493][GAME] gameRollDice start player=0 total=4
+[21:35:05.494 +387.495][GAME] gameRollDice end player=0 total=4 elapsed=0.002 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:05.504 +387.504][UI] dice animation resolved total=4 elapsed=0.013 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:12.816 +393.816][AI] decision start current=1 decision=1 difficulty=2 phase=1 rolled=0 discards=0 thiefPlacement=0 thiefVictim=0 delay=0.386
+[21:35:12.216 +394.216][AI] roll animation start player=1
+[21:35:12.217 +394.218][UI] dice animation start pending=1+1 total=2
+[21:35:13.082 +395.083][UI] dice animation resolve total=2
+[21:35:13.084 +395.084][GAME] gameRollDice start player=1 total=2
+[21:35:13.085 +395.086][GAME] gameRollDice end player=1 total=2 elapsed=0.002 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:13.090 +395.090][UI] dice animation resolved total=2 elapsed=0.008 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:13.210 +395.210][AI] play phase search action=none score=-636.142 elapsed=0.115 budget=0.100 nodes=7 timedOut=1
+[21:35:13.213 +395.213][AI] play phase no action elapsed=0.118
+[21:35:13.214 +395.215][AI] end turn player=1
+[21:35:13.221 +395.221][AI] roll animation start player=2
+[21:35:13.225 +395.226][UI] dice animation start pending=4+4 total=8
+[21:35:14.088 +396.089][UI] dice animation resolve total=8
+[21:35:14.094 +396.094][GAME] gameRollDice start player=2 total=8
+[21:35:14.096 +396.096][GAME] gameRollDice end player=2 total=8 elapsed=0.002 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:14.100 +396.100][UI] dice animation resolved total=8 elapsed=0.011 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:14.151 +396.151][AI] play phase search action=none score=-407.425 elapsed=0.048 budget=0.100 nodes=3 timedOut=0
+[21:35:14.153 +396.154][AI] play phase no action elapsed=0.051
+[21:35:14.155 +396.155][AI] end turn player=2
+[21:35:14.162 +396.163][AI] roll animation start player=3
+[21:35:14.164 +396.164][UI] dice animation start pending=3+4 total=7
+[21:35:15.014 +397.014][UI] dice animation resolve total=7
+[21:35:15.017 +397.017][GAME] gameRollDice start player=3 total=7
+[21:35:15.020 +397.020][GAME] begin discard phase currentPlayer=3
+[21:35:15.027 +397.027][GAME] discard requirement player=0 total=5 discard=0
+[21:35:15.029 +397.030][GAME] discard requirement player=1 total=11 discard=5
+[21:35:15.031 +397.032][GAME] discard requirement player=2 total=10 discard=5
+[21:35:15.033 +397.034][GAME] discard requirement player=3 total=11 discard=5
+[21:35:15.035 +397.036][GAME] gameRollDice end player=3 total=7 elapsed=0.019 pendingDiscards=1 thiefPlacement=0 thiefVictim=0
+[21:35:15.038 +397.039][UI] dice animation resolved total=7 elapsed=0.024 pendingDiscards=1 thiefPlacement=0 thiefVictim=0
+[21:35:15.042 +397.043][AI] decision start current=3 decision=1 difficulty=2 phase=1 rolled=1 discards=1 thiefPlacement=0 thiefVictim=0 delay=0.000
+[21:35:15.048 +397.048][AI] discard planning start player=1 required=5
+[21:35:15.050 +397.051][AI] discard planning end player=1 elapsed=0.003 plan=[0,1,0,4,0]
+[21:35:15.053 +397.053][AI] action execute start current=3 actor=1 type=discard tile=0 corner=0 side=0 target=1 resA=0 resB=0 discard=[0,1,0,4,0]
+[21:35:15.057 +397.058][GAME] discard submitted player=1 plan=[0,1,0,4,0] thiefPlacement=0
+[21:35:15.060 +397.061][AI] action execute end type=discard success=1 elapsed=0.007
+[21:35:15.062 +397.063][AI] discard execute player=1 success=1 elapsed=0.010
+[21:35:15.070 +397.070][AI] decision start current=3 decision=2 difficulty=2 phase=1 rolled=1 discards=1 thiefPlacement=0 thiefVictim=0 delay=0.000
+[21:35:15.075 +397.075][AI] discard planning start player=2 required=5
+[21:35:15.080 +397.080][AI] discard planning end player=2 elapsed=0.005 plan=[1,2,0,2,0]
+[21:35:15.082 +397.083][AI] action execute start current=3 actor=2 type=discard tile=0 corner=0 side=0 target=2 resA=0 resB=0 discard=[1,2,0,2,0]
+[21:35:15.086 +397.086][GAME] discard submitted player=2 plan=[1,2,0,2,0] thiefPlacement=0
+[21:35:15.088 +397.089][AI] action execute end type=discard success=1 elapsed=0.006
+[21:35:15.090 +397.091][AI] discard execute player=2 success=1 elapsed=0.008
+[21:35:15.100 +397.100][AI] decision start current=3 decision=3 difficulty=2 phase=1 rolled=1 discards=1 thiefPlacement=0 thiefVictim=0 delay=0.000
+[21:35:15.104 +397.104][AI] discard planning start player=3 required=5
+[21:35:15.106 +397.107][AI] discard planning end player=3 elapsed=0.003 plan=[1,3,1,0,0]
+[21:35:15.109 +397.109][AI] action execute start current=3 actor=3 type=discard tile=0 corner=0 side=0 target=3 resA=0 resB=0 discard=[1,3,1,0,0]
+[21:35:15.112 +397.113][GAME] discard submitted player=3 plan=[1,3,1,0,0] thiefPlacement=1
+[21:35:15.114 +397.115][AI] action execute end type=discard success=1 elapsed=0.006
+[21:35:15.117 +397.117][AI] discard execute player=3 success=1 elapsed=0.008
+[21:35:15.140 +397.141][GAME] move thief start player=3 tile=0
+[21:35:15.144 +397.144][GAME] move thief end player=3 tile=0 elapsed=0.003 thiefVictim=1
+[21:35:15.210 +397.211][GAME] move thief start player=3 tile=1
+[21:35:15.212 +397.212][GAME] move thief end player=3 tile=1 elapsed=0.002 thiefVictim=1
+[21:35:15.279 +397.279][GAME] move thief start player=3 tile=2
+[21:35:15.285 +397.285][GAME] move thief end player=3 tile=2 elapsed=0.006 thiefVictim=1
+[21:35:15.353 +397.353][GAME] move thief start player=3 tile=3
+[21:35:15.354 +397.355][GAME] move thief end player=3 tile=3 elapsed=0.002 thiefVictim=1
+[21:35:15.421 +397.421][GAME] move thief start player=3 tile=5
+[21:35:15.422 +397.423][GAME] move thief end player=3 tile=5 elapsed=0.001 thiefVictim=1
+[21:35:16.570 +397.570][GAME] move thief start player=3 tile=6
+[21:35:16.575 +397.575][GAME] move thief end player=3 tile=6 elapsed=0.005 thiefVictim=1
+[21:35:16.650 +397.650][GAME] move thief start player=3 tile=7
+[21:35:16.652 +397.653][GAME] move thief end player=3 tile=7 elapsed=0.002 thiefVictim=1
+[21:35:16.800 +397.801][GAME] move thief start player=3 tile=8
+[21:35:16.803 +397.803][GAME] move thief end player=3 tile=8 elapsed=0.003 thiefVictim=1
+[21:35:16.905 +397.905][GAME] move thief start player=3 tile=9
+[21:35:16.906 +397.906][GAME] move thief end player=3 tile=9 elapsed=0.001 thiefVictim=1
+[21:35:16.071 +398.072][GAME] move thief start player=3 tile=10
+[21:35:16.073 +398.073][GAME] move thief end player=3 tile=10 elapsed=0.002 thiefVictim=1
+[21:35:16.238 +398.238][GAME] move thief start player=3 tile=11
+[21:35:16.239 +398.239][GAME] move thief end player=3 tile=11 elapsed=0.001 thiefVictim=1
+[21:35:16.323 +398.323][GAME] move thief start player=3 tile=12
+[21:35:16.325 +398.325][GAME] move thief end player=3 tile=12 elapsed=0.002 thiefVictim=1
+[21:35:16.426 +398.427][GAME] move thief start player=3 tile=13
+[21:35:16.429 +398.429][GAME] move thief end player=3 tile=13 elapsed=0.003 thiefVictim=1
+[21:35:17.561 +398.562][GAME] move thief start player=3 tile=14
+[21:35:17.563 +398.563][GAME] move thief end player=3 tile=14 elapsed=0.001 thiefVictim=1
+[21:35:17.646 +398.646][GAME] move thief start player=3 tile=15
+[21:35:17.647 +398.648][GAME] move thief end player=3 tile=15 elapsed=0.002 thiefVictim=1
+[21:35:17.730 +398.730][GAME] move thief start player=3 tile=16
+[21:35:17.732 +398.732][GAME] move thief end player=3 tile=16 elapsed=0.002 thiefVictim=1
+[21:35:17.800 +398.800][GAME] move thief start player=3 tile=17
+[21:35:17.801 +398.801][GAME] move thief end player=3 tile=17 elapsed=0.001 thiefVictim=1
+[21:35:17.868 +398.869][GAME] move thief start player=3 tile=18
+[21:35:17.870 +398.870][GAME] move thief end player=3 tile=18 elapsed=0.002 thiefVictim=0
+[21:35:17.887 +398.888][AI] thief move planning end player=3 tile=0 elapsed=1.764
+[21:35:17.889 +398.890][AI] action execute start current=3 actor=0 type=move_thief tile=0 corner=0 side=0 target=0 resA=0 resB=0 discard=[0,0,0,0,0]
+[21:35:17.893 +398.894][GAME] move thief start player=3 tile=0
+[21:35:17.895 +398.896][GAME] move thief end player=3 tile=0 elapsed=0.002 thiefVictim=1
+[21:35:17.897 +398.898][AI] action execute end type=move_thief success=1 elapsed=0.008
+[21:35:17.899 +398.899][AI] thief move execute player=3 tile=0 success=1 elapsed=0.010
+[21:35:17.969 +398.970][AI] thief victim planning end player=3 victim=0 elapsed=0.063
+[21:35:17.971 +398.972][AI] action execute start current=3 actor=0 type=choose_thief_victim tile=0 corner=0 side=0 target=0 resA=0 resB=0 discard=[0,0,0,0,0]
+[21:35:17.975 +398.975][GAME] steal resource player=3 victim=0 resource=2
+[21:35:17.976 +398.977][AI] action execute end type=choose_thief_victim success=1 elapsed=0.005
+[21:35:17.980 +398.981][AI] thief victim execute player=3 victim=0 success=1 elapsed=0.009
+[21:35:18.753 +399.753][AI] play phase search action=none score=-483.169 elapsed=0.115 budget=0.100 nodes=7 timedOut=1
+[21:35:18.755 +399.756][AI] play phase no action elapsed=0.118
+[21:35:18.757 +399.757][AI] end turn player=3
+[21:35:19.833 +400.834][UI] dice animation start pending=5+6 total=11
+[21:35:20.684 +401.684][UI] dice animation resolve total=11
+[21:35:20.686 +401.686][GAME] gameRollDice start player=0 total=11
+[21:35:20.688 +401.688][GAME] gameRollDice end player=0 total=11 elapsed=0.002 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:20.691 +401.692][UI] dice animation resolved total=11 elapsed=0.008 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:22.324 +404.325][AI] decision start current=1 decision=1 difficulty=2 phase=1 rolled=0 discards=0 thiefPlacement=0 thiefVictim=0 delay=0.386
+[21:35:23.725 +404.725][AI] roll animation start player=1
+[21:35:23.726 +404.726][UI] dice animation start pending=2+3 total=5
+[21:35:24.593 +405.593][UI] dice animation resolve total=5
+[21:35:24.594 +405.595][GAME] gameRollDice start player=1 total=5
+[21:35:24.596 +405.596][GAME] gameRollDice end player=1 total=5 elapsed=0.001 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:24.605 +405.605][UI] dice animation resolved total=5 elapsed=0.012 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:24.724 +405.724][AI] play phase search action=none score=-641.038 elapsed=0.116 budget=0.100 nodes=7 timedOut=1
+[21:35:24.726 +405.726][AI] play phase no action elapsed=0.118
+[21:35:24.727 +405.727][AI] end turn player=1
+[21:35:24.733 +405.734][AI] roll animation start player=2
+[21:35:24.737 +405.737][UI] dice animation start pending=3+4 total=7
+[21:35:25.601 +406.602][UI] dice animation resolve total=7
+[21:35:25.603 +406.604][GAME] gameRollDice start player=2 total=7
+[21:35:25.605 +406.605][GAME] begin discard phase currentPlayer=2
+[21:35:25.606 +406.607][GAME] discard requirement player=0 total=5 discard=0
+[21:35:25.608 +406.608][GAME] discard requirement player=1 total=7 discard=0
+[21:35:25.610 +406.610][GAME] discard requirement player=2 total=7 discard=0
+[21:35:25.611 +406.612][GAME] discard requirement player=3 total=9 discard=4
+[21:35:25.613 +406.614][GAME] gameRollDice end player=2 total=7 elapsed=0.010 pendingDiscards=1 thiefPlacement=0 thiefVictim=0
+[21:35:25.618 +406.619][UI] dice animation resolved total=7 elapsed=0.017 pendingDiscards=1 thiefPlacement=0 thiefVictim=0
+[21:35:25.622 +406.622][AI] decision start current=2 decision=3 difficulty=2 phase=1 rolled=1 discards=1 thiefPlacement=0 thiefVictim=0 delay=0.000
+[21:35:25.625 +406.626][AI] discard planning start player=3 required=4
+[21:35:25.627 +406.628][AI] discard planning end player=3 elapsed=0.002 plan=[0,1,2,0,1]
+[21:35:25.629 +406.630][AI] action execute start current=2 actor=3 type=discard tile=0 corner=0 side=0 target=3 resA=0 resB=0 discard=[0,1,2,0,1]
+[21:35:25.635 +406.636][GAME] discard submitted player=3 plan=[0,1,2,0,1] thiefPlacement=1
+[21:35:25.637 +406.638][AI] action execute end type=discard success=1 elapsed=0.008
+[21:35:25.639 +406.640][AI] discard execute player=3 success=1 elapsed=0.010
+[21:35:25.646 +406.647][AI] decision start current=2 decision=2 difficulty=2 phase=1 rolled=1 discards=0 thiefPlacement=1 thiefVictim=0 delay=0.000
+[21:35:25.666 +406.667][GAME] move thief start player=2 tile=1
+[21:35:25.668 +406.669][GAME] move thief end player=2 tile=1 elapsed=0.002 thiefVictim=1
+[21:35:25.719 +406.719][GAME] move thief start player=2 tile=2
+[21:35:25.720 +406.721][GAME] move thief end player=2 tile=2 elapsed=0.002 thiefVictim=1
+[21:35:25.770 +406.771][GAME] move thief start player=2 tile=3
+[21:35:25.772 +406.772][GAME] move thief end player=2 tile=3 elapsed=0.001 thiefVictim=1
+[21:35:25.821 +406.822][GAME] move thief start player=2 tile=4
+[21:35:25.823 +406.823][GAME] move thief end player=2 tile=4 elapsed=0.001 thiefVictim=1
+[21:35:25.952 +406.953][GAME] move thief start player=2 tile=5
+[21:35:25.954 +406.954][GAME] move thief end player=2 tile=5 elapsed=0.001 thiefVictim=1
+[21:35:25.083 +407.083][GAME] move thief start player=2 tile=6
+[21:35:25.084 +407.085][GAME] move thief end player=2 tile=6 elapsed=0.001 thiefVictim=1
+[21:35:25.133 +407.134][GAME] move thief start player=2 tile=7
+[21:35:25.136 +407.136][GAME] move thief end player=2 tile=7 elapsed=0.002 thiefVictim=1
+[21:35:25.266 +407.266][GAME] move thief start player=2 tile=8
+[21:35:25.267 +407.268][GAME] move thief end player=2 tile=8 elapsed=0.001 thiefVictim=1
+[21:35:25.445 +407.446][GAME] move thief start player=2 tile=9
+[21:35:25.447 +407.447][GAME] move thief end player=2 tile=9 elapsed=0.001 thiefVictim=1
+[21:35:26.626 +407.626][GAME] move thief start player=2 tile=10
+[21:35:26.627 +407.628][GAME] move thief end player=2 tile=10 elapsed=0.002 thiefVictim=1
+[21:35:26.727 +407.728][GAME] move thief start player=2 tile=11
+[21:35:26.728 +407.729][GAME] move thief end player=2 tile=11 elapsed=0.001 thiefVictim=0
+[21:35:26.746 +407.746][GAME] move thief start player=2 tile=12
+[21:35:26.750 +407.751][GAME] move thief end player=2 tile=12 elapsed=0.004 thiefVictim=1
+[21:35:26.849 +407.849][GAME] move thief start player=2 tile=13
+[21:35:26.850 +407.851][GAME] move thief end player=2 tile=13 elapsed=0.001 thiefVictim=1
+[21:35:26.900 +407.900][GAME] move thief start player=2 tile=14
+[21:35:26.901 +407.902][GAME] move thief end player=2 tile=14 elapsed=0.001 thiefVictim=1
+[21:35:26.000 +408.000][GAME] move thief start player=2 tile=15
+[21:35:26.002 +408.003][GAME] move thief end player=2 tile=15 elapsed=0.002 thiefVictim=1
+[21:35:26.114 +408.114][GAME] move thief start player=2 tile=16
+[21:35:26.115 +408.116][GAME] move thief end player=2 tile=16 elapsed=0.001 thiefVictim=1
+[21:35:26.165 +408.165][GAME] move thief start player=2 tile=17
+[21:35:26.166 +408.166][GAME] move thief end player=2 tile=17 elapsed=0.001 thiefVictim=1
+[21:35:26.215 +408.216][GAME] move thief start player=2 tile=18
+[21:35:26.217 +408.218][GAME] move thief end player=2 tile=18 elapsed=0.002 thiefVictim=1
+[21:35:26.315 +408.315][AI] thief move planning end player=2 tile=4 elapsed=1.665
+[21:35:26.316 +408.317][AI] action execute start current=2 actor=0 type=move_thief tile=4 corner=0 side=0 target=0 resA=0 resB=0 discard=[0,0,0,0,0]
+[21:35:26.320 +408.321][GAME] move thief start player=2 tile=4
+[21:35:26.321 +408.322][GAME] move thief end player=2 tile=4 elapsed=0.001 thiefVictim=1
+[21:35:26.324 +408.324][AI] action execute end type=move_thief success=1 elapsed=0.008
+[21:35:26.326 +408.327][AI] thief move execute player=2 tile=4 success=1 elapsed=0.010
+[21:35:26.461 +408.462][AI] thief victim planning end player=2 victim=3 elapsed=0.128
+[21:35:26.462 +408.463][AI] action execute start current=2 actor=3 type=choose_thief_victim tile=0 corner=0 side=0 target=3 resA=0 resB=0 discard=[0,0,0,0,0]
+[21:35:26.466 +408.466][GAME] steal resource player=2 victim=3 resource=4
+[21:35:26.468 +408.469][AI] action execute end type=choose_thief_victim success=1 elapsed=0.006
+[21:35:26.472 +408.473][AI] thief victim execute player=2 victim=3 success=1 elapsed=0.010
+[21:35:27.243 +409.243][AI] play phase search action=none score=-346.088 elapsed=0.114 budget=0.100 nodes=7 timedOut=1
+[21:35:27.245 +409.246][AI] play phase no action elapsed=0.116
+[21:35:27.247 +409.247][AI] end turn player=2
+[21:35:27.253 +409.253][AI] roll animation start player=3
+[21:35:27.256 +409.257][UI] dice animation start pending=5+5 total=10
+[21:35:28.122 +410.123][UI] dice animation resolve total=10
+[21:35:28.124 +410.124][GAME] gameRollDice start player=3 total=10
+[21:35:28.125 +410.126][GAME] gameRollDice end player=3 total=10 elapsed=0.002 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:28.128 +410.128][UI] dice animation resolved total=10 elapsed=0.005 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:28.248 +410.249][AI] play phase search action=none score=-574.566 elapsed=0.116 budget=0.100 nodes=7 timedOut=1
+[21:35:28.251 +410.251][AI] play phase no action elapsed=0.118
+[21:35:28.252 +410.252][AI] end turn player=3
+[21:35:29.192 +411.192][UI] dice animation start pending=3+3 total=6
+[21:35:30.042 +412.043][UI] dice animation resolve total=6
+[21:35:30.045 +412.045][GAME] gameRollDice start player=0 total=6
+[21:35:30.046 +412.047][GAME] gameRollDice end player=0 total=6 elapsed=0.001 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:30.050 +412.050][UI] dice animation resolved total=6 elapsed=0.007 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:45.774 +426.774][AI] decision start current=1 decision=1 difficulty=2 phase=1 rolled=0 discards=0 thiefPlacement=0 thiefVictim=0 delay=0.386
+[21:35:45.175 +427.175][AI] roll animation start player=1
+[21:35:45.176 +427.177][UI] dice animation start pending=5+5 total=10
+[21:35:46.026 +428.027][UI] dice animation resolve total=10
+[21:35:46.027 +428.028][GAME] gameRollDice start player=1 total=10
+[21:35:46.029 +428.029][GAME] gameRollDice end player=1 total=10 elapsed=0.001 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:46.034 +428.034][UI] dice animation resolved total=10 elapsed=0.007 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:46.152 +428.153][AI] play phase search action=none score=-662.021 elapsed=0.114 budget=0.100 nodes=7 timedOut=1
+[21:35:46.155 +428.155][AI] play phase no action elapsed=0.117
+[21:35:46.155 +428.156][AI] end turn player=1
+[21:35:46.162 +428.162][AI] roll animation start player=2
+[21:35:46.166 +428.167][UI] dice animation start pending=6+6 total=12
+[21:35:47.029 +429.030][UI] dice animation resolve total=12
+[21:35:47.030 +429.031][GAME] gameRollDice start player=2 total=12
+[21:35:47.032 +429.033][GAME] gameRollDice end player=2 total=12 elapsed=0.002 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:47.035 +429.036][UI] dice animation resolved total=12 elapsed=0.006 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:47.153 +429.154][AI] play phase search action=none score=-443.314 elapsed=0.114 budget=0.100 nodes=7 timedOut=1
+[21:35:47.156 +429.156][AI] play phase no action elapsed=0.116
+[21:35:47.157 +429.158][AI] end turn player=2
+[21:35:47.164 +429.164][AI] roll animation start player=3
+[21:35:47.166 +429.166][UI] dice animation start pending=3+4 total=7
+[21:35:48.032 +430.032][UI] dice animation resolve total=7
+[21:35:48.033 +430.034][GAME] gameRollDice start player=3 total=7
+[21:35:48.035 +430.035][GAME] begin discard phase currentPlayer=3
+[21:35:48.036 +430.037][GAME] discard requirement player=0 total=10 discard=5
+[21:35:48.038 +430.039][GAME] discard requirement player=1 total=9 discard=4
+[21:35:48.040 +430.040][GAME] discard requirement player=2 total=8 discard=4
+[21:35:48.043 +430.043][GAME] discard requirement player=3 total=6 discard=0
+[21:35:48.045 +430.045][GAME] gameRollDice end player=3 total=7 elapsed=0.011 pendingDiscards=1 thiefPlacement=0 thiefVictim=0
+[21:35:48.048 +430.048][UI] dice animation resolved total=7 elapsed=0.016 pendingDiscards=1 thiefPlacement=0 thiefVictim=0
+[21:35:53.780 +434.781][GAME] discard submitted player=0 plan=[0,4,0,1,0] thiefPlacement=0
+[21:35:53.797 +434.797][AI] decision start current=3 decision=1 difficulty=2 phase=1 rolled=1 discards=1 thiefPlacement=0 thiefVictim=0 delay=0.000
+[21:35:53.800 +434.800][AI] discard planning start player=1 required=4
+[21:35:53.802 +434.803][AI] discard planning end player=1 elapsed=0.002 plan=[0,1,0,2,1]
+[21:35:53.807 +434.807][AI] action execute start current=3 actor=1 type=discard tile=0 corner=0 side=0 target=1 resA=0 resB=0 discard=[0,1,0,2,1]
+[21:35:53.810 +434.810][GAME] discard submitted player=1 plan=[0,1,0,2,1] thiefPlacement=0
+[21:35:53.812 +434.812][AI] action execute end type=discard success=1 elapsed=0.005
+[21:35:53.813 +434.814][AI] discard execute player=1 success=1 elapsed=0.007
+[21:35:53.821 +434.821][AI] decision start current=3 decision=2 difficulty=2 phase=1 rolled=1 discards=1 thiefPlacement=0 thiefVictim=0 delay=0.000
+[21:35:53.825 +434.825][AI] discard planning start player=2 required=4
+[21:35:53.827 +434.828][AI] discard planning end player=2 elapsed=0.002 plan=[0,1,0,0,3]
+[21:35:53.829 +434.829][AI] action execute start current=3 actor=2 type=discard tile=0 corner=0 side=0 target=2 resA=0 resB=0 discard=[0,1,0,0,3]
+[21:35:53.833 +434.834][GAME] discard submitted player=2 plan=[0,1,0,0,3] thiefPlacement=1
+[21:35:53.835 +434.836][AI] action execute end type=discard success=1 elapsed=0.006
+[21:35:53.838 +434.838][AI] discard execute player=2 success=1 elapsed=0.009
+[21:35:53.846 +434.846][AI] decision start current=3 decision=3 difficulty=2 phase=1 rolled=1 discards=0 thiefPlacement=1 thiefVictim=0 delay=0.000
+[21:35:53.879 +434.879][GAME] move thief start player=3 tile=0
+[21:35:53.885 +434.885][GAME] move thief end player=3 tile=0 elapsed=0.006 thiefVictim=1
+[21:35:53.981 +434.981][GAME] move thief start player=3 tile=1
+[21:35:53.982 +434.983][GAME] move thief end player=3 tile=1 elapsed=0.001 thiefVictim=1
+[21:35:53.066 +435.066][GAME] move thief start player=3 tile=2
+[21:35:53.069 +435.069][GAME] move thief end player=3 tile=2 elapsed=0.003 thiefVictim=1
+[21:35:53.153 +435.154][GAME] move thief start player=3 tile=3
+[21:35:53.155 +435.156][GAME] move thief end player=3 tile=3 elapsed=0.002 thiefVictim=1
+[21:35:53.240 +435.240][GAME] move thief start player=3 tile=5
+[21:35:53.241 +435.242][GAME] move thief end player=3 tile=5 elapsed=0.001 thiefVictim=1
+[21:35:53.407 +435.407][GAME] move thief start player=3 tile=6
+[21:35:53.408 +435.408][GAME] move thief end player=3 tile=6 elapsed=0.001 thiefVictim=1
+[21:35:53.490 +435.490][GAME] move thief start player=3 tile=7
+[21:35:53.491 +435.492][GAME] move thief end player=3 tile=7 elapsed=0.001 thiefVictim=1
+[21:35:54.654 +435.654][GAME] move thief start player=3 tile=8
+[21:35:54.656 +435.656][GAME] move thief end player=3 tile=8 elapsed=0.002 thiefVictim=1
+[21:35:54.754 +435.755][GAME] move thief start player=3 tile=9
+[21:35:54.756 +435.757][GAME] move thief end player=3 tile=9 elapsed=0.002 thiefVictim=1
+[21:35:54.919 +435.920][GAME] move thief start player=3 tile=10
+[21:35:54.921 +435.922][GAME] move thief end player=3 tile=10 elapsed=0.002 thiefVictim=1
+[21:35:54.084 +436.085][GAME] move thief start player=3 tile=11
+[21:35:54.086 +436.086][GAME] move thief end player=3 tile=11 elapsed=0.002 thiefVictim=1
+[21:35:54.170 +436.171][GAME] move thief start player=3 tile=12
+[21:35:54.172 +436.172][GAME] move thief end player=3 tile=12 elapsed=0.002 thiefVictim=1
+[21:35:54.271 +436.272][GAME] move thief start player=3 tile=13
+[21:35:54.273 +436.274][GAME] move thief end player=3 tile=13 elapsed=0.002 thiefVictim=1
+[21:35:54.422 +436.422][GAME] move thief start player=3 tile=14
+[21:35:54.423 +436.424][GAME] move thief end player=3 tile=14 elapsed=0.001 thiefVictim=1
+[21:35:54.506 +436.507][GAME] move thief start player=3 tile=15
+[21:35:54.508 +436.509][GAME] move thief end player=3 tile=15 elapsed=0.002 thiefVictim=1
+[21:35:55.591 +436.592][GAME] move thief start player=3 tile=16
+[21:35:55.593 +436.593][GAME] move thief end player=3 tile=16 elapsed=0.001 thiefVictim=1
+[21:35:55.675 +436.675][GAME] move thief start player=3 tile=17
+[21:35:55.676 +436.677][GAME] move thief end player=3 tile=17 elapsed=0.001 thiefVictim=1
+[21:35:55.760 +436.760][GAME] move thief start player=3 tile=18
+[21:35:55.762 +436.763][GAME] move thief end player=3 tile=18 elapsed=0.003 thiefVictim=0
+[21:35:55.782 +436.782][AI] thief move planning end player=3 tile=0 elapsed=1.920
+[21:35:55.784 +436.784][AI] action execute start current=3 actor=0 type=move_thief tile=0 corner=0 side=0 target=0 resA=0 resB=0 discard=[0,0,0,0,0]
+[21:35:55.787 +436.787][GAME] move thief start player=3 tile=0
+[21:35:55.789 +436.789][GAME] move thief end player=3 tile=0 elapsed=0.002 thiefVictim=1
+[21:35:55.790 +436.791][AI] action execute end type=move_thief success=1 elapsed=0.007
+[21:35:55.794 +436.795][AI] thief move execute player=3 tile=0 success=1 elapsed=0.011
+[21:35:55.883 +436.884][AI] thief victim planning end player=3 victim=0 elapsed=0.081
+[21:35:55.885 +436.886][AI] action execute start current=3 actor=0 type=choose_thief_victim tile=0 corner=0 side=0 target=0 resA=0 resB=0 discard=[0,0,0,0,0]
+[21:35:55.889 +436.890][GAME] steal resource player=3 victim=0 resource=2
+[21:35:55.895 +436.895][AI] action execute end type=choose_thief_victim success=1 elapsed=0.010
+[21:35:55.897 +436.897][AI] thief victim execute player=3 victim=0 success=1 elapsed=0.012
+[21:35:56.655 +437.655][AI] play phase search action=none score=-540.801 elapsed=0.100 budget=0.100 nodes=6 timedOut=1
+[21:35:56.658 +437.658][AI] play phase no action elapsed=0.103
+[21:35:56.659 +437.659][AI] end turn player=3
+[21:35:57.299 +439.299][UI] dice animation start pending=5+5 total=10
+[21:35:58.165 +440.166][UI] dice animation resolve total=10
+[21:35:58.169 +440.169][GAME] gameRollDice start player=0 total=10
+[21:35:58.171 +440.172][GAME] gameRollDice end player=0 total=10 elapsed=0.003 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:35:58.260 +440.261][UI] dice animation resolved total=10 elapsed=0.095 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:01.126 +443.126][AI] decision start current=1 decision=1 difficulty=2 phase=1 rolled=0 discards=0 thiefPlacement=0 thiefVictim=0 delay=0.386
+[21:36:02.527 +443.527][AI] roll animation start player=1
+[21:36:02.529 +443.529][UI] dice animation start pending=3+4 total=7
+[21:36:02.394 +444.395][UI] dice animation resolve total=7
+[21:36:02.396 +444.396][GAME] gameRollDice start player=1 total=7
+[21:36:02.397 +444.398][GAME] begin discard phase currentPlayer=1
+[21:36:02.398 +444.399][GAME] discard requirement player=0 total=1 discard=0
+[21:36:02.400 +444.401][GAME] discard requirement player=1 total=5 discard=0
+[21:36:02.402 +444.402][GAME] discard requirement player=2 total=4 discard=0
+[21:36:02.409 +444.409][GAME] discard requirement player=3 total=7 discard=0
+[21:36:02.411 +444.411][GAME] no discards needed, thief placement starts immediately
+[21:36:02.413 +444.413][GAME] gameRollDice end player=1 total=7 elapsed=0.017 pendingDiscards=0 thiefPlacement=1 thiefVictim=0
+[21:36:02.416 +444.416][UI] dice animation resolved total=7 elapsed=0.022 pendingDiscards=0 thiefPlacement=1 thiefVictim=0
+[21:36:02.434 +444.435][GAME] move thief start player=1 tile=1
+[21:36:02.435 +444.436][GAME] move thief end player=1 tile=1 elapsed=0.001 thiefVictim=1
+[21:36:02.469 +444.470][GAME] move thief start player=1 tile=2
+[21:36:02.471 +444.471][GAME] move thief end player=1 tile=2 elapsed=0.002 thiefVictim=1
+[21:36:02.504 +444.505][GAME] move thief start player=1 tile=3
+[21:36:02.506 +444.506][GAME] move thief end player=1 tile=3 elapsed=0.002 thiefVictim=1
+[21:36:03.540 +444.540][GAME] move thief start player=1 tile=4
+[21:36:03.541 +444.542][GAME] move thief end player=1 tile=4 elapsed=0.001 thiefVictim=1
+[21:36:03.638 +444.639][GAME] move thief start player=1 tile=5
+[21:36:03.640 +444.641][GAME] move thief end player=1 tile=5 elapsed=0.002 thiefVictim=1
+[21:36:03.674 +444.674][GAME] move thief start player=1 tile=6
+[21:36:03.675 +444.676][GAME] move thief end player=1 tile=6 elapsed=0.001 thiefVictim=1
+[21:36:03.709 +444.709][GAME] move thief start player=1 tile=7
+[21:36:03.710 +444.710][GAME] move thief end player=1 tile=7 elapsed=0.001 thiefVictim=1
+[21:36:03.744 +444.744][GAME] move thief start player=1 tile=8
+[21:36:03.745 +444.746][GAME] move thief end player=1 tile=8 elapsed=0.002 thiefVictim=1
+[21:36:03.827 +444.827][GAME] move thief start player=1 tile=9
+[21:36:03.835 +444.836][GAME] move thief end player=1 tile=9 elapsed=0.008 thiefVictim=1
+[21:36:03.993 +444.993][GAME] move thief start player=1 tile=10
+[21:36:03.994 +444.994][GAME] move thief end player=1 tile=10 elapsed=0.001 thiefVictim=1
+[21:36:03.076 +445.077][GAME] move thief start player=1 tile=11
+[21:36:03.084 +445.085][GAME] move thief end player=1 tile=11 elapsed=0.008 thiefVictim=1
+[21:36:03.177 +445.178][GAME] move thief start player=1 tile=12
+[21:36:03.179 +445.179][GAME] move thief end player=1 tile=12 elapsed=0.002 thiefVictim=0
+[21:36:03.197 +445.198][GAME] move thief start player=1 tile=13
+[21:36:03.198 +445.199][GAME] move thief end player=1 tile=13 elapsed=0.001 thiefVictim=1
+[21:36:03.295 +445.296][GAME] move thief start player=1 tile=14
+[21:36:03.297 +445.297][GAME] move thief end player=1 tile=14 elapsed=0.001 thiefVictim=1
+[21:36:03.443 +445.444][GAME] move thief start player=1 tile=15
+[21:36:03.452 +445.452][GAME] move thief end player=1 tile=15 elapsed=0.009 thiefVictim=1
+[21:36:04.608 +445.608][GAME] move thief start player=1 tile=16
+[21:36:04.609 +445.610][GAME] move thief end player=1 tile=16 elapsed=0.001 thiefVictim=1
+[21:36:04.643 +445.643][GAME] move thief start player=1 tile=17
+[21:36:04.644 +445.644][GAME] move thief end player=1 tile=17 elapsed=0.001 thiefVictim=1
+[21:36:04.677 +445.678][GAME] move thief start player=1 tile=18
+[21:36:04.680 +445.680][GAME] move thief end player=1 tile=18 elapsed=0.002 thiefVictim=1
+[21:36:04.761 +445.761][AI] thief move planning end player=1 tile=4 elapsed=1.342
+[21:36:04.762 +445.763][AI] action execute start current=1 actor=0 type=move_thief tile=4 corner=0 side=0 target=0 resA=0 resB=0 discard=[0,0,0,0,0]
+[21:36:04.765 +445.766][GAME] move thief start player=1 tile=4
+[21:36:04.766 +445.767][GAME] move thief end player=1 tile=4 elapsed=0.001 thiefVictim=1
+[21:36:04.768 +445.768][AI] action execute end type=move_thief success=1 elapsed=0.005
+[21:36:04.771 +445.771][AI] thief move execute player=1 tile=4 success=1 elapsed=0.009
+[21:36:04.873 +445.874][AI] thief victim planning end player=1 victim=0 elapsed=0.095
+[21:36:04.875 +445.875][AI] action execute start current=1 actor=0 type=choose_thief_victim tile=0 corner=0 side=0 target=0 resA=0 resB=0 discard=[0,0,0,0,0]
+[21:36:04.880 +445.881][GAME] steal resource player=1 victim=0 resource=0
+[21:36:04.886 +445.886][AI] action execute end type=choose_thief_victim success=1 elapsed=0.011
+[21:36:04.887 +445.888][AI] thief victim execute player=1 victim=0 success=1 elapsed=0.012
+[21:36:05.659 +446.659][AI] play phase search action=none score=-724.043 elapsed=0.113 budget=0.100 nodes=7 timedOut=1
+[21:36:05.662 +446.662][AI] play phase no action elapsed=0.116
+[21:36:05.663 +446.663][AI] end turn player=1
+[21:36:05.669 +446.670][AI] roll animation start player=2
+[21:36:05.671 +446.672][UI] dice animation start pending=3+4 total=7
+[21:36:06.536 +447.536][UI] dice animation resolve total=7
+[21:36:06.537 +447.538][GAME] gameRollDice start player=2 total=7
+[21:36:06.538 +447.539][GAME] begin discard phase currentPlayer=2
+[21:36:06.539 +447.540][GAME] discard requirement player=0 total=0 discard=0
+[21:36:06.541 +447.542][GAME] discard requirement player=1 total=6 discard=0
+[21:36:06.548 +447.549][GAME] discard requirement player=2 total=4 discard=0
+[21:36:06.550 +447.550][GAME] discard requirement player=3 total=7 discard=0
+[21:36:06.551 +447.552][GAME] no discards needed, thief placement starts immediately
+[21:36:06.553 +447.553][GAME] gameRollDice end player=2 total=7 elapsed=0.016 pendingDiscards=0 thiefPlacement=1 thiefVictim=0
+[21:36:06.556 +447.556][UI] dice animation resolved total=7 elapsed=0.020 pendingDiscards=0 thiefPlacement=1 thiefVictim=0
+[21:36:06.574 +447.574][GAME] move thief start player=2 tile=0
+[21:36:06.576 +447.576][GAME] move thief end player=2 tile=0 elapsed=0.002 thiefVictim=0
+[21:36:06.595 +447.596][GAME] move thief start player=2 tile=1
+[21:36:06.598 +447.598][GAME] move thief end player=2 tile=1 elapsed=0.003 thiefVictim=0
+[21:36:06.617 +447.617][GAME] move thief start player=2 tile=2
+[21:36:06.619 +447.620][GAME] move thief end player=2 tile=2 elapsed=0.002 thiefVictim=0
+[21:36:06.637 +447.638][GAME] move thief start player=2 tile=3
+[21:36:06.639 +447.639][GAME] move thief end player=2 tile=3 elapsed=0.001 thiefVictim=0
+[21:36:06.657 +447.657][GAME] move thief start player=2 tile=5
+[21:36:06.658 +447.659][GAME] move thief end player=2 tile=5 elapsed=0.001 thiefVictim=1
+[21:36:06.756 +447.756][GAME] move thief start player=2 tile=6
+[21:36:06.758 +447.758][GAME] move thief end player=2 tile=6 elapsed=0.002 thiefVictim=0
+[21:36:06.775 +447.775][GAME] move thief start player=2 tile=7
+[21:36:06.777 +447.778][GAME] move thief end player=2 tile=7 elapsed=0.002 thiefVictim=1
+[21:36:06.873 +447.874][GAME] move thief start player=2 tile=8
+[21:36:06.875 +447.875][GAME] move thief end player=2 tile=8 elapsed=0.001 thiefVictim=1
+[21:36:06.037 +448.038][GAME] move thief start player=2 tile=9
+[21:36:06.042 +448.042][GAME] move thief end player=2 tile=9 elapsed=0.005 thiefVictim=1
+[21:36:06.207 +448.207][GAME] move thief start player=2 tile=10
+[21:36:06.208 +448.208][GAME] move thief end player=2 tile=10 elapsed=0.001 thiefVictim=1
+[21:36:06.306 +448.307][GAME] move thief start player=2 tile=11
+[21:36:06.308 +448.308][GAME] move thief end player=2 tile=11 elapsed=0.001 thiefVictim=0
+[21:36:06.326 +448.327][GAME] move thief start player=2 tile=12
+[21:36:06.327 +448.328][GAME] move thief end player=2 tile=12 elapsed=0.001 thiefVictim=1
+[21:36:06.425 +448.426][GAME] move thief start player=2 tile=13
+[21:36:06.427 +448.428][GAME] move thief end player=2 tile=13 elapsed=0.002 thiefVictim=0
+[21:36:06.445 +448.446][GAME] move thief start player=2 tile=14
+[21:36:06.447 +448.447][GAME] move thief end player=2 tile=14 elapsed=0.002 thiefVictim=1
+[21:36:07.530 +448.531][GAME] move thief start player=2 tile=15
+[21:36:07.532 +448.532][GAME] move thief end player=2 tile=15 elapsed=0.001 thiefVictim=1
+[21:36:07.614 +448.614][GAME] move thief start player=2 tile=16
+[21:36:07.616 +448.616][GAME] move thief end player=2 tile=16 elapsed=0.002 thiefVictim=0
+[21:36:07.633 +448.634][GAME] move thief start player=2 tile=17
+[21:36:07.634 +448.635][GAME] move thief end player=2 tile=17 elapsed=0.001 thiefVictim=0
+[21:36:07.652 +448.652][GAME] move thief start player=2 tile=18
+[21:36:07.653 +448.653][GAME] move thief end player=2 tile=18 elapsed=0.001 thiefVictim=1
+[21:36:07.734 +448.735][AI] thief move planning end player=2 tile=8 elapsed=1.176
+[21:36:07.736 +448.737][AI] action execute start current=2 actor=0 type=move_thief tile=8 corner=0 side=0 target=0 resA=0 resB=0 discard=[0,0,0,0,0]
+[21:36:07.739 +448.739][GAME] move thief start player=2 tile=8
+[21:36:07.740 +448.741][GAME] move thief end player=2 tile=8 elapsed=0.001 thiefVictim=1
+[21:36:07.742 +448.742][AI] action execute end type=move_thief success=1 elapsed=0.006
+[21:36:07.745 +448.745][AI] thief move execute player=2 tile=8 success=1 elapsed=0.009
+[21:36:07.911 +448.912][AI] thief victim planning end player=2 victim=3 elapsed=0.160
+[21:36:07.917 +448.917][AI] action execute start current=2 actor=3 type=choose_thief_victim tile=0 corner=0 side=0 target=3 resA=0 resB=0 discard=[0,0,0,0,0]
+[21:36:07.923 +448.923][GAME] steal resource player=2 victim=3 resource=1
+[21:36:07.925 +448.925][AI] action execute end type=choose_thief_victim success=1 elapsed=0.008
+[21:36:07.928 +448.928][AI] thief victim execute player=2 victim=3 success=1 elapsed=0.011
+[21:36:08.618 +449.619][AI] play phase search action=none score=-492.003 elapsed=0.032 budget=0.100 nodes=2 timedOut=0
+[21:36:08.620 +449.621][AI] play phase no action elapsed=0.034
+[21:36:08.622 +449.622][AI] end turn player=2
+[21:36:08.628 +449.628][AI] roll animation start player=3
+[21:36:08.633 +449.633][UI] dice animation start pending=3+3 total=6
+[21:36:08.495 +450.495][UI] dice animation resolve total=6
+[21:36:08.497 +450.498][GAME] gameRollDice start player=3 total=6
+[21:36:08.499 +450.499][GAME] gameRollDice end player=3 total=6 elapsed=0.002 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:08.503 +450.503][UI] dice animation resolved total=6 elapsed=0.008 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:09.608 +450.609][AI] play phase search action=none score=-621.203 elapsed=0.101 budget=0.100 nodes=6 timedOut=1
+[21:36:09.611 +450.611][AI] play phase no action elapsed=0.103
+[21:36:09.613 +450.614][AI] end turn player=3
+[21:36:10.938 +451.938][UI] dice animation start pending=5+6 total=11
+[21:36:11.788 +452.789][UI] dice animation resolve total=11
+[21:36:11.789 +452.790][GAME] gameRollDice start player=0 total=11
+[21:36:11.791 +452.791][GAME] gameRollDice end player=0 total=11 elapsed=0.001 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:11.794 +452.794][UI] dice animation resolved total=11 elapsed=0.006 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:15.735 +456.735][AI] decision start current=1 decision=1 difficulty=2 phase=1 rolled=0 discards=0 thiefPlacement=0 thiefVictim=0 delay=0.386
+[21:36:15.135 +457.136][AI] roll animation start player=1
+[21:36:15.137 +457.137][UI] dice animation start pending=5+5 total=10
+[21:36:16.003 +458.003][UI] dice animation resolve total=10
+[21:36:16.008 +458.008][GAME] gameRollDice start player=1 total=10
+[21:36:16.010 +458.011][GAME] gameRollDice end player=1 total=10 elapsed=0.003 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:16.015 +458.015][UI] dice animation resolved total=10 elapsed=0.012 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:16.134 +458.134][AI] play phase search action=none score=-821.717 elapsed=0.116 budget=0.100 nodes=7 timedOut=1
+[21:36:16.138 +458.138][AI] play phase no action elapsed=0.120
+[21:36:16.140 +458.141][AI] end turn player=1
+[21:36:16.148 +458.148][AI] roll animation start player=2
+[21:36:16.149 +458.149][UI] dice animation start pending=3+3 total=6
+[21:36:17.014 +459.015][UI] dice animation resolve total=6
+[21:36:17.016 +459.016][GAME] gameRollDice start player=2 total=6
+[21:36:17.017 +459.018][GAME] gameRollDice end player=2 total=6 elapsed=0.001 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:17.020 +459.021][UI] dice animation resolved total=6 elapsed=0.006 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:17.057 +459.058][AI] play phase search action=none score=-551.865 elapsed=0.032 budget=0.100 nodes=2 timedOut=0
+[21:36:17.060 +459.060][AI] play phase no action elapsed=0.035
+[21:36:17.061 +459.062][AI] end turn player=2
+[21:36:17.068 +459.068][AI] roll animation start player=3
+[21:36:17.069 +459.069][UI] dice animation start pending=3+4 total=7
+[21:36:18.934 +459.935][UI] dice animation resolve total=7
+[21:36:18.936 +459.936][GAME] gameRollDice start player=3 total=7
+[21:36:18.938 +459.939][GAME] begin discard phase currentPlayer=3
+[21:36:18.942 +459.942][GAME] discard requirement player=0 total=5 discard=0
+[21:36:18.945 +459.946][GAME] discard requirement player=1 total=8 discard=4
+[21:36:18.947 +459.948][GAME] discard requirement player=2 total=7 discard=0
+[21:36:18.949 +459.949][GAME] discard requirement player=3 total=7 discard=0
+[21:36:18.951 +459.951][GAME] gameRollDice end player=3 total=7 elapsed=0.015 pendingDiscards=1 thiefPlacement=0 thiefVictim=0
+[21:36:18.955 +459.955][UI] dice animation resolved total=7 elapsed=0.020 pendingDiscards=1 thiefPlacement=0 thiefVictim=0
+[21:36:18.964 +459.964][AI] decision start current=3 decision=1 difficulty=2 phase=1 rolled=1 discards=1 thiefPlacement=0 thiefVictim=0 delay=0.000
+[21:36:18.967 +459.968][AI] discard planning start player=1 required=4
+[21:36:18.969 +459.970][AI] discard planning end player=1 elapsed=0.002 plan=[1,0,0,2,1]
+[21:36:18.972 +459.972][AI] action execute start current=3 actor=1 type=discard tile=0 corner=0 side=0 target=1 resA=0 resB=0 discard=[1,0,0,2,1]
+[21:36:18.983 +459.984][GAME] discard submitted player=1 plan=[1,0,0,2,1] thiefPlacement=1
+[21:36:18.986 +459.986][AI] action execute end type=discard success=1 elapsed=0.014
+[21:36:18.988 +459.989][AI] discard execute player=1 success=1 elapsed=0.017
+[21:36:18.997 +459.998][AI] decision start current=3 decision=3 difficulty=2 phase=1 rolled=1 discards=0 thiefPlacement=1 thiefVictim=0 delay=0.000
+[21:36:18.017 +460.018][GAME] move thief start player=3 tile=0
+[21:36:18.020 +460.021][GAME] move thief end player=3 tile=0 elapsed=0.003 thiefVictim=1
+[21:36:18.087 +460.087][GAME] move thief start player=3 tile=1
+[21:36:18.091 +460.091][GAME] move thief end player=3 tile=1 elapsed=0.004 thiefVictim=1
+[21:36:18.158 +460.158][GAME] move thief start player=3 tile=2
+[21:36:18.160 +460.160][GAME] move thief end player=3 tile=2 elapsed=0.002 thiefVictim=1
+[21:36:18.226 +460.227][GAME] move thief start player=3 tile=3
+[21:36:18.228 +460.228][GAME] move thief end player=3 tile=3 elapsed=0.002 thiefVictim=1
+[21:36:18.294 +460.294][GAME] move thief start player=3 tile=4
+[21:36:18.295 +460.296][GAME] move thief end player=3 tile=4 elapsed=0.002 thiefVictim=1
+[21:36:18.361 +460.362][GAME] move thief start player=3 tile=5
+[21:36:18.363 +460.363][GAME] move thief end player=3 tile=5 elapsed=0.002 thiefVictim=1
+[21:36:18.493 +460.493][GAME] move thief start player=3 tile=6
+[21:36:18.494 +460.495][GAME] move thief end player=3 tile=6 elapsed=0.001 thiefVictim=1
+[21:36:19.561 +460.562][GAME] move thief start player=3 tile=7
+[21:36:19.562 +460.563][GAME] move thief end player=3 tile=7 elapsed=0.001 thiefVictim=1
+[21:36:19.691 +460.692][GAME] move thief start player=3 tile=9
+[21:36:19.697 +460.698][GAME] move thief end player=3 tile=9 elapsed=0.006 thiefVictim=1
+[21:36:19.852 +460.853][GAME] move thief start player=3 tile=10
+[21:36:19.854 +460.855][GAME] move thief end player=3 tile=10 elapsed=0.002 thiefVictim=1
+[21:36:19.002 +461.003][GAME] move thief start player=3 tile=11
+[21:36:19.003 +461.004][GAME] move thief end player=3 tile=11 elapsed=0.001 thiefVictim=1
+[21:36:19.086 +461.087][GAME] move thief start player=3 tile=12
+[21:36:19.088 +461.089][GAME] move thief end player=3 tile=12 elapsed=0.002 thiefVictim=1
+[21:36:19.171 +461.171][GAME] move thief start player=3 tile=13
+[21:36:19.173 +461.173][GAME] move thief end player=3 tile=13 elapsed=0.002 thiefVictim=1
+[21:36:19.303 +461.304][GAME] move thief start player=3 tile=14
+[21:36:19.305 +461.306][GAME] move thief end player=3 tile=14 elapsed=0.002 thiefVictim=1
+[21:36:19.390 +461.391][GAME] move thief start player=3 tile=15
+[21:36:19.393 +461.393][GAME] move thief end player=3 tile=15 elapsed=0.002 thiefVictim=1
+[21:36:19.475 +461.475][GAME] move thief start player=3 tile=16
+[21:36:19.477 +461.478][GAME] move thief end player=3 tile=16 elapsed=0.002 thiefVictim=1
+[21:36:20.543 +461.543][GAME] move thief start player=3 tile=17
+[21:36:20.545 +461.545][GAME] move thief end player=3 tile=17 elapsed=0.002 thiefVictim=1
+[21:36:20.610 +461.610][GAME] move thief start player=3 tile=18
+[21:36:20.611 +461.612][GAME] move thief end player=3 tile=18 elapsed=0.002 thiefVictim=0
+[21:36:20.630 +461.630][AI] thief move planning end player=3 tile=4 elapsed=1.629
+[21:36:20.633 +461.633][AI] action execute start current=3 actor=0 type=move_thief tile=4 corner=0 side=0 target=0 resA=0 resB=0 discard=[0,0,0,0,0]
+[21:36:20.636 +461.637][GAME] move thief start player=3 tile=4
+[21:36:20.638 +461.638][GAME] move thief end player=3 tile=4 elapsed=0.001 thiefVictim=1
+[21:36:20.640 +461.641][AI] action execute end type=move_thief success=1 elapsed=0.008
+[21:36:20.643 +461.644][AI] thief move execute player=3 tile=4 success=1 elapsed=0.011
+[21:36:20.716 +461.716][AI] thief victim planning end player=3 victim=0 elapsed=0.064
+[21:36:20.718 +461.718][AI] action execute start current=3 actor=0 type=choose_thief_victim tile=0 corner=0 side=0 target=0 resA=0 resB=0 discard=[0,0,0,0,0]
+[21:36:20.721 +461.721][GAME] steal resource player=3 victim=0 resource=2
+[21:36:20.726 +461.726][AI] action execute end type=choose_thief_victim success=1 elapsed=0.008
+[21:36:20.729 +461.729][AI] thief victim execute player=3 victim=0 success=1 elapsed=0.011
+[21:36:20.503 +462.503][AI] play phase search action=none score=-615.252 elapsed=0.115 budget=0.100 nodes=7 timedOut=1
+[21:36:20.505 +462.506][AI] play phase no action elapsed=0.118
+[21:36:20.506 +462.507][AI] end turn player=3
+[21:36:21.030 +463.031][UI] dice animation start pending=3+3 total=6
+[21:36:22.881 +463.881][UI] dice animation resolve total=6
+[21:36:22.883 +463.883][GAME] gameRollDice start player=0 total=6
+[21:36:22.885 +463.885][GAME] gameRollDice end player=0 total=6 elapsed=0.002 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:22.902 +463.903][UI] dice animation resolved total=6 elapsed=0.021 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:27.882 +468.883][AI] decision start current=1 decision=1 difficulty=2 phase=1 rolled=0 discards=0 thiefPlacement=0 thiefVictim=0 delay=0.386
+[21:36:27.282 +469.283][AI] roll animation start player=1
+[21:36:27.285 +469.286][UI] dice animation start pending=2+2 total=4
+[21:36:28.149 +470.150][UI] dice animation resolve total=4
+[21:36:28.151 +470.151][GAME] gameRollDice start player=1 total=4
+[21:36:28.153 +470.153][GAME] gameRollDice end player=1 total=4 elapsed=0.002 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:28.157 +470.157][UI] dice animation resolved total=4 elapsed=0.008 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:28.278 +470.278][AI] play phase search action=none score=-816.443 elapsed=0.116 budget=0.100 nodes=7 timedOut=1
+[21:36:28.280 +470.280][AI] play phase no action elapsed=0.118
+[21:36:28.281 +470.282][AI] end turn player=1
+[21:36:28.288 +470.288][AI] roll animation start player=2
+[21:36:28.289 +470.290][UI] dice animation start pending=4+5 total=9
+[21:36:29.155 +471.156][UI] dice animation resolve total=9
+[21:36:29.157 +471.158][GAME] gameRollDice start player=2 total=9
+[21:36:29.159 +471.159][GAME] gameRollDice end player=2 total=9 elapsed=0.002 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:29.162 +471.163][UI] dice animation resolved total=9 elapsed=0.007 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:29.283 +471.283][AI] play phase search action=maritime_trade score=-500.329 elapsed=0.114 budget=0.100 nodes=7 timedOut=1
+[21:36:29.286 +471.287][AI] play phase decision current=2 actor=0 type=maritime_trade tile=0 corner=0 side=0 target=0 resA=1 resB=2 discard=[0,0,0,0,0]
+[21:36:29.289 +471.290][AI] action execute start current=2 actor=0 type=maritime_trade tile=0 corner=0 side=0 target=0 resA=1 resB=2 discard=[0,0,0,0,0]
+[21:36:29.296 +471.297][AI] action execute end type=maritime_trade success=1 elapsed=0.007
+[21:36:29.298 +471.298][AI] play phase elapsed=0.129
+[21:36:30.070 +472.071][AI] play phase search action=none score=-500.329 elapsed=0.114 budget=0.100 nodes=7 timedOut=1
+[21:36:30.073 +472.073][AI] play phase no action elapsed=0.117
+[21:36:30.075 +472.075][AI] end turn player=2
+[21:36:30.081 +472.081][AI] roll animation start player=3
+[21:36:30.089 +472.090][UI] dice animation start pending=3+4 total=7
+[21:36:31.948 +472.948][UI] dice animation resolve total=7
+[21:36:31.949 +472.950][GAME] gameRollDice start player=3 total=7
+[21:36:31.951 +472.952][GAME] begin discard phase currentPlayer=3
+[21:36:31.953 +472.954][GAME] discard requirement player=0 total=9 discard=4
+[21:36:31.955 +472.956][GAME] discard requirement player=1 total=7 discard=0
+[21:36:31.958 +472.959][GAME] discard requirement player=2 total=6 discard=0
+[21:36:31.960 +472.960][GAME] discard requirement player=3 total=10 discard=5
+[21:36:31.961 +472.962][GAME] gameRollDice end player=3 total=7 elapsed=0.012 pendingDiscards=1 thiefPlacement=0 thiefVictim=0
+[21:36:31.965 +472.965][UI] dice animation resolved total=7 elapsed=0.017 pendingDiscards=1 thiefPlacement=0 thiefVictim=0
+[21:36:33.495 +475.495][GAME] discard submitted player=0 plan=[0,0,0,4,0] thiefPlacement=0
+[21:36:33.511 +475.512][AI] discard planning start player=3 required=5
+[21:36:33.514 +475.514][AI] discard planning end player=3 elapsed=0.002 plan=[0,3,2,0,0]
+[21:36:33.515 +475.516][AI] action execute start current=3 actor=3 type=discard tile=0 corner=0 side=0 target=3 resA=0 resB=0 discard=[0,3,2,0,0]
+[21:36:33.518 +475.519][GAME] discard submitted player=3 plan=[0,3,2,0,0] thiefPlacement=1
+[21:36:34.525 +475.526][AI] action execute end type=discard success=1 elapsed=0.010
+[21:36:34.527 +475.527][AI] discard execute player=3 success=1 elapsed=0.012
+[21:36:34.550 +475.551][GAME] move thief start player=3 tile=0
+[21:36:34.552 +475.552][GAME] move thief end player=3 tile=0 elapsed=0.001 thiefVictim=1
+[21:36:34.622 +475.623][GAME] move thief start player=3 tile=1
+[21:36:34.627 +475.627][GAME] move thief end player=3 tile=1 elapsed=0.004 thiefVictim=1
+[21:36:34.694 +475.694][GAME] move thief start player=3 tile=2
+[21:36:34.695 +475.696][GAME] move thief end player=3 tile=2 elapsed=0.001 thiefVictim=1
+[21:36:34.762 +475.762][GAME] move thief start player=3 tile=3
+[21:36:34.763 +475.763][GAME] move thief end player=3 tile=3 elapsed=0.001 thiefVictim=1
+[21:36:34.830 +475.830][GAME] move thief start player=3 tile=5
+[21:36:34.831 +475.831][GAME] move thief end player=3 tile=5 elapsed=0.001 thiefVictim=1
+[21:36:34.978 +475.979][GAME] move thief start player=3 tile=6
+[21:36:34.979 +475.980][GAME] move thief end player=3 tile=6 elapsed=0.001 thiefVictim=1
+[21:36:34.046 +476.046][GAME] move thief start player=3 tile=7
+[21:36:34.047 +476.048][GAME] move thief end player=3 tile=7 elapsed=0.001 thiefVictim=1
+[21:36:34.195 +476.195][GAME] move thief start player=3 tile=8
+[21:36:34.196 +476.196][GAME] move thief end player=3 tile=8 elapsed=0.001 thiefVictim=1
+[21:36:34.293 +476.294][GAME] move thief start player=3 tile=9
+[21:36:34.294 +476.295][GAME] move thief end player=3 tile=9 elapsed=0.001 thiefVictim=1
+[21:36:34.471 +476.472][GAME] move thief start player=3 tile=10
+[21:36:34.473 +476.473][GAME] move thief end player=3 tile=10 elapsed=0.002 thiefVictim=1
+[21:36:35.651 +476.651][GAME] move thief start player=3 tile=11
+[21:36:35.653 +476.653][GAME] move thief end player=3 tile=11 elapsed=0.002 thiefVictim=1
+[21:36:35.751 +476.751][GAME] move thief start player=3 tile=12
+[21:36:35.752 +476.753][GAME] move thief end player=3 tile=12 elapsed=0.001 thiefVictim=1
+[21:36:35.852 +476.853][GAME] move thief start player=3 tile=13
+[21:36:35.854 +476.855][GAME] move thief end player=3 tile=13 elapsed=0.002 thiefVictim=1
+[21:36:35.001 +477.001][GAME] move thief start player=3 tile=14
+[21:36:35.002 +477.003][GAME] move thief end player=3 tile=14 elapsed=0.001 thiefVictim=1
+[21:36:35.101 +477.101][GAME] move thief start player=3 tile=15
+[21:36:35.102 +477.102][GAME] move thief end player=3 tile=15 elapsed=0.001 thiefVictim=1
+[21:36:35.201 +477.202][GAME] move thief start player=3 tile=16
+[21:36:35.203 +477.203][GAME] move thief end player=3 tile=16 elapsed=0.002 thiefVictim=1
+[21:36:35.269 +477.270][GAME] move thief start player=3 tile=17
+[21:36:35.271 +477.272][GAME] move thief end player=3 tile=17 elapsed=0.002 thiefVictim=1
+[21:36:35.338 +477.338][GAME] move thief start player=3 tile=18
+[21:36:35.340 +477.341][GAME] move thief end player=3 tile=18 elapsed=0.002 thiefVictim=0
+[21:36:35.358 +477.358][AI] thief move planning end player=3 tile=0 elapsed=1.824
+[21:36:35.360 +477.360][AI] action execute start current=3 actor=0 type=move_thief tile=0 corner=0 side=0 target=0 resA=0 resB=0 discard=[0,0,0,0,0]
+[21:36:35.363 +477.363][GAME] move thief start player=3 tile=0
+[21:36:35.365 +477.365][GAME] move thief end player=3 tile=0 elapsed=0.002 thiefVictim=1
+[21:36:35.366 +477.367][AI] action execute end type=move_thief success=1 elapsed=0.007
+[21:36:35.368 +477.369][AI] thief move execute player=3 tile=0 success=1 elapsed=0.009
+[21:36:35.440 +477.441][AI] thief victim planning end player=3 victim=0 elapsed=0.063
+[21:36:35.442 +477.443][AI] action execute start current=3 actor=0 type=choose_thief_victim tile=0 corner=0 side=0 target=0 resA=0 resB=0 discard=[0,0,0,0,0]
+[21:36:35.448 +477.449][GAME] steal resource player=3 victim=0 resource=3
+[21:36:35.453 +477.453][AI] action execute end type=choose_thief_victim success=1 elapsed=0.010
+[21:36:35.455 +477.456][AI] thief victim execute player=3 victim=0 success=1 elapsed=0.013
+[21:36:36.232 +478.232][AI] play phase search action=none score=-639.790 elapsed=0.116 budget=0.100 nodes=7 timedOut=1
+[21:36:36.234 +478.235][AI] play phase no action elapsed=0.119
+[21:36:36.236 +478.236][AI] end turn player=3
+[21:36:37.843 +478.843][UI] dice animation start pending=4+5 total=9
+[21:36:38.693 +479.694][UI] dice animation resolve total=9
+[21:36:38.695 +479.696][GAME] gameRollDice start player=0 total=9
+[21:36:38.697 +479.697][GAME] gameRollDice end player=0 total=9 elapsed=0.001 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:38.700 +479.701][UI] dice animation resolved total=9 elapsed=0.007 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:40.362 +482.362][AI] decision start current=1 decision=1 difficulty=2 phase=1 rolled=0 discards=0 thiefPlacement=0 thiefVictim=0 delay=0.386
+[21:36:41.764 +482.764][AI] roll animation start player=1
+[21:36:41.765 +482.766][UI] dice animation start pending=4+5 total=9
+[21:36:42.630 +483.631][UI] dice animation resolve total=9
+[21:36:42.631 +483.632][GAME] gameRollDice start player=1 total=9
+[21:36:42.633 +483.633][GAME] gameRollDice end player=1 total=9 elapsed=0.001 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:42.636 +483.636][UI] dice animation resolved total=9 elapsed=0.006 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:42.764 +483.765][AI] play phase search action=none score=-719.419 elapsed=0.114 budget=0.100 nodes=7 timedOut=1
+[21:36:42.767 +483.767][AI] play phase no action elapsed=0.117
+[21:36:42.768 +483.769][AI] end turn player=1
+[21:36:42.774 +483.775][AI] roll animation start player=2
+[21:36:42.777 +483.777][UI] dice animation start pending=3+3 total=6
+[21:36:43.641 +484.641][UI] dice animation resolve total=6
+[21:36:43.642 +484.643][GAME] gameRollDice start player=2 total=6
+[21:36:43.644 +484.644][GAME] gameRollDice end player=2 total=6 elapsed=0.002 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:43.648 +484.649][UI] dice animation resolved total=6 elapsed=0.008 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:43.770 +484.770][AI] play phase search action=none score=-502.875 elapsed=0.115 budget=0.100 nodes=7 timedOut=1
+[21:36:43.773 +484.773][AI] play phase no action elapsed=0.118
+[21:36:43.775 +484.776][AI] end turn player=2
+[21:36:43.787 +484.788][AI] roll animation start player=3
+[21:36:43.809 +484.810][UI] dice animation start pending=3+4 total=7
+[21:36:44.675 +485.675][UI] dice animation resolve total=7
+[21:36:44.676 +485.676][GAME] gameRollDice start player=3 total=7
+[21:36:44.678 +485.678][GAME] begin discard phase currentPlayer=3
+[21:36:44.685 +485.686][GAME] discard requirement player=0 total=7 discard=0
+[21:36:44.687 +485.687][GAME] discard requirement player=1 total=11 discard=5
+[21:36:44.688 +485.689][GAME] discard requirement player=2 total=6 discard=0
+[21:36:44.690 +485.691][GAME] discard requirement player=3 total=8 discard=4
+[21:36:44.692 +485.692][GAME] gameRollDice end player=3 total=7 elapsed=0.016 pendingDiscards=1 thiefPlacement=0 thiefVictim=0
+[21:36:44.696 +485.696][UI] dice animation resolved total=7 elapsed=0.021 pendingDiscards=1 thiefPlacement=0 thiefVictim=0
+[21:36:44.700 +485.700][AI] decision start current=3 decision=1 difficulty=2 phase=1 rolled=1 discards=1 thiefPlacement=0 thiefVictim=0 delay=0.000
+[21:36:44.703 +485.703][AI] discard planning start player=1 required=5
+[21:36:44.706 +485.706][AI] discard planning end player=1 elapsed=0.003 plan=[0,2,0,2,1]
+[21:36:44.708 +485.708][AI] action execute start current=3 actor=1 type=discard tile=0 corner=0 side=0 target=1 resA=0 resB=0 discard=[0,2,0,2,1]
+[21:36:44.718 +485.718][GAME] discard submitted player=1 plan=[0,2,0,2,1] thiefPlacement=0
+[21:36:44.720 +485.720][AI] action execute end type=discard success=1 elapsed=0.012
+[21:36:44.722 +485.722][AI] discard execute player=1 success=1 elapsed=0.014
+[21:36:44.729 +485.729][AI] decision start current=3 decision=3 difficulty=2 phase=1 rolled=1 discards=1 thiefPlacement=0 thiefVictim=0 delay=0.000
+[21:36:44.733 +485.734][AI] discard planning start player=3 required=4
+[21:36:44.736 +485.736][AI] discard planning end player=3 elapsed=0.002 plan=[0,2,0,1,1]
+[21:36:44.738 +485.738][AI] action execute start current=3 actor=3 type=discard tile=0 corner=0 side=0 target=3 resA=0 resB=0 discard=[0,2,0,1,1]
+[21:36:44.741 +485.741][GAME] discard submitted player=3 plan=[0,2,0,1,1] thiefPlacement=1
+[21:36:44.743 +485.743][AI] action execute end type=discard success=1 elapsed=0.005
+[21:36:44.745 +485.745][AI] discard execute player=3 success=1 elapsed=0.007
+[21:36:44.768 +485.769][GAME] move thief start player=3 tile=1
+[21:36:44.867 +485.868][GAME] move thief end player=3 tile=1 elapsed=0.099 thiefVictim=1
+[21:36:44.934 +485.935][GAME] move thief start player=3 tile=2
+[21:36:44.936 +485.936][GAME] move thief end player=3 tile=2 elapsed=0.002 thiefVictim=1
+[21:36:44.002 +486.002][GAME] move thief start player=3 tile=3
+[21:36:44.003 +486.004][GAME] move thief end player=3 tile=3 elapsed=0.002 thiefVictim=1
+[21:36:44.070 +486.070][GAME] move thief start player=3 tile=4
+[21:36:44.071 +486.072][GAME] move thief end player=3 tile=4 elapsed=0.002 thiefVictim=1
+[21:36:44.137 +486.138][GAME] move thief start player=3 tile=5
+[21:36:44.139 +486.139][GAME] move thief end player=3 tile=5 elapsed=0.002 thiefVictim=1
+[21:36:44.285 +486.286][GAME] move thief start player=3 tile=6
+[21:36:44.286 +486.287][GAME] move thief end player=3 tile=6 elapsed=0.001 thiefVictim=1
+[21:36:44.353 +486.353][GAME] move thief start player=3 tile=7
+[21:36:44.354 +486.354][GAME] move thief end player=3 tile=7 elapsed=0.001 thiefVictim=1
+[21:36:44.499 +486.500][GAME] move thief start player=3 tile=8
+[21:36:44.501 +486.502][GAME] move thief end player=3 tile=8 elapsed=0.002 thiefVictim=1
+[21:36:45.599 +486.599][GAME] move thief start player=3 tile=9
+[21:36:45.600 +486.601][GAME] move thief end player=3 tile=9 elapsed=0.001 thiefVictim=1
+[21:36:45.779 +486.779][GAME] move thief start player=3 tile=10
+[21:36:45.780 +486.781][GAME] move thief end player=3 tile=10 elapsed=0.002 thiefVictim=1
+[21:36:45.959 +486.960][GAME] move thief start player=3 tile=11
+[21:36:45.960 +486.961][GAME] move thief end player=3 tile=11 elapsed=0.001 thiefVictim=1
+[21:36:45.060 +487.061][GAME] move thief start player=3 tile=12
+[21:36:45.062 +487.063][GAME] move thief end player=3 tile=12 elapsed=0.002 thiefVictim=1
+[21:36:45.161 +487.161][GAME] move thief start player=3 tile=13
+[21:36:45.163 +487.164][GAME] move thief end player=3 tile=13 elapsed=0.003 thiefVictim=1
+[21:36:45.345 +487.346][GAME] move thief start player=3 tile=14
+[21:36:45.347 +487.347][GAME] move thief end player=3 tile=14 elapsed=0.001 thiefVictim=1
+[21:36:45.444 +487.445][GAME] move thief start player=3 tile=15
+[21:36:45.446 +487.446][GAME] move thief end player=3 tile=15 elapsed=0.002 thiefVictim=1
+[21:36:46.543 +487.544][GAME] move thief start player=3 tile=16
+[21:36:46.545 +487.545][GAME] move thief end player=3 tile=16 elapsed=0.002 thiefVictim=1
+[21:36:46.611 +487.612][GAME] move thief start player=3 tile=17
+[21:36:46.613 +487.613][GAME] move thief end player=3 tile=17 elapsed=0.002 thiefVictim=1
+[21:36:46.679 +487.680][GAME] move thief start player=3 tile=18
+[21:36:46.681 +487.681][GAME] move thief end player=3 tile=18 elapsed=0.002 thiefVictim=0
+[21:36:46.699 +487.700][AI] thief move planning end player=3 tile=4 elapsed=1.947
+[21:36:46.702 +487.702][AI] action execute start current=3 actor=0 type=move_thief tile=4 corner=0 side=0 target=0 resA=0 resB=0 discard=[0,0,0,0,0]
+[21:36:46.706 +487.706][GAME] move thief start player=3 tile=4
+[21:36:46.707 +487.707][GAME] move thief end player=3 tile=4 elapsed=0.001 thiefVictim=1
+[21:36:46.709 +487.709][AI] action execute end type=move_thief success=1 elapsed=0.007
+[21:36:46.711 +487.712][AI] thief move execute player=3 tile=4 success=1 elapsed=0.009
+[21:36:46.787 +487.787][AI] thief victim planning end player=3 victim=0 elapsed=0.064
+[21:36:46.789 +487.789][AI] action execute start current=3 actor=0 type=choose_thief_victim tile=0 corner=0 side=0 target=0 resA=0 resB=0 discard=[0,0,0,0,0]
+[21:36:46.793 +487.793][GAME] steal resource player=3 victim=0 resource=1
+[21:36:46.797 +487.797][AI] action execute end type=choose_thief_victim success=1 elapsed=0.008
+[21:36:46.799 +487.800][AI] thief victim execute player=3 victim=0 success=1 elapsed=0.010
+[21:36:47.573 +488.574][AI] play phase search action=none score=-682.504 elapsed=0.116 budget=0.100 nodes=7 timedOut=1
+[21:36:47.576 +488.576][AI] play phase no action elapsed=0.119
+[21:36:47.577 +488.578][AI] end turn player=3
+[21:36:47.318 +489.318][UI] dice animation start pending=1+1 total=2
+[21:36:48.168 +490.168][UI] dice animation resolve total=2
+[21:36:48.169 +490.170][GAME] gameRollDice start player=0 total=2
+[21:36:48.171 +490.171][GAME] gameRollDice end player=0 total=2 elapsed=0.001 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:48.174 +490.174][UI] dice animation resolved total=2 elapsed=0.006 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:49.968 +490.969][AI] decision start current=1 decision=1 difficulty=2 phase=1 rolled=0 discards=0 thiefPlacement=0 thiefVictim=0 delay=0.386
+[21:36:49.368 +491.369][AI] roll animation start player=1
+[21:36:49.369 +491.370][UI] dice animation start pending=3+4 total=7
+[21:36:50.236 +492.236][UI] dice animation resolve total=7
+[21:36:50.237 +492.238][GAME] gameRollDice start player=1 total=7
+[21:36:50.239 +492.239][GAME] begin discard phase currentPlayer=1
+[21:36:50.240 +492.241][GAME] discard requirement player=0 total=6 discard=0
+[21:36:50.242 +492.242][GAME] discard requirement player=1 total=6 discard=0
+[21:36:50.243 +492.244][GAME] discard requirement player=2 total=8 discard=4
+[21:36:50.245 +492.246][GAME] discard requirement player=3 total=6 discard=0
+[21:36:50.247 +492.248][GAME] gameRollDice end player=1 total=7 elapsed=0.010 pendingDiscards=1 thiefPlacement=0 thiefVictim=0
+[21:36:50.251 +492.251][UI] dice animation resolved total=7 elapsed=0.015 pendingDiscards=1 thiefPlacement=0 thiefVictim=0
+[21:36:50.256 +492.257][AI] decision start current=1 decision=2 difficulty=2 phase=1 rolled=1 discards=1 thiefPlacement=0 thiefVictim=0 delay=0.000
+[21:36:50.259 +492.260][AI] discard planning start player=2 required=4
+[21:36:50.261 +492.262][AI] discard planning end player=2 elapsed=0.002 plan=[2,0,0,0,2]
+[21:36:50.263 +492.264][AI] action execute start current=1 actor=2 type=discard tile=0 corner=0 side=0 target=2 resA=0 resB=0 discard=[2,0,0,0,2]
+[21:36:50.267 +492.267][GAME] discard submitted player=2 plan=[2,0,0,0,2] thiefPlacement=1
+[21:36:50.269 +492.269][AI] action execute end type=discard success=1 elapsed=0.006
+[21:36:50.271 +492.272][AI] discard execute player=2 success=1 elapsed=0.008
+[21:36:50.278 +492.279][AI] decision start current=1 decision=1 difficulty=2 phase=1 rolled=1 discards=0 thiefPlacement=1 thiefVictim=0 delay=0.000
+[21:36:50.298 +492.298][GAME] move thief start player=1 tile=0
+[21:36:50.300 +492.300][GAME] move thief end player=1 tile=0 elapsed=0.002 thiefVictim=1
+[21:36:50.366 +492.367][GAME] move thief start player=1 tile=1
+[21:36:50.368 +492.369][GAME] move thief end player=1 tile=1 elapsed=0.002 thiefVictim=1
+[21:36:50.434 +492.435][GAME] move thief start player=1 tile=2
+[21:36:50.436 +492.436][GAME] move thief end player=1 tile=2 elapsed=0.001 thiefVictim=1
+[21:36:50.501 +492.502][GAME] move thief start player=1 tile=3
+[21:36:50.503 +492.503][GAME] move thief end player=1 tile=3 elapsed=0.001 thiefVictim=1
+[21:36:51.570 +492.570][GAME] move thief start player=1 tile=5
+[21:36:51.574 +492.574][GAME] move thief end player=1 tile=5 elapsed=0.004 thiefVictim=1
+[21:36:51.641 +492.641][GAME] move thief start player=1 tile=6
+[21:36:51.642 +492.642][GAME] move thief end player=1 tile=6 elapsed=0.001 thiefVictim=1
+[21:36:51.708 +492.708][GAME] move thief start player=1 tile=7
+[21:36:51.709 +492.710][GAME] move thief end player=1 tile=7 elapsed=0.001 thiefVictim=1
+[21:36:51.776 +492.776][GAME] move thief start player=1 tile=8
+[21:36:51.777 +492.778][GAME] move thief end player=1 tile=8 elapsed=0.002 thiefVictim=1
+[21:36:51.860 +492.860][GAME] move thief start player=1 tile=9
+[21:36:51.862 +492.863][GAME] move thief end player=1 tile=9 elapsed=0.002 thiefVictim=1
+[21:36:51.009 +493.009][GAME] move thief start player=1 tile=10
+[21:36:51.010 +493.011][GAME] move thief end player=1 tile=10 elapsed=0.001 thiefVictim=1
+[21:36:51.093 +493.094][GAME] move thief start player=1 tile=11
+[21:36:51.094 +493.095][GAME] move thief end player=1 tile=11 elapsed=0.001 thiefVictim=1
+[21:36:51.176 +493.177][GAME] move thief start player=1 tile=12
+[21:36:51.177 +493.178][GAME] move thief end player=1 tile=12 elapsed=0.001 thiefVictim=0
+[21:36:51.195 +493.196][GAME] move thief start player=1 tile=13
+[21:36:51.197 +493.198][GAME] move thief end player=1 tile=13 elapsed=0.002 thiefVictim=1
+[21:36:51.338 +493.338][GAME] move thief start player=1 tile=14
+[21:36:51.340 +493.341][GAME] move thief end player=1 tile=14 elapsed=0.003 thiefVictim=1
+[21:36:51.488 +493.488][GAME] move thief start player=1 tile=15
+[21:36:51.489 +493.490][GAME] move thief end player=1 tile=15 elapsed=0.002 thiefVictim=1
+[21:36:52.639 +493.639][GAME] move thief start player=1 tile=16
+[21:36:52.641 +493.642][GAME] move thief end player=1 tile=16 elapsed=0.003 thiefVictim=1
+[21:36:52.712 +493.712][GAME] move thief start player=1 tile=17
+[21:36:52.713 +493.714][GAME] move thief end player=1 tile=17 elapsed=0.001 thiefVictim=1
+[21:36:52.780 +493.781][GAME] move thief start player=1 tile=18
+[21:36:52.782 +493.782][GAME] move thief end player=1 tile=18 elapsed=0.002 thiefVictim=1
+[21:36:52.865 +493.866][AI] thief move planning end player=1 tile=0 elapsed=1.584
+[21:36:52.867 +493.868][AI] action execute start current=1 actor=0 type=move_thief tile=0 corner=0 side=0 target=0 resA=0 resB=0 discard=[0,0,0,0,0]
+[21:36:52.869 +493.870][GAME] move thief start player=1 tile=0
+[21:36:52.872 +493.873][GAME] move thief end player=1 tile=0 elapsed=0.003 thiefVictim=1
+[21:36:52.879 +493.880][AI] action execute end type=move_thief success=1 elapsed=0.012
+[21:36:52.881 +493.881][AI] thief move execute player=1 tile=0 success=1 elapsed=0.014
+[21:36:52.952 +493.953][AI] thief victim planning end player=1 victim=0 elapsed=0.065
+[21:36:52.954 +493.955][AI] action execute start current=1 actor=0 type=choose_thief_victim tile=0 corner=0 side=0 target=0 resA=0 resB=0 discard=[0,0,0,0,0]
+[21:36:52.960 +493.960][GAME] steal resource player=1 victim=0 resource=3
+[21:36:52.961 +493.962][AI] action execute end type=choose_thief_victim success=1 elapsed=0.007
+[21:36:52.964 +493.964][AI] thief victim execute player=1 victim=0 success=1 elapsed=0.009
+[21:36:53.736 +494.737][AI] play phase search action=none score=-771.701 elapsed=0.115 budget=0.100 nodes=7 timedOut=1
+[21:36:53.739 +494.740][AI] play phase no action elapsed=0.118
+[21:36:53.740 +494.741][AI] end turn player=1
+[21:36:53.747 +494.747][AI] roll animation start player=2
+[21:36:53.748 +494.749][UI] dice animation start pending=3+3 total=6
+[21:36:54.614 +495.614][UI] dice animation resolve total=6
+[21:36:54.615 +495.615][GAME] gameRollDice start player=2 total=6
+[21:36:54.616 +495.616][GAME] gameRollDice end player=2 total=6 elapsed=0.001 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:54.619 +495.619][UI] dice animation resolved total=6 elapsed=0.005 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:54.724 +495.725][AI] play phase search action=none score=-549.177 elapsed=0.100 budget=0.100 nodes=6 timedOut=1
+[21:36:54.727 +495.727][AI] play phase no action elapsed=0.103
+[21:36:54.728 +495.729][AI] end turn player=2
+[21:36:54.736 +495.737][AI] roll animation start player=3
+[21:36:54.738 +495.739][UI] dice animation start pending=6+6 total=12
+[21:36:55.603 +496.604][UI] dice animation resolve total=12
+[21:36:55.606 +496.606][GAME] gameRollDice start player=3 total=12
+[21:36:55.610 +496.611][GAME] gameRollDice end player=3 total=12 elapsed=0.005 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:55.615 +496.615][UI] dice animation resolved total=12 elapsed=0.011 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:55.734 +496.734][AI] play phase search action=none score=-729.803 elapsed=0.116 budget=0.100 nodes=7 timedOut=1
+[21:36:55.737 +496.737][AI] play phase no action elapsed=0.118
+[21:36:55.738 +496.738][AI] end turn player=3
+[21:36:55.278 +497.278][UI] dice animation start pending=3+3 total=6
+[21:36:56.144 +498.144][UI] dice animation resolve total=6
+[21:36:56.145 +498.146][GAME] gameRollDice start player=0 total=6
+[21:36:56.147 +498.147][GAME] gameRollDice end player=0 total=6 elapsed=0.002 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:36:56.150 +498.150][UI] dice animation resolved total=6 elapsed=0.006 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:37:05.805 +506.805][AI] decision start current=1 decision=1 difficulty=2 phase=1 rolled=0 discards=0 thiefPlacement=0 thiefVictim=0 delay=0.386
+[21:37:05.205 +507.205][AI] roll animation start player=1
+[21:37:05.208 +507.208][UI] dice animation start pending=4+4 total=8
+[21:37:06.072 +508.072][UI] dice animation resolve total=8
+[21:37:06.073 +508.074][GAME] gameRollDice start player=1 total=8
+[21:37:06.075 +508.075][GAME] gameRollDice end player=1 total=8 elapsed=0.001 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:37:06.085 +508.085][UI] dice animation resolved total=8 elapsed=0.013 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:37:06.204 +508.205][AI] play phase search action=none score=-845.667 elapsed=0.117 budget=0.100 nodes=7 timedOut=1
+[21:37:06.207 +508.207][AI] play phase no action elapsed=0.119
+[21:37:06.208 +508.209][AI] end turn player=1
+[21:37:06.215 +508.216][AI] roll animation start player=2
+[21:37:06.217 +508.217][UI] dice animation start pending=4+4 total=8
+[21:37:07.082 +509.083][UI] dice animation resolve total=8
+[21:37:07.085 +509.086][GAME] gameRollDice start player=2 total=8
+[21:37:07.087 +509.087][GAME] gameRollDice end player=2 total=8 elapsed=0.001 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:37:07.091 +509.091][UI] dice animation resolved total=8 elapsed=0.008 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:37:07.196 +509.196][AI] play phase search action=none score=-622.796 elapsed=0.101 budget=0.100 nodes=6 timedOut=1
+[21:37:07.198 +509.199][AI] play phase no action elapsed=0.104
+[21:37:07.200 +509.200][AI] end turn player=2
+[21:37:07.207 +509.207][AI] roll animation start player=3
+[21:37:07.208 +509.209][UI] dice animation start pending=3+3 total=6
+[21:37:08.074 +510.074][UI] dice animation resolve total=6
+[21:37:08.076 +510.076][GAME] gameRollDice start player=3 total=6
+[21:37:08.077 +510.078][GAME] gameRollDice end player=3 total=6 elapsed=0.001 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:37:08.087 +510.087][UI] dice animation resolved total=6 elapsed=0.013 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:37:08.192 +510.192][AI] play phase search action=none score=-749.411 elapsed=0.101 budget=0.100 nodes=6 timedOut=1
+[21:37:08.195 +510.195][AI] play phase no action elapsed=0.103
+[21:37:08.197 +510.197][AI] end turn player=3
+[21:37:09.106 +511.106][UI] dice animation start pending=4+5 total=9
+[21:37:10.957 +511.957][UI] dice animation resolve total=9
+[21:37:10.958 +511.959][GAME] gameRollDice start player=0 total=9
+[21:37:10.960 +511.960][GAME] gameRollDice end player=0 total=9 elapsed=0.001 pendingDiscards=0 thiefPlacement=0 thiefVictim=0
+[21:37:10.963 +511.963][UI] dice animation resolved total=9 elapsed=0.006 pendingDiscards=0 thiefPlacement=0 thiefVictim=0

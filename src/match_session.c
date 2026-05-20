@@ -2070,6 +2070,25 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
                     break;
                 }
 
+                /* Handle trade between two remote players: forward to target */
+                if (matchSessionGetSeatAuthority(session, authoritativeAction.player) == MATCH_SEAT_REMOTE)
+                {
+                    const int targetPeerId = (authoritativeAction.player >= PLAYER_RED && authoritativeAction.player <= PLAYER_BLACK)
+                                                 ? session->remotePeerForPlayer[authoritativeAction.player]
+                                                 : -1;
+                    if (targetPeerId >= 0)
+                    {
+                        if (!netplayQueueTradeOfferForHostPeer(session->netplay, targetPeerId, &authoritativeAction))
+                        {
+                            netplayQueueActionRejectForHostPeer(session->netplay,
+                                                                event->peerId,
+                                                                "failed to forward trade offer",
+                                                                session->stateHash);
+                        }
+                        break;
+                    }
+                }
+
                 netplayQueueActionRejectForHostPeer(session->netplay,
                                                     event->peerId,
                                                     "trade target unsupported",
