@@ -96,6 +96,7 @@ static void HandleMultiplayerKeyboardInput(void);
 static void AppendMultiplayerFieldChar(char *buffer, size_t bufferSize, int codepoint);
 static void RemoveMultiplayerFieldChar(char *buffer);
 static bool ValidateMultiplayerConfig(char *message, size_t messageSize);
+static bool MultiplayerHostLooksLikeRender(const char *hostAddress);
 static void TrimMultiplayerHostAddress(void);
 static bool MultiplayerRelayModeRequested(void);
 static void SyncMultiplayerRelayDefaults(void);
@@ -1732,6 +1733,22 @@ static bool MultiplayerRelayModeRequested(void)
     return gMainMenuMultiplayerRoomCode[0] != '\0';
 }
 
+static bool MultiplayerHostLooksLikeRender(const char *hostAddress)
+{
+    static const char renderSuffix[] = ".onrender.com";
+    size_t hostLength = 0u;
+    size_t suffixLength = sizeof(renderSuffix) - 1u;
+
+    if (hostAddress == NULL)
+    {
+        return false;
+    }
+
+    hostLength = strlen(hostAddress);
+    return hostLength > suffixLength &&
+           strcmp(hostAddress + hostLength - suffixLength, renderSuffix) == 0;
+}
+
 static void SyncMultiplayerRelayDefaults(void)
 {
     const long parsedPort = strtol(gMainMenuMultiplayerPortText, NULL, 10);
@@ -1966,6 +1983,11 @@ static void TrimMultiplayerHostAddress(void)
     }
 
     if (secureScheme && MainMenuGetMultiplayerPort() == NETPLAY_DEFAULT_PORT)
+    {
+        MainMenuSetMultiplayerPort(443u);
+    }
+
+    if (MultiplayerHostLooksLikeRender(normalized) && MainMenuGetMultiplayerPort() != 443u)
     {
         MainMenuSetMultiplayerPort(443u);
     }

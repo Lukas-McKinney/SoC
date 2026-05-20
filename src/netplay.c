@@ -215,6 +215,7 @@ static bool gSocketLayerReady = false;
 static bool net_socket_layer_init(void);
 static uint64_t netplay_now_ms(void);
 static bool is_loopback_host(const char *hostAddress);
+static bool is_render_public_hostname(const char *hostAddress);
 static bool parse_relay_endpoint(const char *input,
                                  unsigned short fallbackPort,
                                  char *hostBuffer,
@@ -537,6 +538,22 @@ static bool is_loopback_host(const char *hostAddress)
            strcmp(hostAddress, "::1") == 0;
 }
 
+static bool is_render_public_hostname(const char *hostAddress)
+{
+    static const char renderSuffix[] = ".onrender.com";
+    size_t hostLength = 0u;
+    size_t suffixLength = sizeof(renderSuffix) - 1u;
+
+    if (hostAddress == NULL)
+    {
+        return false;
+    }
+
+    hostLength = strlen(hostAddress);
+    return hostLength > suffixLength &&
+           strcmp(hostAddress + hostLength - suffixLength, renderSuffix) == 0;
+}
+
 static bool parse_relay_endpoint(const char *input,
                                  unsigned short fallbackPort,
                                  char *hostBuffer,
@@ -550,6 +567,7 @@ static bool parse_relay_endpoint(const char *input,
     char *delimiter = NULL;
     char *colon = NULL;
     bool secure = false;
+    bool schemeSpecified = false;
     unsigned short port = fallbackPort;
 
     if (input == NULL || hostBuffer == NULL || hostBufferSize == 0u)
@@ -582,6 +600,7 @@ static bool parse_relay_endpoint(const char *input,
          buffer[3] == '/' &&
          buffer[4] == '/'))
     {
+        schemeSpecified = true;
         memmove(buffer, buffer + 5, strlen(buffer + 5) + 1u);
     }
     else if (((buffer[0] == 'w' || buffer[0] == 'W') &&
@@ -591,6 +610,7 @@ static bool parse_relay_endpoint(const char *input,
               buffer[4] == '/' &&
               buffer[5] == '/'))
     {
+        schemeSpecified = true;
         secure = true;
         memmove(buffer, buffer + 6, strlen(buffer + 6) + 1u);
     }
@@ -602,6 +622,7 @@ static bool parse_relay_endpoint(const char *input,
               buffer[5] == '/' &&
               buffer[6] == '/'))
     {
+        schemeSpecified = true;
         memmove(buffer, buffer + 7, strlen(buffer + 7) + 1u);
     }
     else if (((buffer[0] == 'h' || buffer[0] == 'H') &&
@@ -613,6 +634,7 @@ static bool parse_relay_endpoint(const char *input,
               buffer[6] == '/' &&
               buffer[7] == '/'))
     {
+        schemeSpecified = true;
         secure = true;
         memmove(buffer, buffer + 8, strlen(buffer + 8) + 1u);
     }
@@ -647,6 +669,19 @@ static bool parse_relay_endpoint(const char *input,
     if (buffer[0] == '\0' || strlen(buffer) >= hostBufferSize)
     {
         return false;
+    }
+
+    if (is_render_public_hostname(buffer))
+    {
+        secure = true;
+        if (port == 10000u)
+        {
+            port = 443u;
+        }
+    }
+    else if (!schemeSpecified && port == 443u)
+    {
+        secure = true;
     }
 
     if (secure && port == NETPLAY_DEFAULT_PORT)
@@ -912,7 +947,9 @@ static bool open_relay_transport(struct NetplayState *state,
                              WINHTTP_NO_HEADER_INDEX) ||
         statusCode != 101u)
     {
-        set_last_error(state, "websocket upgrade rejected");
+        char errorText[NETPLAY_MAX_STATUS_TEXT];
+        snprintf(errorText, sizeof(errorText), "websocket upgrade rejected (HTTP %lu)", (unsigned long)statusCode);
+        set_last_error(state, errorText);
         close_relay_transport(state);
         return false;
     }

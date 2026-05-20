@@ -90,8 +90,11 @@ static void process_client_input(struct RelayClient *clients, int index);
 static int find_free_client_slot(const struct RelayClient *clients);
 static bool parse_handshake_line(const char *line, char *roomCode, size_t roomCodeSize, enum RelayRole *role);
 static void normalize_handshake_line(char *line);
+static bool try_read_http_request_path(const char *requestText, char *path, size_t pathSize);
+static const char *find_http_header_value(const char *requestText, const char *headerName);
 static bool parse_websocket_request(const char *requestText, char *roomCode, size_t roomCodeSize, enum RelayRole *role, char *acceptKey, size_t acceptKeySize);
 static bool send_websocket_upgrade_response(RelaySocket socketHandle, const char *acceptKey);
+static bool send_http_text_response(RelaySocket socketHandle, int statusCode, const char *reasonPhrase, const char *body);
 static bool websocket_frame_append(struct RelayClient *clients, int index, const unsigned char *payload, size_t payloadSize);
 static bool websocket_frame_send(RelaySocket socketHandle, unsigned char opcode, const unsigned char *payload, size_t payloadSize);
 static bool websocket_frame_parse(struct RelayClient *clients, int index);
@@ -269,10 +272,109 @@ static bool copy_query_value(const char *path, const char *name, char *buffer, s
     return false;
 }
 
-static bool parse_websocket_request(const char *requestText, char *roomCode, size_t roomCodeSize, enum RelayRole *role, char *acceptKey, size_t acceptKeySize)
+static bool try_read_http_request_path(const char *requestText, char *path, size_t pathSize)
 {
     char requestLine[256];
+    char parsedPath[256];
     const char *lineEnd = NULL;
+
+    if (requestText == NULL || path == NULL || pathSize == 0u)
+    {
+        return false;
+    }
+
+    lineEnd = strstr(requestText, "\r\n");
+    if (lineEnd == NULL || (size_t)(lineEnd - requestText) >= sizeof(requestLine))
+    {
+        return false;
+    }
+
+    memcpy(requestLine, requestText, (size_t)(lineEnd - requestText));
+    requestLine[lineEnd - requestText] = '\0';
+    if (sscanf(requestLine, "GET %255s", parsedPath) != 1)
+    {
+        return false;
+    }
+
+    if (strlen(parsedPath) >= pathSize)
+    {
+        return false;
+    }
+
+    snprintf(path, pathSize, "%s", parsedPath);
+    return true;
+}
+
+static bool header_name_matches(const char *line, size_t lineLength, const char *headerName, size_t headerNameLength)
+{
+    if (line == NULL || headerName == NULL || lineLength <= headerNameLength || line[headerNameLength] != ':')
+    {
+        return false;
+    }
+
+    for (size_t i = 0u; i < headerNameLength; i++)
+    {
+        if (tolower((unsigned char)line[i]) != tolower((unsigned char)headerName[i]))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static const char *find_http_header_value(const char *requestText, const char *headerName)
+{
+    const char *cursor = NULL;
+    size_t headerNameLength = 0u;
+
+    if (requestText == NULL || headerName == NULL)
+    {
+        return NULL;
+    }
+
+    cursor = strstr(requestText, "\r\n");
+    if (cursor == NULL)
+    {
+        return NULL;
+    }
+
+    headerNameLength = strlen(headerName);
+    cursor += 2;
+    while (*cursor != '\0')
+    {
+        const char *lineEnd = strstr(cursor, "\r\n");
+        size_t lineLength = 0u;
+
+        if (lineEnd == NULL)
+        {
+            return NULL;
+        }
+
+        if (lineEnd == cursor)
+        {
+            return NULL;
+        }
+
+        lineLength = (size_t)(lineEnd - cursor);
+        if (header_name_matches(cursor, lineLength, headerName, headerNameLength))
+        {
+            const char *value = cursor + headerNameLength + 1u;
+            while (*value == ' ' || *value == '\t')
+            {
+                value++;
+            }
+            return value;
+        }
+
+        cursor = lineEnd + 2;
+    }
+
+    return NULL;
+}
+
+static bool parse_websocket_request(const char *requestText, char *roomCode, size_t roomCodeSize, enum RelayRole *role, char *acceptKey, size_t acceptKeySize)
+{
     const char *pathStart = NULL;
     const char *pathEnd = NULL;
     char path[128];
@@ -283,20 +385,7 @@ static bool parse_websocket_request(const char *requestText, char *roomCode, siz
         return false;
     }
 
-    lineEnd = strstr(requestText, "\r\n");
-    if (lineEnd == NULL)
-    {
-        return false;
-    }
-
-    if ((size_t)(lineEnd - requestText) >= sizeof(requestLine))
-    {
-        return false;
-    }
-
-    memcpy(requestLine, requestText, (size_t)(lineEnd - requestText));
-    requestLine[lineEnd - requestText] = '\0';
-    if (sscanf(requestLine, "GET %127s", path) != 1)
+    if (!try_read_http_request_path(requestText, path, sizeof(path)))
     {
         return false;
     }
@@ -324,17 +413,12 @@ static bool parse_websocket_request(const char *requestText, char *roomCode, siz
         return false;
     }
 
-    pathStart = strstr(requestText, "Sec-WebSocket-Key:");
+    pathStart = find_http_header_value(requestText, "Sec-WebSocket-Key");
     if (pathStart == NULL)
     {
         return false;
     }
 
-    pathStart += strlen("Sec-WebSocket-Key:");
-    while (*pathStart == ' ' || *pathStart == '\t')
-    {
-        pathStart++;
-    }
     pathEnd = strstr(pathStart, "\r\n");
     if (pathEnd == NULL || pathEnd <= pathStart)
     {
@@ -349,6 +433,36 @@ static bool parse_websocket_request(const char *requestText, char *roomCode, siz
     memcpy(acceptKey, pathStart, (size_t)(pathEnd - pathStart));
     acceptKey[pathEnd - pathStart] = '\0';
     return true;
+}
+
+static bool send_http_text_response(RelaySocket socketHandle, int statusCode, const char *reasonPhrase, const char *body)
+{
+    char response[512];
+    const char *payload = body != NULL ? body : "";
+    int responseLength = 0;
+
+    if (reasonPhrase == NULL)
+    {
+        return false;
+    }
+
+    responseLength = snprintf(response,
+                              sizeof(response),
+                              "HTTP/1.1 %d %s\r\n"
+                              "Content-Type: text/plain; charset=utf-8\r\n"
+                              "Content-Length: %u\r\n"
+                              "Connection: close\r\n\r\n"
+                              "%s",
+                              statusCode,
+                              reasonPhrase,
+                              (unsigned int)strlen(payload),
+                              payload);
+    if (responseLength <= 0 || (size_t)responseLength >= sizeof(response))
+    {
+        return false;
+    }
+
+    return send_all_socket(socketHandle, (const unsigned char *)response, (size_t)responseLength);
 }
 
 static bool send_websocket_upgrade_response(RelaySocket socketHandle, const char *acceptKey)
@@ -845,6 +959,26 @@ static void process_client_input(struct RelayClient *clients, int index)
                     requestText[requestLength] = '\0';
                     if (!parse_websocket_request(requestText, roomCode, sizeof(roomCode), &role, acceptKey, sizeof(acceptKey)))
                     {
+                        char path[128];
+                        const bool havePath = try_read_http_request_path(requestText, path, sizeof(path));
+
+                        fprintf(stderr, "[relay] rejected http request: idx=%d path=%s\n", index, havePath ? path : "(unknown)");
+                        fflush(stderr);
+
+                        if (havePath && (strcmp(path, "/") == 0 || strcmp(path, "/healthz") == 0))
+                        {
+                            (void)send_http_text_response(client->socketHandle,
+                                                          200,
+                                                          "OK",
+                                                          "SoC relay is running. Use WebSocket upgrade requests with room and role query parameters.\n");
+                        }
+                        else
+                        {
+                            (void)send_http_text_response(client->socketHandle,
+                                                          426,
+                                                          "Upgrade Required",
+                                                          "This endpoint expects a WebSocket upgrade request.\n");
+                        }
                         disconnect_client(clients, index, "invalid websocket handshake");
                         return;
                     }
