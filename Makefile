@@ -21,14 +21,12 @@ RULE_TEST_TARGET = rules_test.exe
 CONSOLE_TARGET = soc_console.exe
 RELAY_SERVER_TARGET = soc_relay.exe
 CLEAN_CMD = del /Q $(TARGET) $(RULE_TEST_TARGET) $(CONSOLE_TARGET) $(RELAY_SERVER_TARGET) 2>nul
+ENSURE_RAYLIB = @:
 else
 PKG_CONFIG ?= pkg-config
 RAYLIB_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags raylib 2>/dev/null)
 RAYLIB_LIBS ?= $(shell $(PKG_CONFIG) --libs raylib 2>/dev/null)
-
-ifeq ($(strip $(RAYLIB_LIBS)),)
-$(error raylib was not found via pkg-config. Install raylib and pkg-config, or pass RAYLIB_CFLAGS/RAYLIB_LIBS to make)
-endif
+RAYLIB_MISSING_MESSAGE = raylib was not found via pkg-config. Install raylib and pkg-config, or pass RAYLIB_CFLAGS/RAYLIB_LIBS to make
 
 CFLAGS = $(COMMON_CFLAGS) $(RAYLIB_CFLAGS)
 GAME_LDFLAGS = $(RAYLIB_LIBS)
@@ -40,6 +38,12 @@ RULE_TEST_TARGET = rules_test
 CONSOLE_TARGET = soc_console
 RELAY_SERVER_TARGET = soc_relay
 CLEAN_CMD = rm -f $(TARGET) $(RULE_TEST_TARGET) $(CONSOLE_TARGET) $(RELAY_SERVER_TARGET)
+
+ifeq ($(strip $(RAYLIB_LIBS)),)
+ENSURE_RAYLIB = @echo "$(RAYLIB_MISSING_MESSAGE)" >&2; exit 1
+else
+ENSURE_RAYLIB = @:
+endif
 endif
 
 all: $(TARGET)
@@ -57,12 +61,15 @@ package-macos: $(TARGET)
 	bash scripts/package_macos.sh
 
 $(TARGET): $(GAME_SRC)
+	$(ENSURE_RAYLIB)
 	$(CC) $(CFLAGS) $(GAME_SRC) $(GAME_LDFLAGS) -o $(TARGET)
 
 $(RULE_TEST_TARGET): $(RULE_TEST_SRC)
+	$(ENSURE_RAYLIB)
 	$(CC) $(CFLAGS) $(RULE_TEST_SRC) $(RULE_TEST_LDFLAGS) -o $(RULE_TEST_TARGET)
 
 $(CONSOLE_TARGET): $(CONSOLE_SRC)
+	$(ENSURE_RAYLIB)
 	$(CC) $(CFLAGS) $(CONSOLE_SRC) $(RULE_TEST_LDFLAGS) -o $(CONSOLE_TARGET)
 
 $(RELAY_SERVER_TARGET): $(RELAY_SERVER_SRC)

@@ -234,6 +234,8 @@ Use these settings:
 - Build command: `make relay-server`
 - Start command: `./soc_relay`
 
+If you deploy Render as a Docker service instead, Render will build the repository `Dockerfile` and you should not also configure separate build/start commands for the relay.
+
 Render will provide a `PORT` environment variable automatically, and the relay server uses it when present.
 
 The Render endpoint is exposed over `wss://`, so the game client should use the relay mode against the Render hostname on port `443`.

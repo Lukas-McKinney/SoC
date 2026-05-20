@@ -5,9 +5,12 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+COPY Makefile ./Makefile
+COPY inc/websocket.h ./inc/websocket.h
 COPY src/relay_server.c ./src/relay_server.c
+COPY src/websocket.c ./src/websocket.c
 
-RUN gcc -O2 -Wall -Wextra -o /app/soc_relay /app/src/relay_server.c
+RUN make relay-server
 
 FROM debian:bookworm-slim
 
