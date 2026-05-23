@@ -103,11 +103,9 @@ void DrawBuildPanel(const struct Map *map)
     const Color borderColor = UiPanelBorderColor();
     const Color textColor = UiTextColor();
     const Color mutedText = UiMutedTextColor();
-    const float cardWidth = UiScaled(175.0f);
-    const float cardHeight = UiScaled(60.0f);
-    const Rectangle roadCard = {panelX + UiScaled(10.0f), panelY + UiScaled(50.0f), cardWidth, cardHeight};
-    const Rectangle settlementCard = {panelX + UiScaled(196.0f), panelY + UiScaled(50.0f), cardWidth, cardHeight};
-    const Rectangle cityCard = {panelX + UiScaled(10.0f), panelY + UiScaled(112.0f), cardWidth, cardHeight};
+    const Rectangle roadCard = GetBuildPanelRoadCardBounds();
+    const Rectangle settlementCard = GetBuildPanelSettlementCardBounds();
+    const Rectangle cityCard = GetBuildPanelCityCardBounds();
     const Rectangle devCard = GetBuildPanelDevelopmentCardBounds();
     const Color activeCard = UiPanelHighlightColor();
     const Color armedAccent = (Color){171, 82, 54, 255};
