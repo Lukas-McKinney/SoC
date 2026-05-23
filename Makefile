@@ -12,10 +12,10 @@ ifeq ($(OS),Windows_NT)
 RAYLIB_INCLUDE ?= C:/raylib/w64devkit/x86_64-w64-mingw32/include
 RAYLIB_LIB ?= C:/raylib/w64devkit/x86_64-w64-mingw32/lib
 
-CFLAGS = $(COMMON_CFLAGS) -Wno-expansion-to-defined -isystem $(RAYLIB_INCLUDE)
-GAME_LDFLAGS = -L$(RAYLIB_LIB) -lraylib -lopengl32 -lgdi32 -lwinmm -lws2_32 -lwinhttp
+CFLAGS = $(COMMON_CFLAGS) -Wno-expansion-to-defined -isystem $(RAYLIB_INCLUDE) -pthread
+GAME_LDFLAGS = -L$(RAYLIB_LIB) -lraylib -lopengl32 -lgdi32 -lwinmm -lws2_32 -lwinhttp -pthread
 RULE_TEST_LDFLAGS = $(GAME_LDFLAGS) -lm
-RELAY_SERVER_CFLAGS = $(COMMON_CFLAGS) -Wno-expansion-to-defined -isystem $(RAYLIB_INCLUDE)
+RELAY_SERVER_CFLAGS = $(COMMON_CFLAGS) -Wno-expansion-to-defined -isystem $(RAYLIB_INCLUDE) -pthread
 RELAY_SERVER_LDFLAGS = -lws2_32
 TARGET = settlers.exe
 RULE_TEST_TARGET = rules_test.exe
@@ -30,8 +30,8 @@ RAYLIB_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags raylib 2>/dev/null)
 RAYLIB_LIBS ?= $(shell $(PKG_CONFIG) --libs raylib 2>/dev/null)
 RAYLIB_MISSING_MESSAGE = raylib was not found via pkg-config. Install raylib and pkg-config, or pass RAYLIB_CFLAGS/RAYLIB_LIBS to make
 
-CFLAGS = $(COMMON_CFLAGS) $(RAYLIB_CFLAGS)
-GAME_LDFLAGS = $(RAYLIB_LIBS)
+CFLAGS = $(COMMON_CFLAGS) $(RAYLIB_CFLAGS) -pthread
+GAME_LDFLAGS = $(RAYLIB_LIBS) -pthread
 RULE_TEST_LDFLAGS = $(GAME_LDFLAGS) -lm
 RELAY_SERVER_CFLAGS = $(COMMON_CFLAGS)
 RELAY_SERVER_LDFLAGS =
