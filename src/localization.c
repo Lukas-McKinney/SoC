@@ -490,37 +490,75 @@ const char *locPortResourceShort(enum ResourceType resource)
 
 const char *locDevelopmentCardTitle(enum DevelopmentCardType type)
 {
+    if (gCurrentLanguage == UI_LANGUAGE_GERMAN)
+    {
+        switch (type)
+        {
+        case DEVELOPMENT_CARD_KNIGHT:
+            return "Ritter";
+        case DEVELOPMENT_CARD_VICTORY_POINT:
+            return "Siegpunkt";
+        case DEVELOPMENT_CARD_ROAD_BUILDING:
+            return "Strassenbau";
+        case DEVELOPMENT_CARD_YEAR_OF_PLENTY:
+            return "Erfindung";
+        case DEVELOPMENT_CARD_MONOPOLY:
+            return "Monopol";
+        default:
+            return "Entwicklungskarte";
+        }
+    }
+
     switch (type)
     {
     case DEVELOPMENT_CARD_KNIGHT:
-        return loc("Knight");
+        return "Knight";
     case DEVELOPMENT_CARD_VICTORY_POINT:
-        return loc("Victory Point");
+        return "Victory Point";
     case DEVELOPMENT_CARD_ROAD_BUILDING:
-        return loc("Road Building");
+        return "Road Building";
     case DEVELOPMENT_CARD_YEAR_OF_PLENTY:
-        return loc("Year of Plenty");
+        return "Year of Plenty";
     case DEVELOPMENT_CARD_MONOPOLY:
-        return loc("Monopoly");
+        return "Monopoly";
     default:
-        return loc("Development");
+        return "Development";
     }
 }
 
 const char *locDevelopmentCardDescription(enum DevelopmentCardType type)
 {
+    if (gCurrentLanguage == UI_LANGUAGE_GERMAN)
+    {
+        switch (type)
+        {
+        case DEVELOPMENT_CARD_KNIGHT:
+            return "Bewege den\nRaeuber und stiehl\neine Karte.";
+        case DEVELOPMENT_CARD_VICTORY_POINT:
+            return "Wert 1\nversteckter\nSiegpunkt.";
+        case DEVELOPMENT_CARD_ROAD_BUILDING:
+            return "Baue 2 Strassen\nkostenlos.";
+        case DEVELOPMENT_CARD_YEAR_OF_PLENTY:
+            return "Nimm beliebige\n2 Rohstoffe\naus der Bank.";
+        case DEVELOPMENT_CARD_MONOPOLY:
+            return "Waehle 1 Rohstoff.\nAlle Gegner geben\ndir diesen.";
+        default:
+            return "";
+        }
+    }
+
     switch (type)
     {
     case DEVELOPMENT_CARD_KNIGHT:
-        return loc("Move the thief\nand steal\n1 random card.");
+        return "Move the thief\nand steal\n1 random card.";
     case DEVELOPMENT_CARD_VICTORY_POINT:
-        return loc("Worth 1 hidden\nvictory point\nat the end.");
+        return "Worth 1 hidden\nvictory point\nat the end.";
     case DEVELOPMENT_CARD_ROAD_BUILDING:
-        return loc("Place 2 roads\nfor free.");
+        return "Place 2 roads\nfor free.";
     case DEVELOPMENT_CARD_YEAR_OF_PLENTY:
-        return loc("Take any\n2 resources\nfrom the bank.");
+        return "Take any\n2 resources\nfrom the bank.";
     case DEVELOPMENT_CARD_MONOPOLY:
-        return loc("Choose 1 resource.\nAll opponents give\nyou that type.");
+        return "Choose 1 resource.\nAll opponents give\nyou that type.";
     default:
         return "";
     }
