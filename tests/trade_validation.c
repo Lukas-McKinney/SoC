@@ -1,5 +1,6 @@
 #include "game_action.h"
 #include "game_logic.h"
+#include "map_snapshot.h"
 #include "match_session.h"
 #include "netplay.h"
 
@@ -11,6 +12,7 @@ static int gFailureCount = 0;
 static int gTestCount = 0;
 
 static bool test_declining_pending_trade_does_not_transfer_resources(void);
+static bool test_authoritative_snapshot_restores_local_discard_control_after_rejoin(void);
 
 #define ASSERT_TRUE(expr)                                                                                              \
     do                                                                                                                 \
@@ -44,6 +46,7 @@ int main(void)
         bool (*fn)(void);
     } tests[] = {
         {"declining a pending trade leaves resources unchanged", test_declining_pending_trade_does_not_transfer_resources},
+        {"authoritative snapshot restores local discard control after rejoin", test_authoritative_snapshot_restores_local_discard_control_after_rejoin},
     };
 
     for (int i = 0; i < (int)(sizeof(tests) / sizeof(tests[0])); i++)
@@ -98,5 +101,33 @@ static bool test_declining_pending_trade_does_not_transfer_resources(void)
 
     netplayDestroy(session.netplay);
     session.netplay = NULL;
+    return true;
+}
+
+static bool test_authoritative_snapshot_restores_local_discard_control_after_rejoin(void)
+{
+    struct MatchSession session;
+    struct Map authoritativeMap;
+    unsigned char snapshot[NETPLAY_MAX_PAYLOAD_SIZE];
+    size_t snapshotSize = 0u;
+
+    matchSessionInit(&session);
+    matchSessionConfigurePrivateClient(&session, PLAYER_BLUE);
+
+    ASSERT_TRUE(setupMap(&authoritativeMap));
+    authoritativeMap.phase = GAME_PHASE_PLAY;
+    authoritativeMap.currentPlayer = PLAYER_RED;
+    authoritativeMap.rolledThisTurn = true;
+    authoritativeMap.players[PLAYER_BLUE].resources[RESOURCE_WOOD] = 1;
+    authoritativeMap.players[PLAYER_BLUE].resources[RESOURCE_WHEAT] = 1;
+    authoritativeMap.discardRemaining[PLAYER_BLUE] = 2;
+
+    snapshotSize = mapSerializeSnapshot(&authoritativeMap, snapshot, sizeof(snapshot));
+    ASSERT_EQ_INT((int)mapSnapshotSerializedSize(), (int)snapshotSize);
+    ASSERT_TRUE(matchSessionApplyAuthoritativeSnapshot(&session, snapshot, snapshotSize));
+    ASSERT_TRUE(matchSessionHasStarted(&session));
+    ASSERT_EQ_INT(PLAYER_BLUE, gameGetCurrentDiscardPlayer(&session.map));
+    ASSERT_TRUE(matchSessionLocalControlsPlayer(&session, PLAYER_BLUE));
+    ASSERT_TRUE(matchSessionLocalCanActOnCurrentDecision(&session));
     return true;
 }

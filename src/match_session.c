@@ -67,6 +67,7 @@ static enum PlayerType assign_remote_player_to_peer(struct MatchSession *session
 static bool send_hello_to_peer(struct MatchSession *session, int peerId, enum PlayerType assignedPlayer);
 static bool send_lobby_state_to_peer(struct MatchSession *session, int peerId);
 static bool broadcast_lobby_state(struct MatchSession *session);
+static void sync_state_to_connected_peer(struct MatchSession *session, int peerId, enum PlayerType assignedPlayer);
 
 static void configure_relay_settings(struct MatchSession *session,
                                      const char *relayServerAddress,
@@ -468,6 +469,22 @@ static bool send_lobby_state_to_peer(struct MatchSession *session, int peerId)
 static bool broadcast_lobby_state(struct MatchSession *session)
 {
     return send_lobby_state_to_peer(session, -1);
+}
+
+static void sync_state_to_connected_peer(struct MatchSession *session, int peerId, enum PlayerType assignedPlayer)
+{
+    if (session == NULL || session->netplay == NULL)
+    {
+        return;
+    }
+
+    send_hello_to_peer(session, peerId, assignedPlayer);
+    queue_local_capabilities(session);
+    broadcast_lobby_state(session);
+    if (session->matchStarted)
+    {
+        broadcast_host_snapshot(session);
+    }
 }
 
 static bool send_match_init(struct MatchSession *session)
@@ -1441,6 +1458,28 @@ bool matchSessionLocalCanActOnCurrentDecision(const struct MatchSession *session
     return matchSessionLocalControlsPlayer(session, active_decision_player(session));
 }
 
+bool matchSessionApplyAuthoritativeSnapshot(struct MatchSession *session,
+                                            const unsigned char *payload,
+                                            size_t payloadSize)
+{
+    if (session == NULL || payload == NULL || !mapDeserializeSnapshot(&session->map, payload, payloadSize))
+    {
+        return false;
+    }
+
+    session->ready = true;
+    session->matchStarted = true;
+    session->awaitingAuthoritativeUpdate = false;
+    session->initialSnapshotReceived = true;
+    session->connectionStatus = MATCH_CONNECTION_CONNECTED;
+    reset_reconnect_state(session);
+    clear_connection_error(session);
+    matchSessionRefreshStateHash(session);
+    reset_client_transient_ui();
+    debugLog("NET", "snapshot applied (size=%zu, hash=%u)", payloadSize, session->stateHash);
+    return true;
+}
+
 static bool apply_authoritative_action_to_client_map(struct MatchSession *session,
                                                      const struct GameAction *action,
                                                      const struct GameActionResult *result)
@@ -1800,7 +1839,6 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
 
             session->connectionStatus = MATCH_CONNECTION_CONNECTED;
             session->ready = true;
-            session->matchStarted = false;
             clear_connection_error(session);
             debugLog("NET",
                      "remote client connected (peer=%d local=%d remote=%d)",
@@ -1808,12 +1846,7 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
                      (int)session->localPlayer,
                      (int)remotePlayer);
             uiShowCenteredStatus(loc("Remote player connected."), UI_NOTIFICATION_POSITIVE);
-            if (session->netplay != NULL)
-            {
-                send_hello_to_peer(session, peerId, remotePlayer);
-                queue_local_capabilities(session);
-                broadcast_lobby_state(session);
-            }
+            sync_state_to_connected_peer(session, peerId, remotePlayer);
         }
         break;
 
@@ -1833,9 +1866,7 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
             }
 
             uiShowCenteredStatus(loc("Remote player connected."), UI_NOTIFICATION_POSITIVE);
-            send_hello_to_peer(session, event->peerId, remotePlayer);
-            queue_local_capabilities(session);
-            broadcast_lobby_state(session);
+            sync_state_to_connected_peer(session, event->peerId, remotePlayer);
         }
         break;
 
@@ -1846,16 +1877,13 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
 
             session->connectionStatus = MATCH_CONNECTION_CONNECTED;
             session->ready = true;
-            session->matchStarted = false;
             clear_connection_error(session);
             debugLog("NET",
                      "relay host connected (local=%d remote=%d)",
                      (int)session->localPlayer,
                      (int)remotePlayer);
             uiShowCenteredStatus(loc("Remote player connected."), UI_NOTIFICATION_POSITIVE);
-            send_hello_to_peer(session, 0, remotePlayer);
-            queue_local_capabilities(session);
-            broadcast_lobby_state(session);
+            sync_state_to_connected_peer(session, 0, remotePlayer);
         }
         else
         {
@@ -1870,7 +1898,6 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
 
     case NETPLAY_EVENT_DISCONNECTED:
         session->ready = false;
-        session->matchStarted = false;
         session->pendingUiResetForMatchInit = false;
         session->awaitingAuthoritativeUpdate = false;
         clear_pending_trade_offer(session);
@@ -1955,7 +1982,6 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
         session->connectionStatus = MATCH_CONNECTION_SYNCING;
         reset_reconnect_state(session);
         session->ready = false;
-        session->matchStarted = false;
         session->awaitingAuthoritativeUpdate = false;
         clear_connection_error(session);
         reset_client_transient_ui();
@@ -1977,7 +2003,6 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
     case NETPLAY_EVENT_LOBBY_STATE:
         apply_lobby_state_info(session, &event->lobbyState);
         session->ready = true;
-        session->matchStarted = false;
         session->pendingUiResetForMatchInit = false;
         session->awaitingAuthoritativeUpdate = false;
         session->connectionStatus = MATCH_CONNECTION_CONNECTED;
@@ -2006,17 +2031,8 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
         break;
 
     case NETPLAY_EVENT_SNAPSHOT:
-        if (mapDeserializeSnapshot(&session->map, event->payload, event->payloadSize))
+        if (matchSessionApplyAuthoritativeSnapshot(session, event->payload, event->payloadSize))
         {
-            session->ready = true;
-            session->awaitingAuthoritativeUpdate = false;
-            session->initialSnapshotReceived = true;
-            session->connectionStatus = MATCH_CONNECTION_CONNECTED;
-            reset_reconnect_state(session);
-            clear_connection_error(session);
-            matchSessionRefreshStateHash(session);
-            reset_client_transient_ui();
-            debugLog("NET", "snapshot applied (size=%zu, hash=%u)", event->payloadSize, session->stateHash);
         }
         else
         {

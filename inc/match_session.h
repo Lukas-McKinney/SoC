@@ -5,6 +5,7 @@
 #include "map.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #define MATCH_SESSION_MAX_RELAY_ROOM_CODE 31
@@ -111,6 +112,9 @@ bool matchSessionSubmitAction(struct MatchSession *session,
                               const struct GameAction *action,
                               const struct GameActionContext *context,
                               struct GameActionResult *result);
+bool matchSessionApplyAuthoritativeSnapshot(struct MatchSession *session,
+                                            const unsigned char *payload,
+                                            size_t payloadSize);
 bool matchSessionBroadcastState(struct MatchSession *session);
 bool matchSessionHasPendingTradeOfferForLocalResponse(const struct MatchSession *session);
 bool matchSessionGetPendingTradeOffer(const struct MatchSession *session, struct GameAction *offerAction);
