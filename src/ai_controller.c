@@ -604,13 +604,13 @@ static double ai_search_time_budget(enum AiDifficulty difficulty)
     switch (difficulty)
     {
     case AI_DIFFICULTY_HARD:
-        /* give Hard AI substantially more planning time for deeper lookahead and better move selection */
-        return 4.000;
+        /* Keep single-frame planning short enough that local UI stays responsive during AI turns. */
+        return 0.250;
     case AI_DIFFICULTY_MEDIUM:
-        return 0.400;
+        return 0.140;
     case AI_DIFFICULTY_EASY:
     default:
-        return 0.080;
+        return 0.060;
     }
 }
 
@@ -2654,6 +2654,7 @@ static bool choose_best_setup_road_action(const struct Map *map, enum PlayerType
 static bool choose_best_thief_move_action(const struct Map *map, enum AiDifficulty difficulty, struct AiAction *action)
 {
     struct AiSearchState state;
+    bool found = false;
 
     if (map == NULL || action == NULL || !gameNeedsThiefPlacement(map))
     {
@@ -2662,13 +2663,17 @@ static bool choose_best_thief_move_action(const struct Map *map, enum AiDifficul
 
     state.buildActionsRemaining = max_int(ai_build_action_budget(difficulty) - gAiBuildActionsThisTurn, 0);
     state.maritimeTradesRemaining = max_int(ai_maritime_trade_budget(difficulty) - gAiMaritimeTradesThisTurn, 0);
+    ai_begin_play_phase_search(difficulty);
     search_thief_move_score(map, map->currentPlayer, difficulty, state, action);
-    return action->type == AI_ACTION_MOVE_THIEF;
+    found = action->type == AI_ACTION_MOVE_THIEF;
+    ai_end_play_phase_search();
+    return found;
 }
 
 static bool choose_best_thief_victim_action(const struct Map *map, enum AiDifficulty difficulty, struct AiAction *action)
 {
     struct AiSearchState state;
+    bool found = false;
 
     if (map == NULL || action == NULL || !gameNeedsThiefVictimSelection(map))
     {
@@ -2677,13 +2682,17 @@ static bool choose_best_thief_victim_action(const struct Map *map, enum AiDiffic
 
     state.buildActionsRemaining = max_int(ai_build_action_budget(difficulty) - gAiBuildActionsThisTurn, 0);
     state.maritimeTradesRemaining = max_int(ai_maritime_trade_budget(difficulty) - gAiMaritimeTradesThisTurn, 0);
+    ai_begin_play_phase_search(difficulty);
     search_thief_victim_score(map, map->currentPlayer, difficulty, state, action);
-    return action->type == AI_ACTION_CHOOSE_THIEF_VICTIM;
+    found = action->type == AI_ACTION_CHOOSE_THIEF_VICTIM;
+    ai_end_play_phase_search();
+    return found;
 }
 
 static bool choose_best_free_road_action(const struct Map *map, enum AiDifficulty difficulty, struct AiAction *action)
 {
     struct AiSearchState state;
+    bool found = false;
 
     if (map == NULL || action == NULL || !gameHasFreeRoadPlacements(map))
     {
@@ -2692,6 +2701,9 @@ static bool choose_best_free_road_action(const struct Map *map, enum AiDifficult
 
     state.buildActionsRemaining = max_int(ai_build_action_budget(difficulty) - gAiBuildActionsThisTurn, 0);
     state.maritimeTradesRemaining = max_int(ai_maritime_trade_budget(difficulty) - gAiMaritimeTradesThisTurn, 0);
+    ai_begin_play_phase_search(difficulty);
     search_free_road_score(map, map->currentPlayer, difficulty, state, action);
-    return action->type == AI_ACTION_BUILD_ROAD;
+    found = action->type == AI_ACTION_BUILD_ROAD;
+    ai_end_play_phase_search();
+    return found;
 }
