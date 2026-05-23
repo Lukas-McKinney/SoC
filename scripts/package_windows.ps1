@@ -52,10 +52,44 @@ function Is-SystemDll {
         "kernel32.dll", "user32.dll", "gdi32.dll", "winmm.dll", "ws2_32.dll", "shell32.dll", "msvcrt.dll",
         "advapi32.dll", "ole32.dll", "oleaut32.dll", "comdlg32.dll", "comctl32.dll", "rpcrt4.dll", "imm32.dll",
         "version.dll", "setupapi.dll", "crypt32.dll", "winspool.drv", "uxtheme.dll", "dwmapi.dll", "shlwapi.dll",
-        "secur32.dll", "ntdll.dll"
+        "secur32.dll", "ntdll.dll", "kernelbase.dll", "winhttp.dll", "bcrypt.dll", "normaliz.dll"
     )
 
     return $systemDlls -contains ($DllName.ToLowerInvariant())
+}
+
+function Is-ApiSetDll {
+    param([string]$DllName)
+
+    if ([string]::IsNullOrWhiteSpace($DllName)) {
+        return $false
+    }
+
+    return $DllName.ToLowerInvariant() -match "^(api-ms-win|ext-ms-win)-.*\.dll$"
+}
+
+function Is-SystemDllPath {
+    param([string]$DllPath)
+
+    if ([string]::IsNullOrWhiteSpace($DllPath)) {
+        return $false
+    }
+
+    $resolvedPath = [System.IO.Path]::GetFullPath($DllPath).ToLowerInvariant()
+    $windowsDir = [System.Environment]::GetFolderPath("Windows").ToLowerInvariant()
+    $systemDirs = @(
+        (Join-Path $windowsDir "system32").ToLowerInvariant(),
+        (Join-Path $windowsDir "syswow64").ToLowerInvariant(),
+        (Join-Path $windowsDir "sysnative").ToLowerInvariant()
+    )
+
+    foreach ($dir in $systemDirs) {
+        if ($resolvedPath.StartsWith($dir + [System.IO.Path]::DirectorySeparatorChar) -or $resolvedPath -eq $dir) {
+            return $true
+        }
+    }
+
+    return $false
 }
 
 $packageName = "SoC-$Version-windows-x64"
@@ -100,7 +134,7 @@ if (Get-Command objdump -ErrorAction SilentlyContinue) {
 
         $imports = Get-ImportedDllNames -FilePath $current
         foreach ($dllName in $imports) {
-            if (Is-SystemDll $dllName) {
+            if ((Is-SystemDll $dllName) -or (Is-ApiSetDll $dllName)) {
                 continue
             }
 
@@ -117,6 +151,10 @@ if (Get-Command objdump -ErrorAction SilentlyContinue) {
             $resolvedDll = Resolve-DllPath -DllName $dllName -Hints $hints
             if (-not $resolvedDll) {
                 throw "Binary imports $dllName but it was not found. Pass -RaylibDllPath or ensure required DLLs are in PATH."
+            }
+
+            if (Is-SystemDllPath $resolvedDll) {
+                continue
             }
 
             $resolvedKey = $resolvedDll.ToLowerInvariant()
