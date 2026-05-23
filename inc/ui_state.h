@@ -108,6 +108,7 @@ unsigned long long uiGetTotalLosses(void);
 void uiStartDiceRollAnimation(void);
 void uiStartObservedDiceRollAnimation(int total);
 bool uiIsDiceRolling(void);
+bool uiIsDiceRevealBlockingAi(void);
 int uiGetDisplayedDieA(void);
 int uiGetDisplayedDieB(void);
 void uiStartDevelopmentCardDrawAnimation(enum DevelopmentCardType type);

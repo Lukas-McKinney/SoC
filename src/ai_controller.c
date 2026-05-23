@@ -112,11 +112,17 @@ static int min_int(int a, int b);
 static int max_int(int a, int b);
 static int resource_total_for_player(const struct Map *map, enum PlayerType player);
 static bool can_afford_cost(const int resources[5], const int cost[5]);
+static bool player_can_afford_cost(const struct Map *map, enum PlayerType player, const int cost[5]);
 static float cost_progress_score(const int resources[5], const int cost[5], float readyBonus, float coveredWeight, float missingPenalty);
 static float evaluate_hand_value(const struct Map *map, enum PlayerType player, const int resources[5], enum AiDifficulty difficulty);
 static int dice_weight(int number);
 static enum ResourceType tile_resource_type(enum TileType type);
 static float resource_weight(enum ResourceType resource, enum AiDifficulty difficulty);
+static bool edge_keys_match(int ax1, int ay1, int bx1, int by1, int ax2, int ay2, int bx2, int by2);
+static void accumulate_corner_resource_profile(const struct Map *map, int tileId, int cornerIndex, float production[5], int coverage[5], int *desertTouches);
+static void accumulate_player_setup_profile(const struct Map *map, enum PlayerType player, float production[5], int coverage[5], int *ownedStructures, int *desertTouches);
+static float setup_resource_priority(enum ResourceType resource, enum AiDifficulty difficulty);
+static float evaluate_setup_player_strength(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty);
 static bool find_corner_key(int tileId, int cornerIndex, int *x, int *y);
 static float evaluate_corner_value(const struct Map *map, int tileId, int cornerIndex, enum AiDifficulty difficulty);
 static bool shared_corner_occupied(const struct Map *map, int tileId, int cornerIndex);
@@ -704,6 +710,7 @@ static bool ai_is_blocked_by_ui(void)
            uiIsBoardCreationAnimating() ||
            uiGetBoardUiFadeProgress() < 1.0f ||
            uiIsDiceRolling() ||
+           uiIsDiceRevealBlockingAi() ||
            uiIsDevelopmentCardDrawAnimating() ||
            uiIsDevelopmentPurchaseConfirmOpen() ||
            uiIsDevelopmentPlayConfirmOpen();
@@ -814,6 +821,16 @@ static bool can_afford_cost(const int resources[5], const int cost[5])
     }
 
     return true;
+}
+
+static bool player_can_afford_cost(const struct Map *map, enum PlayerType player, const int cost[5])
+{
+    if (map == NULL || player < PLAYER_RED || player > PLAYER_BLACK)
+    {
+        return false;
+    }
+
+    return can_afford_cost(map->players[player].resources, cost);
 }
 
 static float cost_progress_score(const int resources[5], const int cost[5], float readyBonus, float coveredWeight, float missingPenalty)
@@ -949,6 +966,253 @@ static float resource_weight(enum ResourceType resource, enum AiDifficulty diffi
     default:
         return 1.0f;
     }
+}
+
+static bool edge_keys_match(int ax1, int ay1, int bx1, int by1, int ax2, int ay2, int bx2, int by2)
+{
+    return ax1 == ax2 && ay1 == ay2 && bx1 == bx2 && by1 == by2;
+}
+
+static void accumulate_corner_resource_profile(const struct Map *map, int tileId, int cornerIndex, float production[5], int coverage[5], int *desertTouches)
+{
+    int tx = 0;
+    int ty = 0;
+    Vector2 origin;
+
+    if (map == NULL || production == NULL || coverage == NULL || !find_corner_key(tileId, cornerIndex, &tx, &ty))
+    {
+        return;
+    }
+
+    origin = (Vector2){(float)GetScreenWidth() * BOARD_ORIGIN_X_FACTOR, (float)GetScreenHeight() * BOARD_ORIGIN_Y_FACTOR};
+    for (int otherTile = 0; otherTile < LAND_TILE_COUNT; otherTile++)
+    {
+        Vector2 center = AxialToWorld(kLandCoords[otherTile], origin, BOARD_HEX_RADIUS);
+        for (int otherCorner = 0; otherCorner < HEX_CORNERS; otherCorner++)
+        {
+            int ox = 0;
+            int oy = 0;
+            RendererGetCornerKey(center, BOARD_HEX_RADIUS, otherCorner, &ox, &oy);
+            if (ox != tx || oy != ty)
+            {
+                continue;
+            }
+
+            if (map->tiles[otherTile].type == TILE_DESERT)
+            {
+                if (desertTouches != NULL)
+                {
+                    (*desertTouches)++;
+                }
+                break;
+            }
+
+            {
+                const enum ResourceType resource = tile_resource_type(map->tiles[otherTile].type);
+                production[resource] += (float)dice_weight(map->tiles[otherTile].diceNumber);
+                coverage[resource] = 1;
+            }
+            break;
+        }
+    }
+}
+
+static void accumulate_player_setup_profile(const struct Map *map, enum PlayerType player, float production[5], int coverage[5], int *ownedStructures, int *desertTouches)
+{
+    if (map == NULL || production == NULL || coverage == NULL)
+    {
+        return;
+    }
+
+    for (int tileId = 0; tileId < LAND_TILE_COUNT; tileId++)
+    {
+        for (int cornerIndex = 0; cornerIndex < HEX_CORNERS; cornerIndex++)
+        {
+            const struct Corner *corner = &map->tiles[tileId].corners[cornerIndex];
+            float cornerProduction[5] = {0};
+            int cornerCoverage[5] = {0};
+            int cornerDesertTouches = 0;
+            float multiplier = 1.0f;
+
+            if (!IsCanonicalSharedCorner(tileId, cornerIndex) ||
+                corner->owner != player ||
+                corner->structure == STRUCTURE_NONE)
+            {
+                continue;
+            }
+
+            accumulate_corner_resource_profile(map, tileId, cornerIndex, cornerProduction, cornerCoverage, &cornerDesertTouches);
+            multiplier = corner->structure == STRUCTURE_CITY ? 2.0f : 1.0f;
+            for (int resource = RESOURCE_WOOD; resource <= RESOURCE_STONE; resource++)
+            {
+                if (cornerCoverage[resource] != 0)
+                {
+                    coverage[resource] = 1;
+                    production[resource] += cornerProduction[resource] * multiplier;
+                }
+            }
+
+            if (desertTouches != NULL)
+            {
+                *desertTouches += cornerDesertTouches;
+            }
+            if (ownedStructures != NULL)
+            {
+                (*ownedStructures)++;
+            }
+        }
+    }
+}
+
+static float setup_resource_priority(enum ResourceType resource, enum AiDifficulty difficulty)
+{
+    if (difficulty == AI_DIFFICULTY_HARD)
+    {
+        switch (resource)
+        {
+        case RESOURCE_WHEAT:
+            return 1.36f;
+        case RESOURCE_STONE:
+            return 1.22f;
+        case RESOURCE_WOOD:
+            return 1.18f;
+        case RESOURCE_CLAY:
+            return 1.15f;
+        case RESOURCE_SHEEP:
+        default:
+            return 0.96f;
+        }
+    }
+
+    if (difficulty == AI_DIFFICULTY_MEDIUM)
+    {
+        switch (resource)
+        {
+        case RESOURCE_WHEAT:
+            return 1.22f;
+        case RESOURCE_STONE:
+            return 1.12f;
+        case RESOURCE_WOOD:
+        case RESOURCE_CLAY:
+            return 1.08f;
+        case RESOURCE_SHEEP:
+        default:
+            return 0.98f;
+        }
+    }
+
+    return 1.0f;
+}
+
+static float evaluate_setup_player_strength(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty)
+{
+    float production[5] = {0};
+    int coverage[5] = {0};
+    int ownedStructures = 0;
+    int desertTouches = 0;
+    int uniqueResources = 0;
+    float score = 0.0f;
+
+    if (map == NULL || player < PLAYER_RED || player > PLAYER_BLACK)
+    {
+        return -AI_SEARCH_WIN_SCORE;
+    }
+
+    accumulate_player_setup_profile(map, player, production, coverage, &ownedStructures, &desertTouches);
+    score += evaluate_hand_value(map, player, map->players[player].resources, difficulty) * 3.2f;
+
+    for (int resource = RESOURCE_WOOD; resource <= RESOURCE_STONE; resource++)
+    {
+        const float amount = production[resource];
+        if (coverage[resource] == 0)
+        {
+            continue;
+        }
+
+        uniqueResources++;
+        score += amount * setup_resource_priority((enum ResourceType)resource, difficulty) * 2.35f;
+        switch ((enum ResourceType)resource)
+        {
+        case RESOURCE_WOOD:
+            score += 6.0f;
+            break;
+        case RESOURCE_WHEAT:
+            score += 7.5f;
+            break;
+        case RESOURCE_CLAY:
+            score += 6.0f;
+            break;
+        case RESOURCE_SHEEP:
+            score += 4.0f;
+            break;
+        case RESOURCE_STONE:
+            score += 5.0f;
+            break;
+        default:
+            break;
+        }
+
+        if (amount >= 8.0f)
+        {
+            score += 2.0f;
+        }
+    }
+
+    score += (float)uniqueResources * 2.4f;
+    score += min_int((int)(production[RESOURCE_WOOD] * 10.0f), (int)(production[RESOURCE_CLAY] * 10.0f)) * 0.14f;
+    score += min_int((int)(production[RESOURCE_WHEAT] * 10.0f), (int)(production[RESOURCE_STONE] * 10.0f)) * 0.15f;
+    score += min_int((int)(production[RESOURCE_WHEAT] * 10.0f), (int)(production[RESOURCE_SHEEP] * 10.0f)) * 0.09f;
+    score -= (float)desertTouches * 1.9f;
+
+    if (ownedStructures >= 2)
+    {
+        if (coverage[RESOURCE_WOOD] == 0)
+        {
+            score -= 20.0f;
+        }
+        if (coverage[RESOURCE_CLAY] == 0)
+        {
+            score -= 20.0f;
+        }
+        if (coverage[RESOURCE_WHEAT] == 0)
+        {
+            score -= 22.0f;
+        }
+        if (coverage[RESOURCE_SHEEP] == 0)
+        {
+            score -= 12.0f;
+        }
+        if (coverage[RESOURCE_STONE] == 0)
+        {
+            score -= 9.0f;
+        }
+        if (uniqueResources >= 4)
+        {
+            score += 9.0f;
+        }
+        if (uniqueResources == 5)
+        {
+            score += 5.0f;
+        }
+        if (production[RESOURCE_WOOD] < 3.0f)
+        {
+            score -= 4.5f;
+        }
+        if (production[RESOURCE_CLAY] < 3.0f)
+        {
+            score -= 4.5f;
+        }
+        if (production[RESOURCE_WHEAT] < 3.0f)
+        {
+            score -= 5.5f;
+        }
+    }
+    else if (uniqueResources < 2)
+    {
+        score -= 10.0f;
+    }
+
+    return score;
 }
 
 static bool find_corner_key(int tileId, int cornerIndex, int *x, int *y)
@@ -1195,6 +1459,11 @@ static bool corner_can_host_future_settlement(const struct Map *map, int tileId,
 static int count_player_roads_touching_corner(const struct Map *map, enum PlayerType player, int tileId, int cornerIndex)
 {
     int count = 0;
+    int seenAx[LAND_TILE_COUNT * HEX_CORNERS];
+    int seenAy[LAND_TILE_COUNT * HEX_CORNERS];
+    int seenBx[LAND_TILE_COUNT * HEX_CORNERS];
+    int seenBy[LAND_TILE_COUNT * HEX_CORNERS];
+    int seenCount = 0;
     int tx = 0;
     int ty = 0;
     Vector2 origin;
@@ -1214,6 +1483,7 @@ static int count_player_roads_touching_corner(const struct Map *map, enum Player
             int ay = 0;
             int bx = 0;
             int by = 0;
+            bool duplicate = false;
             if (!map->tiles[otherTile].sides[sideIndex].isset ||
                 map->tiles[otherTile].sides[sideIndex].player != player)
             {
@@ -1221,8 +1491,27 @@ static int count_player_roads_touching_corner(const struct Map *map, enum Player
             }
 
             RendererGetRoadEdgeKey(center, BOARD_HEX_RADIUS, sideIndex, &ax, &ay, &bx, &by);
-            if ((ax == tx && ay == ty) || (bx == tx && by == ty))
+            if ((ax != tx || ay != ty) && (bx != tx || by != ty))
             {
+                continue;
+            }
+
+            for (int i = 0; i < seenCount; i++)
+            {
+                if (edge_keys_match(ax, ay, bx, by, seenAx[i], seenAy[i], seenBx[i], seenBy[i]))
+                {
+                    duplicate = true;
+                    break;
+                }
+            }
+
+            if (!duplicate)
+            {
+                seenAx[seenCount] = ax;
+                seenAy[seenCount] = ay;
+                seenBx[seenCount] = bx;
+                seenBy[seenCount] = by;
+                seenCount++;
                 count++;
             }
         }
@@ -1657,11 +1946,21 @@ static float evaluate_player_strength(const struct Map *map, enum PlayerType pla
         score += 38.0f + (float)gameGetLongestRoadLength(map) * 2.5f;  /* Higher bonus for long roads */
     }
 
-    /* Incentive to build roads when affordable - scaled by difficulty */
-    if (gameCanAffordRoad(map))
+    if (player_can_afford_cost(map, player, kCityCost))
     {
-        /* Hard AI strongly prioritizes connected road networks for strategy expansion */
-        score += difficulty == AI_DIFFICULTY_HARD ? 50.0f : (difficulty == AI_DIFFICULTY_MEDIUM ? 22.0f : 5.0f);
+        score += difficulty == AI_DIFFICULTY_HARD ? 62.0f : (difficulty == AI_DIFFICULTY_MEDIUM ? 30.0f : 10.0f);
+    }
+    if (player_can_afford_cost(map, player, kSettlementCost))
+    {
+        score += difficulty == AI_DIFFICULTY_HARD ? 38.0f : (difficulty == AI_DIFFICULTY_MEDIUM ? 20.0f : 7.0f);
+    }
+    if (gameGetDevelopmentDeckCount(map) > 0 && player_can_afford_cost(map, player, kDevelopmentCost))
+    {
+        score += difficulty == AI_DIFFICULTY_HARD ? 16.0f : (difficulty == AI_DIFFICULTY_MEDIUM ? 9.0f : 3.0f);
+    }
+    if (player_can_afford_cost(map, player, kRoadCost))
+    {
+        score += difficulty == AI_DIFFICULTY_HARD ? 18.0f : (difficulty == AI_DIFFICULTY_MEDIUM ? 11.0f : 4.0f);
     }
 
     score -= (float)max_int(totalResources - 7, 0) * 1.1f;
@@ -2179,6 +2478,53 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
         struct AiSearchState nextState = state;
         nextState.buildActionsRemaining--;
 
+        /* Explore the highest-impact direct builds first so bounded searches spend
+           their budget on cities/dev cards before the much wider road scan. */
+        if (gameCanAffordCity(map))
+        {
+            for (int tileId = 0; tileId < LAND_TILE_COUNT; tileId++)
+            {
+                for (int cornerIndex = 0; cornerIndex < HEX_CORNERS; cornerIndex++)
+                {
+                    struct Map simulatedMap;
+                    float score;
+
+                    if (ai_search_timed_out())
+                    {
+                        return bestScore;
+                    }
+
+                    if (!IsCanonicalSharedCorner(tileId, cornerIndex) ||
+                        !boardIsValidCityPlacement(map, tileId, cornerIndex, player))
+                    {
+                        continue;
+                    }
+
+                    simulatedMap = *map;
+                    if (!gameTryBuyCity(&simulatedMap))
+                    {
+                        continue;
+                    }
+
+                    PlaceSettlementOnSharedCorner(&simulatedMap, tileId, cornerIndex, player, STRUCTURE_CITY);
+                    gameRefreshAwards(&simulatedMap);
+                    gameCheckVictory(&simulatedMap, player);
+                    score = search_turn_score(&simulatedMap, player, difficulty, nextState, NULL);
+                    if (score > bestScore + epsilon)
+                    {
+                        bestScore = score;
+                        foundAction = true;
+                        if (bestAction != NULL)
+                        {
+                            bestAction->type = AI_ACTION_BUILD_CITY;
+                            bestAction->tileId = tileId;
+                            bestAction->cornerIndex = cornerIndex;
+                        }
+                    }
+                }
+            }
+        }
+
         if (gameCanAffordSettlement(map))
         {
             for (int tileId = 0; tileId < LAND_TILE_COUNT; tileId++)
@@ -2224,46 +2570,26 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
             }
         }
 
-        if (gameCanAffordCity(map))
+        if (gameCanBuyDevelopment(map))
         {
-            for (int tileId = 0; tileId < LAND_TILE_COUNT; tileId++)
+            struct Map simulatedMap = *map;
+            enum DevelopmentCardType drawnCard = DEVELOPMENT_CARD_KNIGHT;
+            if (ai_search_timed_out())
             {
-                for (int cornerIndex = 0; cornerIndex < HEX_CORNERS; cornerIndex++)
+                return bestScore;
+            }
+
+            if (gameTryBuyDevelopment(&simulatedMap, &drawnCard))
+            {
+                gameCheckVictory(&simulatedMap, player);
+                const float score = search_turn_score(&simulatedMap, player, difficulty, nextState, NULL);
+                if (score > bestScore + epsilon)
                 {
-                    struct Map simulatedMap;
-                    float score;
-
-                    if (ai_search_timed_out())
+                    bestScore = score;
+                    foundAction = true;
+                    if (bestAction != NULL)
                     {
-                        return bestScore;
-                    }
-
-                    if (!IsCanonicalSharedCorner(tileId, cornerIndex) ||
-                        !boardIsValidCityPlacement(map, tileId, cornerIndex, player))
-                    {
-                        continue;
-                    }
-
-                    simulatedMap = *map;
-                    if (!gameTryBuyCity(&simulatedMap))
-                    {
-                        continue;
-                    }
-
-                    PlaceSettlementOnSharedCorner(&simulatedMap, tileId, cornerIndex, player, STRUCTURE_CITY);
-                    gameRefreshAwards(&simulatedMap);
-                    gameCheckVictory(&simulatedMap, player);
-                    score = search_turn_score(&simulatedMap, player, difficulty, nextState, NULL);
-                    if (score > bestScore + epsilon)
-                    {
-                        bestScore = score;
-                        foundAction = true;
-                        if (bestAction != NULL)
-                        {
-                            bestAction->type = AI_ACTION_BUILD_CITY;
-                            bestAction->tileId = tileId;
-                            bestAction->cornerIndex = cornerIndex;
-                        }
+                        bestAction->type = AI_ACTION_BUY_DEVELOPMENT;
                     }
                 }
             }
@@ -2310,31 +2636,6 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
                             bestAction->tileId = tileId;
                             bestAction->sideIndex = sideIndex;
                         }
-                    }
-                }
-            }
-        }
-
-        if (gameCanBuyDevelopment(map))
-        {
-            struct Map simulatedMap = *map;
-            enum DevelopmentCardType drawnCard = DEVELOPMENT_CARD_KNIGHT;
-            if (ai_search_timed_out())
-            {
-                return bestScore;
-            }
-
-            if (gameTryBuyDevelopment(&simulatedMap, &drawnCard))
-            {
-                gameCheckVictory(&simulatedMap, player);
-                const float score = search_turn_score(&simulatedMap, player, difficulty, nextState, NULL);
-                if (score > bestScore + epsilon)
-                {
-                    bestScore = score;
-                    foundAction = true;
-                    if (bestAction != NULL)
-                    {
-                        bestAction->type = AI_ACTION_BUY_DEVELOPMENT;
                     }
                 }
             }
@@ -2511,7 +2812,7 @@ static float search_setup_road_score(const struct Map *map, enum PlayerType play
 {
     const float epsilon = 0.001f;
     Vector2 origin = {(float)GetScreenWidth() * BOARD_ORIGIN_X_FACTOR, (float)GetScreenHeight() * BOARD_ORIGIN_Y_FACTOR};
-    float bestScore = -AI_SEARCH_WIN_SCORE;
+    float bestScore = evaluate_setup_player_strength(map, player, difficulty);
     bool found = false;
 
     if (bestAction != NULL)
@@ -2522,7 +2823,7 @@ static float search_setup_road_score(const struct Map *map, enum PlayerType play
 
     if (map == NULL || !gameIsSetupRoadTurn(map))
     {
-        return evaluate_player_position(map, player, difficulty);
+        return evaluate_setup_player_strength(map, player, difficulty);
     }
 
     for (int tileId = 0; tileId < LAND_TILE_COUNT; tileId++)
@@ -2544,7 +2845,7 @@ static float search_setup_road_score(const struct Map *map, enum PlayerType play
             PlaceRoadOnSharedEdge(&simulatedMap, tileId, sideIndex, player);
             gameRefreshAwards(&simulatedMap);
             gameHandlePlacedRoad(&simulatedMap);
-            score = evaluate_player_position(&simulatedMap, player, difficulty);
+            score = evaluate_setup_player_strength(&simulatedMap, player, difficulty);
             if (!found || score > bestScore + epsilon)
             {
                 found = true;
@@ -2574,7 +2875,7 @@ static float search_setup_road_score(const struct Map *map, enum PlayerType play
         }
     }
 
-    return found ? bestScore : evaluate_player_position(map, player, difficulty);
+    return bestScore;
 }
 
 static bool choose_best_setup_settlement_action(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty, struct AiAction *action)
