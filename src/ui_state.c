@@ -64,6 +64,7 @@ static bool gDiceRolling = false;
 static bool gDiceRollAnimationSubmitsAction = true;
 static double gDiceRollStartTime = 0.0;
 static double gLastDiceShuffleTime = 0.0;
+static double gDiceRevealBlockUntil = 0.0;
 static int gPendingDieA = 1;
 static int gPendingDieB = 1;
 static int gDisplayedDieA = 1;
@@ -190,6 +191,7 @@ static void reset_ui_state(bool resetTheme)
     gLastRoadPlacementTime = -1.0;
     gLastStructurePlacementTime = -1.0;
     gDiceRolling = false;
+    gDiceRevealBlockUntil = 0.0;
     gDisplayedDieA = 1;
     gDisplayedDieB = 1;
     gBoardCreationAnimationStartTime = GetTime();
@@ -883,6 +885,7 @@ void uiStartDiceRollAnimation(void)
     gDiceRollAnimationSubmitsAction = true;
     gDiceRollStartTime = GetTime();
     gLastDiceShuffleTime = 0.0;
+    gDiceRevealBlockUntil = 0.0;
     choose_canonical_dice_faces(rolledTotal, &gPendingDieA, &gPendingDieB);
     gDisplayedDieA = GetRandomValue(1, 6);
     gDisplayedDieB = GetRandomValue(1, 6);
@@ -903,6 +906,7 @@ void uiStartObservedDiceRollAnimation(int total)
     gDiceRollAnimationSubmitsAction = false;
     gDiceRollStartTime = GetTime();
     gLastDiceShuffleTime = 0.0;
+    gDiceRevealBlockUntil = 0.0;
     choose_canonical_dice_faces(total, &gPendingDieA, &gPendingDieB);
     gDisplayedDieA = GetRandomValue(1, 6);
     gDisplayedDieB = GetRandomValue(1, 6);
@@ -915,6 +919,11 @@ void uiStartObservedDiceRollAnimation(int total)
 bool uiIsDiceRolling(void)
 {
     return gDiceRolling;
+}
+
+bool uiIsDiceRevealBlockingAi(void)
+{
+    return GetTime() < gDiceRevealBlockUntil;
 }
 
 int uiGetDisplayedDieA(void)
@@ -1371,6 +1380,7 @@ static void update_dice_animation(struct Map *map)
         const double rollResolveStarted = GetTime();
         const int resolvedRoll = gPendingDieA + gPendingDieB;
         gDiceRolling = false;
+        gDiceRevealBlockUntil = now + 0.18;
         gDisplayedDieA = gPendingDieA;
         gDisplayedDieB = gPendingDieB;
         gRecentRollHighlightValue = resolvedRoll;
