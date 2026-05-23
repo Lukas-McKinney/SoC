@@ -1462,6 +1462,8 @@ bool matchSessionApplyAuthoritativeSnapshot(struct MatchSession *session,
                                             const unsigned char *payload,
                                             size_t payloadSize)
 {
+    const bool wasStarted = session != NULL && session->matchStarted;
+
     if (session == NULL || payload == NULL || !mapDeserializeSnapshot(&session->map, payload, payloadSize))
     {
         return false;
@@ -1469,6 +1471,7 @@ bool matchSessionApplyAuthoritativeSnapshot(struct MatchSession *session,
 
     session->ready = true;
     session->matchStarted = true;
+    session->pendingUiResetForMatchInit = !wasStarted;
     session->awaitingAuthoritativeUpdate = false;
     session->initialSnapshotReceived = true;
     session->connectionStatus = MATCH_CONNECTION_CONNECTED;
