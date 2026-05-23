@@ -4,6 +4,7 @@ COMMON_CFLAGS = -Wall -Wextra -Iinc -finput-charset=UTF-8 -fexec-charset=UTF-8
 SRC = $(wildcard src/*.c)
 GAME_SRC = $(filter-out src/console_game.c src/relay_server.c,$(SRC))
 RULE_TEST_SRC = tests/rule_validation.c src/board_rules.c src/game_logic.c src/map.c src/debug_log.c
+TRADE_TEST_SRC = tests/trade_validation.c $(filter-out src/soc.c,$(GAME_SRC))
 CONSOLE_SRC = src/console_game.c src/board_rules.c src/game_logic.c src/map.c src/debug_log.c
 RELAY_SERVER_SRC = src/relay_server.c src/websocket.c
 
@@ -18,9 +19,10 @@ RELAY_SERVER_CFLAGS = $(COMMON_CFLAGS) -Wno-expansion-to-defined -isystem $(RAYL
 RELAY_SERVER_LDFLAGS = -lws2_32
 TARGET = settlers.exe
 RULE_TEST_TARGET = rules_test.exe
+TRADE_TEST_TARGET = trade_test.exe
 CONSOLE_TARGET = soc_console.exe
 RELAY_SERVER_TARGET = soc_relay.exe
-CLEAN_CMD = del /Q $(TARGET) $(RULE_TEST_TARGET) $(CONSOLE_TARGET) $(RELAY_SERVER_TARGET) 2>nul
+CLEAN_CMD = del /Q $(TARGET) $(RULE_TEST_TARGET) $(TRADE_TEST_TARGET) $(CONSOLE_TARGET) $(RELAY_SERVER_TARGET) 2>nul
 ENSURE_RAYLIB = @:
 else
 PKG_CONFIG ?= pkg-config
@@ -50,6 +52,8 @@ all: $(TARGET)
 
 rules-test: $(RULE_TEST_TARGET)
 
+trade-test: $(TRADE_TEST_TARGET)
+
 console: $(CONSOLE_TARGET)
 
 relay-server: $(RELAY_SERVER_TARGET)
@@ -67,6 +71,10 @@ $(TARGET): $(GAME_SRC)
 $(RULE_TEST_TARGET): $(RULE_TEST_SRC)
 	$(ENSURE_RAYLIB)
 	$(CC) $(CFLAGS) $(RULE_TEST_SRC) $(RULE_TEST_LDFLAGS) -o $(RULE_TEST_TARGET)
+
+$(TRADE_TEST_TARGET): $(TRADE_TEST_SRC)
+	$(ENSURE_RAYLIB)
+	$(CC) $(CFLAGS) $(TRADE_TEST_SRC) $(RULE_TEST_LDFLAGS) -o $(TRADE_TEST_TARGET)
 
 $(CONSOLE_TARGET): $(CONSOLE_SRC)
 	$(ENSURE_RAYLIB)
