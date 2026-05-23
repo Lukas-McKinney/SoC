@@ -1480,6 +1480,26 @@ bool matchSessionApplyAuthoritativeSnapshot(struct MatchSession *session,
     return true;
 }
 
+bool matchSessionApplyLobbyState(struct MatchSession *session,
+                                 const struct NetplayLobbyStateInfo *info)
+{
+    if (session == NULL || info == NULL)
+    {
+        return false;
+    }
+
+    apply_lobby_state_info(session, info);
+    session->ready = true;
+    session->matchStarted = false;
+    session->pendingUiResetForMatchInit = false;
+    session->awaitingAuthoritativeUpdate = false;
+    session->initialSnapshotReceived = false;
+    session->connectionStatus = MATCH_CONNECTION_CONNECTED;
+    reset_reconnect_state(session);
+    clear_connection_error(session);
+    return true;
+}
+
 static bool apply_authoritative_action_to_client_map(struct MatchSession *session,
                                                      const struct GameAction *action,
                                                      const struct GameActionResult *result)
@@ -1982,6 +2002,8 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
         session->connectionStatus = MATCH_CONNECTION_SYNCING;
         reset_reconnect_state(session);
         session->ready = false;
+        session->matchStarted = false;
+        session->initialSnapshotReceived = false;
         session->awaitingAuthoritativeUpdate = false;
         clear_connection_error(session);
         reset_client_transient_ui();
@@ -2001,13 +2023,7 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
         break;
 
     case NETPLAY_EVENT_LOBBY_STATE:
-        apply_lobby_state_info(session, &event->lobbyState);
-        session->ready = true;
-        session->pendingUiResetForMatchInit = false;
-        session->awaitingAuthoritativeUpdate = false;
-        session->connectionStatus = MATCH_CONNECTION_CONNECTED;
-        reset_reconnect_state(session);
-        clear_connection_error(session);
+        (void)matchSessionApplyLobbyState(session, &event->lobbyState);
         break;
 
     case NETPLAY_EVENT_MATCH_INIT:

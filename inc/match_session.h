@@ -12,6 +12,7 @@
 
 struct GameActionContext;
 struct GameActionResult;
+struct NetplayLobbyStateInfo;
 struct NetplayState;
 
 enum MatchSeatAuthority
@@ -115,6 +116,8 @@ bool matchSessionSubmitAction(struct MatchSession *session,
 bool matchSessionApplyAuthoritativeSnapshot(struct MatchSession *session,
                                             const unsigned char *payload,
                                             size_t payloadSize);
+bool matchSessionApplyLobbyState(struct MatchSession *session,
+                                 const struct NetplayLobbyStateInfo *info);
 bool matchSessionBroadcastState(struct MatchSession *session);
 bool matchSessionHasPendingTradeOfferForLocalResponse(const struct MatchSession *session);
 bool matchSessionGetPendingTradeOffer(const struct MatchSession *session, struct GameAction *offerAction);
