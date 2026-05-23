@@ -2217,6 +2217,12 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
                 else
                 {
                     uiShowCenteredStatus(loc("Host declined your trade."), UI_NOTIFICATION_NEGATIVE);
+                    if (event->stateHash != 0u && event->stateHash != session->stateHash)
+                    {
+                        debugLog("NET", "trade decline hash mismatch local=%u host=%u", session->stateHash, event->stateHash);
+                        uiShowCenteredWarning(loc("Trade declined with state mismatch; waiting for resync snapshot."));
+                        request_snapshot_resync(session, "trade decline hash mismatch");
+                    }
                 }
                 clear_pending_trade_offer(session);
             }
