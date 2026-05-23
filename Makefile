@@ -4,6 +4,7 @@ COMMON_CFLAGS = -Wall -Wextra -Iinc -finput-charset=UTF-8 -fexec-charset=UTF-8
 SRC = $(wildcard src/*.c)
 GAME_SRC = $(filter-out src/console_game.c src/relay_server.c,$(SRC))
 RULE_TEST_SRC = tests/rule_validation.c src/board_rules.c src/game_logic.c src/map.c src/debug_log.c
+TRADE_TEST_SRC = tests/trade_validation.c $(filter-out src/soc.c,$(GAME_SRC))
 CONSOLE_SRC = src/console_game.c src/board_rules.c src/game_logic.c src/map.c src/debug_log.c
 RELAY_SERVER_SRC = src/relay_server.c src/websocket.c
 
@@ -11,16 +12,17 @@ ifeq ($(OS),Windows_NT)
 RAYLIB_INCLUDE ?= C:/raylib/w64devkit/x86_64-w64-mingw32/include
 RAYLIB_LIB ?= C:/raylib/w64devkit/x86_64-w64-mingw32/lib
 
-CFLAGS = $(COMMON_CFLAGS) -Wno-expansion-to-defined -isystem $(RAYLIB_INCLUDE)
-GAME_LDFLAGS = -L$(RAYLIB_LIB) -lraylib -lopengl32 -lgdi32 -lwinmm -lws2_32 -lwinhttp
+CFLAGS = $(COMMON_CFLAGS) -Wno-expansion-to-defined -isystem $(RAYLIB_INCLUDE) -pthread
+GAME_LDFLAGS = -L$(RAYLIB_LIB) -lraylib -lopengl32 -lgdi32 -lwinmm -lws2_32 -lwinhttp -pthread
 RULE_TEST_LDFLAGS = $(GAME_LDFLAGS) -lm
-RELAY_SERVER_CFLAGS = $(COMMON_CFLAGS) -Wno-expansion-to-defined -isystem $(RAYLIB_INCLUDE)
+RELAY_SERVER_CFLAGS = $(COMMON_CFLAGS) -Wno-expansion-to-defined -isystem $(RAYLIB_INCLUDE) -pthread
 RELAY_SERVER_LDFLAGS = -lws2_32
 TARGET = settlers.exe
 RULE_TEST_TARGET = rules_test.exe
+TRADE_TEST_TARGET = trade_test.exe
 CONSOLE_TARGET = soc_console.exe
 RELAY_SERVER_TARGET = soc_relay.exe
-CLEAN_CMD = del /Q $(TARGET) $(RULE_TEST_TARGET) $(CONSOLE_TARGET) $(RELAY_SERVER_TARGET) 2>nul
+CLEAN_CMD = del /Q $(TARGET) $(RULE_TEST_TARGET) $(TRADE_TEST_TARGET) $(CONSOLE_TARGET) $(RELAY_SERVER_TARGET) 2>nul
 ENSURE_RAYLIB = @:
 else
 PKG_CONFIG ?= pkg-config
@@ -28,16 +30,17 @@ RAYLIB_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags raylib 2>/dev/null)
 RAYLIB_LIBS ?= $(shell $(PKG_CONFIG) --libs raylib 2>/dev/null)
 RAYLIB_MISSING_MESSAGE = raylib was not found via pkg-config. Install raylib and pkg-config, or pass RAYLIB_CFLAGS/RAYLIB_LIBS to make
 
-CFLAGS = $(COMMON_CFLAGS) $(RAYLIB_CFLAGS)
-GAME_LDFLAGS = $(RAYLIB_LIBS)
+CFLAGS = $(COMMON_CFLAGS) $(RAYLIB_CFLAGS) -pthread
+GAME_LDFLAGS = $(RAYLIB_LIBS) -pthread
 RULE_TEST_LDFLAGS = $(GAME_LDFLAGS) -lm
 RELAY_SERVER_CFLAGS = $(COMMON_CFLAGS)
 RELAY_SERVER_LDFLAGS =
 TARGET = settlers
 RULE_TEST_TARGET = rules_test
+TRADE_TEST_TARGET = trade_test
 CONSOLE_TARGET = soc_console
 RELAY_SERVER_TARGET = soc_relay
-CLEAN_CMD = rm -f $(TARGET) $(RULE_TEST_TARGET) $(CONSOLE_TARGET) $(RELAY_SERVER_TARGET)
+CLEAN_CMD = rm -f $(TARGET) $(RULE_TEST_TARGET) $(TRADE_TEST_TARGET) $(CONSOLE_TARGET) $(RELAY_SERVER_TARGET)
 
 ifeq ($(strip $(RAYLIB_LIBS)),)
 ENSURE_RAYLIB = @echo "$(RAYLIB_MISSING_MESSAGE)" >&2; exit 1
@@ -49,6 +52,8 @@ endif
 all: $(TARGET)
 
 rules-test: $(RULE_TEST_TARGET)
+
+trade-test: $(TRADE_TEST_TARGET)
 
 console: $(CONSOLE_TARGET)
 
@@ -67,6 +72,10 @@ $(TARGET): $(GAME_SRC)
 $(RULE_TEST_TARGET): $(RULE_TEST_SRC)
 	$(ENSURE_RAYLIB)
 	$(CC) $(CFLAGS) $(RULE_TEST_SRC) $(RULE_TEST_LDFLAGS) -o $(RULE_TEST_TARGET)
+
+$(TRADE_TEST_TARGET): $(TRADE_TEST_SRC)
+	$(ENSURE_RAYLIB)
+	$(CC) $(CFLAGS) $(TRADE_TEST_SRC) $(RULE_TEST_LDFLAGS) -o $(TRADE_TEST_TARGET)
 
 $(CONSOLE_TARGET): $(CONSOLE_SRC)
 	$(ENSURE_RAYLIB)

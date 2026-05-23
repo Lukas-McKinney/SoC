@@ -12,6 +12,7 @@
 #include <math.h>
 #include <raylib.h>
 #include <stddef.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -77,16 +78,45 @@ struct AiSearchState
     int maritimeTradesRemaining;
 };
 
+struct AiAsyncPlayPhaseRequest
+{
+    struct Map snapshot;
+    enum AiDifficulty difficulty;
+    int buildActionsThisTurn;
+    int maritimeTradesThisTurn;
+    unsigned int generation;
+};
+
+struct AiAsyncPlayPhaseResult
+{
+    struct Map snapshot;
+    enum AiDifficulty difficulty;
+    int buildActionsThisTurn;
+    int maritimeTradesThisTurn;
+    struct AiAction action;
+    bool foundAction;
+    double budgetUsed;
+    unsigned int nodesVisited;
+    bool timedOut;
+    double elapsed;
+    unsigned int generation;
+};
+
 static enum PlayerType gTrackedDecisionPlayer = PLAYER_NONE;
 static enum PlayerType gTrackedTurnPlayer = PLAYER_NONE;
 static double gNextAiActionTime = 0.0;
 static int gAiBuildActionsThisTurn = 0;
 static int gAiMaritimeTradesThisTurn = 0;
 static bool gAiUiPreparedForTurn = false;
-static double gAiSearchDeadline = 0.0;
-static double gAiSearchBudget = 0.0;
-static unsigned int gAiSearchNodesVisited = 0;
-static bool gAiSearchTimedOut = false;
+static _Thread_local double gAiSearchDeadline = 0.0;
+static _Thread_local double gAiSearchBudget = 0.0;
+static _Thread_local unsigned int gAiSearchNodesVisited = 0;
+static _Thread_local bool gAiSearchTimedOut = false;
+static bool gAiAsyncPlayPhaseRunning = false;
+static bool gAiAsyncPlayPhaseReady = false;
+static unsigned int gAiAsyncPlayPhaseGeneration = 0;
+static struct AiAsyncPlayPhaseResult gAiAsyncPlayPhaseResult;
+static pthread_mutex_t gAiAsyncMutex = PTHREAD_MUTEX_INITIALIZER;
 
 static bool player_is_ai(const struct Map *map, enum PlayerType player);
 static enum PlayerType active_decision_player(const struct Map *map);
@@ -107,16 +137,36 @@ static void reset_ai_turn_state(void);
 static void prepare_ui_for_ai_turn(void);
 static bool ai_is_blocked_by_ui(void);
 static bool ai_action_to_game_action(const struct AiAction *action, struct GameAction *gameAction);
+static void ai_async_lock(void);
+static void ai_async_unlock(void);
+static void ai_async_invalidate_play_phase_plan(void);
+static bool ai_async_try_start_play_phase_plan(const struct Map *map, enum AiDifficulty difficulty);
+static bool ai_async_has_play_phase_plan_in_flight(void);
+static bool ai_async_try_consume_play_phase_plan(const struct Map *map, enum AiDifficulty difficulty,
+                                                 struct AiAction *action, bool *foundAction,
+                                                 double *budgetUsed, unsigned int *nodesVisited,
+                                                 bool *timedOut, double *elapsed);
+static bool ai_async_map_matches_snapshot(const struct Map *map, const struct Map *snapshot);
+static bool find_best_play_phase_action_core(const struct Map *map, enum AiDifficulty difficulty,
+                                             int buildActionsThisTurn, int maritimeTradesThisTurn,
+                                             struct AiAction *action, float *scoreOut, double *budgetUsed,
+                                             unsigned int *nodesVisited, bool *timedOut, double *elapsed);
 
 static int min_int(int a, int b);
 static int max_int(int a, int b);
 static int resource_total_for_player(const struct Map *map, enum PlayerType player);
 static bool can_afford_cost(const int resources[5], const int cost[5]);
+static bool player_can_afford_cost(const struct Map *map, enum PlayerType player, const int cost[5]);
 static float cost_progress_score(const int resources[5], const int cost[5], float readyBonus, float coveredWeight, float missingPenalty);
 static float evaluate_hand_value(const struct Map *map, enum PlayerType player, const int resources[5], enum AiDifficulty difficulty);
 static int dice_weight(int number);
 static enum ResourceType tile_resource_type(enum TileType type);
 static float resource_weight(enum ResourceType resource, enum AiDifficulty difficulty);
+static bool edge_keys_match(int ax1, int ay1, int bx1, int by1, int ax2, int ay2, int bx2, int by2);
+static void accumulate_corner_resource_profile(const struct Map *map, int tileId, int cornerIndex, float production[5], int coverage[5], int *desertTouches);
+static void accumulate_player_setup_profile(const struct Map *map, enum PlayerType player, float production[5], int coverage[5], int *ownedStructures, int *desertTouches);
+static float setup_resource_priority(enum ResourceType resource, enum AiDifficulty difficulty);
+static float evaluate_setup_player_strength(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty);
 static bool find_corner_key(int tileId, int cornerIndex, int *x, int *y);
 static float evaluate_corner_value(const struct Map *map, int tileId, int cornerIndex, enum AiDifficulty difficulty);
 static bool shared_corner_occupied(const struct Map *map, int tileId, int cornerIndex);
@@ -157,6 +207,7 @@ static bool handle_ai_roll(struct Map *map);
 
 void aiResetController(void)
 {
+    ai_async_invalidate_play_phase_plan();
     gTrackedDecisionPlayer = PLAYER_NONE;
     gTrackedTurnPlayer = PLAYER_NONE;
     gNextAiActionTime = 0.0;
@@ -199,6 +250,178 @@ void aiConfigureAIMatch(struct Map *map, enum PlayerType humanPlayer, enum AiDif
         map->players[player].controlMode = PLAYER_CONTROL_AI;
         map->players[player].aiDifficulty = difficulty;
     }
+}
+
+static void ai_async_lock(void)
+{
+    pthread_mutex_lock(&gAiAsyncMutex);
+}
+
+static void ai_async_unlock(void)
+{
+    pthread_mutex_unlock(&gAiAsyncMutex);
+}
+
+static bool ai_async_map_matches_snapshot(const struct Map *map, const struct Map *snapshot)
+{
+    return map != NULL &&
+           snapshot != NULL &&
+           memcmp(map, snapshot, sizeof(*map)) == 0;
+}
+
+static void ai_async_invalidate_play_phase_plan(void)
+{
+    ai_async_lock();
+    gAiAsyncPlayPhaseGeneration++;
+    gAiAsyncPlayPhaseReady = false;
+    ai_async_unlock();
+}
+
+static void *ai_async_play_phase_worker(void *userdata)
+{
+    struct AiAsyncPlayPhaseRequest *request = (struct AiAsyncPlayPhaseRequest *)userdata;
+    struct AiAsyncPlayPhaseResult result;
+
+    memset(&result, 0, sizeof(result));
+    if (request != NULL)
+    {
+        float searchScore = 0.0f;
+
+        result.snapshot = request->snapshot;
+        result.difficulty = request->difficulty;
+        result.buildActionsThisTurn = request->buildActionsThisTurn;
+        result.maritimeTradesThisTurn = request->maritimeTradesThisTurn;
+        result.generation = request->generation;
+        result.foundAction = find_best_play_phase_action_core(&request->snapshot,
+                                                              request->difficulty,
+                                                              request->buildActionsThisTurn,
+                                                              request->maritimeTradesThisTurn,
+                                                              &result.action,
+                                                              &searchScore,
+                                                              &result.budgetUsed,
+                                                              &result.nodesVisited,
+                                                              &result.timedOut,
+                                                              &result.elapsed);
+    }
+
+    ai_async_lock();
+    if (request != NULL && gAiAsyncPlayPhaseGeneration == request->generation)
+    {
+        gAiAsyncPlayPhaseResult = result;
+        gAiAsyncPlayPhaseReady = true;
+    }
+    gAiAsyncPlayPhaseRunning = false;
+    ai_async_unlock();
+
+    free(request);
+    return NULL;
+}
+
+static bool ai_async_try_start_play_phase_plan(const struct Map *map, enum AiDifficulty difficulty)
+{
+    struct AiAsyncPlayPhaseRequest *request;
+
+    if (map == NULL)
+    {
+        return false;
+    }
+
+    ai_async_lock();
+    if (gAiAsyncPlayPhaseRunning || gAiAsyncPlayPhaseReady)
+    {
+        ai_async_unlock();
+        return false;
+    }
+
+    request = (struct AiAsyncPlayPhaseRequest *)malloc(sizeof(*request));
+    if (request == NULL)
+    {
+        ai_async_unlock();
+        return false;
+    }
+
+    memset(request, 0, sizeof(*request));
+    request->snapshot = *map;
+    request->difficulty = difficulty;
+    request->buildActionsThisTurn = gAiBuildActionsThisTurn;
+    request->maritimeTradesThisTurn = gAiMaritimeTradesThisTurn;
+    request->generation = gAiAsyncPlayPhaseGeneration;
+    gAiAsyncPlayPhaseRunning = true;
+    ai_async_unlock();
+
+    {
+        pthread_t threadId;
+        if (pthread_create(&threadId, NULL, ai_async_play_phase_worker, request) != 0)
+        {
+            ai_async_lock();
+            gAiAsyncPlayPhaseRunning = false;
+            ai_async_unlock();
+            free(request);
+            return false;
+        }
+        pthread_detach(threadId);
+    }
+
+    return true;
+}
+
+static bool ai_async_has_play_phase_plan_in_flight(void)
+{
+    bool inFlight;
+
+    ai_async_lock();
+    inFlight = gAiAsyncPlayPhaseRunning || gAiAsyncPlayPhaseReady;
+    ai_async_unlock();
+    return inFlight;
+}
+
+static bool ai_async_try_consume_play_phase_plan(const struct Map *map, enum AiDifficulty difficulty,
+                                                 struct AiAction *action, bool *foundAction,
+                                                 double *budgetUsed, unsigned int *nodesVisited,
+                                                 bool *timedOut, double *elapsed)
+{
+    bool consumed = false;
+
+    ai_async_lock();
+    if (gAiAsyncPlayPhaseReady)
+    {
+        if (gAiAsyncPlayPhaseResult.generation == gAiAsyncPlayPhaseGeneration &&
+            gAiAsyncPlayPhaseResult.difficulty == difficulty &&
+            gAiAsyncPlayPhaseResult.buildActionsThisTurn == gAiBuildActionsThisTurn &&
+            gAiAsyncPlayPhaseResult.maritimeTradesThisTurn == gAiMaritimeTradesThisTurn &&
+            ai_async_map_matches_snapshot(map, &gAiAsyncPlayPhaseResult.snapshot))
+        {
+            if (action != NULL)
+            {
+                *action = gAiAsyncPlayPhaseResult.action;
+            }
+            if (foundAction != NULL)
+            {
+                *foundAction = gAiAsyncPlayPhaseResult.foundAction;
+            }
+            if (budgetUsed != NULL)
+            {
+                *budgetUsed = gAiAsyncPlayPhaseResult.budgetUsed;
+            }
+            if (nodesVisited != NULL)
+            {
+                *nodesVisited = gAiAsyncPlayPhaseResult.nodesVisited;
+            }
+            if (timedOut != NULL)
+            {
+                *timedOut = gAiAsyncPlayPhaseResult.timedOut;
+            }
+            if (elapsed != NULL)
+            {
+                *elapsed = gAiAsyncPlayPhaseResult.elapsed;
+            }
+            consumed = true;
+        }
+
+        gAiAsyncPlayPhaseReady = false;
+    }
+    ai_async_unlock();
+    return consumed;
 }
 
 bool aiControlsActiveDecision(const struct Map *map)
@@ -319,7 +542,17 @@ void aiUpdateTurn(struct Map *map)
         gAiUiPreparedForTurn = true;
     }
 
-    if (ai_is_blocked_by_ui() || GetTime() < gNextAiActionTime)
+    if (map->phase == GAME_PHASE_PLAY &&
+        map->rolledThisTurn &&
+        !gameHasPendingDiscards(map) &&
+        !gameNeedsThiefPlacement(map) &&
+        !gameNeedsThiefVictimSelection(map) &&
+        !gameHasFreeRoadPlacements(map))
+    {
+        ai_async_try_start_play_phase_plan(map, difficulty);
+    }
+
+    if (GetTime() < gNextAiActionTime || ai_is_blocked_by_ui())
     {
         return;
     }
@@ -416,13 +649,43 @@ void aiUpdateTurn(struct Map *map)
 
     {
         struct AiAction action;
-        const double planningStart = GetTime();
-        if (find_best_play_phase_action(map, difficulty, &action))
+        bool planCompleted = false;
+        bool foundAction = false;
+        double planBudget = 0.0;
+        double planElapsed = 0.0;
+        unsigned int planNodes = 0;
+        bool planTimedOut = false;
+
+        planCompleted = ai_async_try_consume_play_phase_plan(map, difficulty,
+                                                             &action, &foundAction,
+                                                             &planBudget, &planNodes,
+                                                             &planTimedOut, &planElapsed);
+        if (planCompleted)
+        {
+            debugLog("AI", "play phase async ready action=%s elapsed=%.3f budget=%.3f nodes=%u timedOut=%d",
+                     ai_action_type_label(action.type),
+                     planElapsed,
+                     planBudget,
+                     planNodes,
+                     planTimedOut ? 1 : 0);
+        }
+        else if (ai_async_has_play_phase_plan_in_flight())
+        {
+            return;
+        }
+        else
+        {
+            const double planningStart = GetTime();
+            foundAction = find_best_play_phase_action(map, difficulty, &action);
+            planElapsed = GetTime() - planningStart;
+        }
+
+        if (foundAction)
         {
             log_ai_action("play phase decision", map, &action);
             if (execute_ai_action(map, &action))
             {
-                debugLog("AI", "play phase elapsed=%.3f", GetTime() - planningStart);
+                debugLog("AI", "play phase elapsed=%.3f", planElapsed);
                 if (action.type == AI_ACTION_MARITIME_TRADE)
                 {
                     gAiMaritimeTradesThisTurn++;
@@ -437,11 +700,11 @@ void aiUpdateTurn(struct Map *map)
                 schedule_next_ai_action(map, difficulty);
                 return;
             }
-            debugLog("AI", "play phase execute failed elapsed=%.3f", GetTime() - planningStart);
+            debugLog("AI", "play phase execute failed elapsed=%.3f", planElapsed);
             schedule_next_ai_action(map, difficulty);
             return;
         }
-        debugLog("AI", "play phase no action elapsed=%.3f", GetTime() - planningStart);
+        debugLog("AI", "play phase no action elapsed=%.3f", planElapsed);
     }
 
     if (gameCanEndTurn(map))
@@ -604,13 +867,13 @@ static double ai_search_time_budget(enum AiDifficulty difficulty)
     switch (difficulty)
     {
     case AI_DIFFICULTY_HARD:
-        /* give Hard AI substantially more planning time for deeper lookahead and better move selection */
-        return 4.000;
+        /* Keep single-frame planning short enough that local UI stays responsive during AI turns. */
+        return 0.250;
     case AI_DIFFICULTY_MEDIUM:
-        return 0.400;
+        return 0.140;
     case AI_DIFFICULTY_EASY:
     default:
-        return 0.080;
+        return 0.060;
     }
 }
 
@@ -684,6 +947,7 @@ static void schedule_next_ai_action(const struct Map *map, enum AiDifficulty dif
 
 static void reset_ai_turn_state(void)
 {
+    ai_async_invalidate_play_phase_plan();
     gAiBuildActionsThisTurn = 0;
     gAiMaritimeTradesThisTurn = 0;
     gAiUiPreparedForTurn = false;
@@ -704,6 +968,7 @@ static bool ai_is_blocked_by_ui(void)
            uiIsBoardCreationAnimating() ||
            uiGetBoardUiFadeProgress() < 1.0f ||
            uiIsDiceRolling() ||
+           uiIsDiceRevealBlockingAi() ||
            uiIsDevelopmentCardDrawAnimating() ||
            uiIsDevelopmentPurchaseConfirmOpen() ||
            uiIsDevelopmentPlayConfirmOpen();
@@ -814,6 +1079,16 @@ static bool can_afford_cost(const int resources[5], const int cost[5])
     }
 
     return true;
+}
+
+static bool player_can_afford_cost(const struct Map *map, enum PlayerType player, const int cost[5])
+{
+    if (map == NULL || player < PLAYER_RED || player > PLAYER_BLACK)
+    {
+        return false;
+    }
+
+    return can_afford_cost(map->players[player].resources, cost);
 }
 
 static float cost_progress_score(const int resources[5], const int cost[5], float readyBonus, float coveredWeight, float missingPenalty)
@@ -949,6 +1224,253 @@ static float resource_weight(enum ResourceType resource, enum AiDifficulty diffi
     default:
         return 1.0f;
     }
+}
+
+static bool edge_keys_match(int ax1, int ay1, int bx1, int by1, int ax2, int ay2, int bx2, int by2)
+{
+    return ax1 == ax2 && ay1 == ay2 && bx1 == bx2 && by1 == by2;
+}
+
+static void accumulate_corner_resource_profile(const struct Map *map, int tileId, int cornerIndex, float production[5], int coverage[5], int *desertTouches)
+{
+    int tx = 0;
+    int ty = 0;
+    Vector2 origin;
+
+    if (map == NULL || production == NULL || coverage == NULL || !find_corner_key(tileId, cornerIndex, &tx, &ty))
+    {
+        return;
+    }
+
+    origin = (Vector2){(float)GetScreenWidth() * BOARD_ORIGIN_X_FACTOR, (float)GetScreenHeight() * BOARD_ORIGIN_Y_FACTOR};
+    for (int otherTile = 0; otherTile < LAND_TILE_COUNT; otherTile++)
+    {
+        Vector2 center = AxialToWorld(kLandCoords[otherTile], origin, BOARD_HEX_RADIUS);
+        for (int otherCorner = 0; otherCorner < HEX_CORNERS; otherCorner++)
+        {
+            int ox = 0;
+            int oy = 0;
+            RendererGetCornerKey(center, BOARD_HEX_RADIUS, otherCorner, &ox, &oy);
+            if (ox != tx || oy != ty)
+            {
+                continue;
+            }
+
+            if (map->tiles[otherTile].type == TILE_DESERT)
+            {
+                if (desertTouches != NULL)
+                {
+                    (*desertTouches)++;
+                }
+                break;
+            }
+
+            {
+                const enum ResourceType resource = tile_resource_type(map->tiles[otherTile].type);
+                production[resource] += (float)dice_weight(map->tiles[otherTile].diceNumber);
+                coverage[resource] = 1;
+            }
+            break;
+        }
+    }
+}
+
+static void accumulate_player_setup_profile(const struct Map *map, enum PlayerType player, float production[5], int coverage[5], int *ownedStructures, int *desertTouches)
+{
+    if (map == NULL || production == NULL || coverage == NULL)
+    {
+        return;
+    }
+
+    for (int tileId = 0; tileId < LAND_TILE_COUNT; tileId++)
+    {
+        for (int cornerIndex = 0; cornerIndex < HEX_CORNERS; cornerIndex++)
+        {
+            const struct Corner *corner = &map->tiles[tileId].corners[cornerIndex];
+            float cornerProduction[5] = {0};
+            int cornerCoverage[5] = {0};
+            int cornerDesertTouches = 0;
+            float multiplier = 1.0f;
+
+            if (!IsCanonicalSharedCorner(tileId, cornerIndex) ||
+                corner->owner != player ||
+                corner->structure == STRUCTURE_NONE)
+            {
+                continue;
+            }
+
+            accumulate_corner_resource_profile(map, tileId, cornerIndex, cornerProduction, cornerCoverage, &cornerDesertTouches);
+            multiplier = corner->structure == STRUCTURE_CITY ? 2.0f : 1.0f;
+            for (int resource = RESOURCE_WOOD; resource <= RESOURCE_STONE; resource++)
+            {
+                if (cornerCoverage[resource] != 0)
+                {
+                    coverage[resource] = 1;
+                    production[resource] += cornerProduction[resource] * multiplier;
+                }
+            }
+
+            if (desertTouches != NULL)
+            {
+                *desertTouches += cornerDesertTouches;
+            }
+            if (ownedStructures != NULL)
+            {
+                (*ownedStructures)++;
+            }
+        }
+    }
+}
+
+static float setup_resource_priority(enum ResourceType resource, enum AiDifficulty difficulty)
+{
+    if (difficulty == AI_DIFFICULTY_HARD)
+    {
+        switch (resource)
+        {
+        case RESOURCE_WHEAT:
+            return 1.36f;
+        case RESOURCE_STONE:
+            return 1.22f;
+        case RESOURCE_WOOD:
+            return 1.18f;
+        case RESOURCE_CLAY:
+            return 1.15f;
+        case RESOURCE_SHEEP:
+        default:
+            return 0.96f;
+        }
+    }
+
+    if (difficulty == AI_DIFFICULTY_MEDIUM)
+    {
+        switch (resource)
+        {
+        case RESOURCE_WHEAT:
+            return 1.22f;
+        case RESOURCE_STONE:
+            return 1.12f;
+        case RESOURCE_WOOD:
+        case RESOURCE_CLAY:
+            return 1.08f;
+        case RESOURCE_SHEEP:
+        default:
+            return 0.98f;
+        }
+    }
+
+    return 1.0f;
+}
+
+static float evaluate_setup_player_strength(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty)
+{
+    float production[5] = {0};
+    int coverage[5] = {0};
+    int ownedStructures = 0;
+    int desertTouches = 0;
+    int uniqueResources = 0;
+    float score = 0.0f;
+
+    if (map == NULL || player < PLAYER_RED || player > PLAYER_BLACK)
+    {
+        return -AI_SEARCH_WIN_SCORE;
+    }
+
+    accumulate_player_setup_profile(map, player, production, coverage, &ownedStructures, &desertTouches);
+    score += evaluate_hand_value(map, player, map->players[player].resources, difficulty) * 3.2f;
+
+    for (int resource = RESOURCE_WOOD; resource <= RESOURCE_STONE; resource++)
+    {
+        const float amount = production[resource];
+        if (coverage[resource] == 0)
+        {
+            continue;
+        }
+
+        uniqueResources++;
+        score += amount * setup_resource_priority((enum ResourceType)resource, difficulty) * 2.35f;
+        switch ((enum ResourceType)resource)
+        {
+        case RESOURCE_WOOD:
+            score += 6.0f;
+            break;
+        case RESOURCE_WHEAT:
+            score += 7.5f;
+            break;
+        case RESOURCE_CLAY:
+            score += 6.0f;
+            break;
+        case RESOURCE_SHEEP:
+            score += 4.0f;
+            break;
+        case RESOURCE_STONE:
+            score += 5.0f;
+            break;
+        default:
+            break;
+        }
+
+        if (amount >= 8.0f)
+        {
+            score += 2.0f;
+        }
+    }
+
+    score += (float)uniqueResources * 2.4f;
+    score += min_int((int)(production[RESOURCE_WOOD] * 10.0f), (int)(production[RESOURCE_CLAY] * 10.0f)) * 0.14f;
+    score += min_int((int)(production[RESOURCE_WHEAT] * 10.0f), (int)(production[RESOURCE_STONE] * 10.0f)) * 0.15f;
+    score += min_int((int)(production[RESOURCE_WHEAT] * 10.0f), (int)(production[RESOURCE_SHEEP] * 10.0f)) * 0.09f;
+    score -= (float)desertTouches * 1.9f;
+
+    if (ownedStructures >= 2)
+    {
+        if (coverage[RESOURCE_WOOD] == 0)
+        {
+            score -= 20.0f;
+        }
+        if (coverage[RESOURCE_CLAY] == 0)
+        {
+            score -= 20.0f;
+        }
+        if (coverage[RESOURCE_WHEAT] == 0)
+        {
+            score -= 22.0f;
+        }
+        if (coverage[RESOURCE_SHEEP] == 0)
+        {
+            score -= 12.0f;
+        }
+        if (coverage[RESOURCE_STONE] == 0)
+        {
+            score -= 9.0f;
+        }
+        if (uniqueResources >= 4)
+        {
+            score += 9.0f;
+        }
+        if (uniqueResources == 5)
+        {
+            score += 5.0f;
+        }
+        if (production[RESOURCE_WOOD] < 3.0f)
+        {
+            score -= 4.5f;
+        }
+        if (production[RESOURCE_CLAY] < 3.0f)
+        {
+            score -= 4.5f;
+        }
+        if (production[RESOURCE_WHEAT] < 3.0f)
+        {
+            score -= 5.5f;
+        }
+    }
+    else if (uniqueResources < 2)
+    {
+        score -= 10.0f;
+    }
+
+    return score;
 }
 
 static bool find_corner_key(int tileId, int cornerIndex, int *x, int *y)
@@ -1195,6 +1717,11 @@ static bool corner_can_host_future_settlement(const struct Map *map, int tileId,
 static int count_player_roads_touching_corner(const struct Map *map, enum PlayerType player, int tileId, int cornerIndex)
 {
     int count = 0;
+    int seenAx[LAND_TILE_COUNT * HEX_CORNERS];
+    int seenAy[LAND_TILE_COUNT * HEX_CORNERS];
+    int seenBx[LAND_TILE_COUNT * HEX_CORNERS];
+    int seenBy[LAND_TILE_COUNT * HEX_CORNERS];
+    int seenCount = 0;
     int tx = 0;
     int ty = 0;
     Vector2 origin;
@@ -1214,6 +1741,7 @@ static int count_player_roads_touching_corner(const struct Map *map, enum Player
             int ay = 0;
             int bx = 0;
             int by = 0;
+            bool duplicate = false;
             if (!map->tiles[otherTile].sides[sideIndex].isset ||
                 map->tiles[otherTile].sides[sideIndex].player != player)
             {
@@ -1221,8 +1749,27 @@ static int count_player_roads_touching_corner(const struct Map *map, enum Player
             }
 
             RendererGetRoadEdgeKey(center, BOARD_HEX_RADIUS, sideIndex, &ax, &ay, &bx, &by);
-            if ((ax == tx && ay == ty) || (bx == tx && by == ty))
+            if ((ax != tx || ay != ty) && (bx != tx || by != ty))
             {
+                continue;
+            }
+
+            for (int i = 0; i < seenCount; i++)
+            {
+                if (edge_keys_match(ax, ay, bx, by, seenAx[i], seenAy[i], seenBx[i], seenBy[i]))
+                {
+                    duplicate = true;
+                    break;
+                }
+            }
+
+            if (!duplicate)
+            {
+                seenAx[seenCount] = ax;
+                seenAy[seenCount] = ay;
+                seenBx[seenCount] = bx;
+                seenBy[seenCount] = by;
+                seenCount++;
                 count++;
             }
         }
@@ -1657,11 +2204,21 @@ static float evaluate_player_strength(const struct Map *map, enum PlayerType pla
         score += 38.0f + (float)gameGetLongestRoadLength(map) * 2.5f;  /* Higher bonus for long roads */
     }
 
-    /* Incentive to build roads when affordable - scaled by difficulty */
-    if (gameCanAffordRoad(map))
+    if (player_can_afford_cost(map, player, kCityCost))
     {
-        /* Hard AI strongly prioritizes connected road networks for strategy expansion */
-        score += difficulty == AI_DIFFICULTY_HARD ? 50.0f : (difficulty == AI_DIFFICULTY_MEDIUM ? 22.0f : 5.0f);
+        score += difficulty == AI_DIFFICULTY_HARD ? 62.0f : (difficulty == AI_DIFFICULTY_MEDIUM ? 30.0f : 10.0f);
+    }
+    if (player_can_afford_cost(map, player, kSettlementCost))
+    {
+        score += difficulty == AI_DIFFICULTY_HARD ? 38.0f : (difficulty == AI_DIFFICULTY_MEDIUM ? 20.0f : 7.0f);
+    }
+    if (gameGetDevelopmentDeckCount(map) > 0 && player_can_afford_cost(map, player, kDevelopmentCost))
+    {
+        score += difficulty == AI_DIFFICULTY_HARD ? 16.0f : (difficulty == AI_DIFFICULTY_MEDIUM ? 9.0f : 3.0f);
+    }
+    if (player_can_afford_cost(map, player, kRoadCost))
+    {
+        score += difficulty == AI_DIFFICULTY_HARD ? 18.0f : (difficulty == AI_DIFFICULTY_MEDIUM ? 11.0f : 4.0f);
     }
 
     score -= (float)max_int(totalResources - 7, 0) * 1.1f;
@@ -1885,8 +2442,8 @@ static float search_free_road_score(const struct Map *map, enum PlayerType playe
 {
     const float epsilon = 0.001f;
     Vector2 origin = {(float)GetScreenWidth() * BOARD_ORIGIN_X_FACTOR, (float)GetScreenHeight() * BOARD_ORIGIN_Y_FACTOR};
-    struct Map skippedMap;
-    float bestScore;
+    const float fallbackScore = evaluate_player_position(map, player, difficulty);
+    float bestScore = fallbackScore;
     bool found = false;
 
     if (bestAction != NULL)
@@ -1897,17 +2454,13 @@ static float search_free_road_score(const struct Map *map, enum PlayerType playe
 
     if (map == NULL || !gameHasFreeRoadPlacements(map))
     {
-        return evaluate_player_position(map, player, difficulty);
+        return fallbackScore;
     }
 
     if (ai_search_visit_node())
     {
-        return evaluate_player_position(map, player, difficulty);
+        return fallbackScore;
     }
-
-    skippedMap = *map;
-    skippedMap.freeRoadPlacementsRemaining = 0;
-    bestScore = search_turn_score(&skippedMap, player, difficulty, state, NULL);
 
     for (int tileId = 0; tileId < LAND_TILE_COUNT; tileId++)
     {
@@ -1918,7 +2471,7 @@ static float search_free_road_score(const struct Map *map, enum PlayerType playe
 
             if (ai_search_timed_out())
             {
-                return bestScore;
+                return found ? bestScore : fallbackScore;
             }
 
             if (!IsCanonicalSharedEdge(tileId, sideIndex) ||
@@ -1963,7 +2516,7 @@ static float search_free_road_score(const struct Map *map, enum PlayerType playe
         }
     }
 
-    return bestScore;
+    return found ? bestScore : fallbackScore;
 }
 
 static float search_turn_score(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty, struct AiSearchState state, struct AiAction *bestAction)
@@ -2183,6 +2736,53 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
         struct AiSearchState nextState = state;
         nextState.buildActionsRemaining--;
 
+        /* Explore the highest-impact direct builds first so bounded searches spend
+           their budget on cities/dev cards before the much wider road scan. */
+        if (gameCanAffordCity(map))
+        {
+            for (int tileId = 0; tileId < LAND_TILE_COUNT; tileId++)
+            {
+                for (int cornerIndex = 0; cornerIndex < HEX_CORNERS; cornerIndex++)
+                {
+                    struct Map simulatedMap;
+                    float score;
+
+                    if (ai_search_timed_out())
+                    {
+                        return bestScore;
+                    }
+
+                    if (!IsCanonicalSharedCorner(tileId, cornerIndex) ||
+                        !boardIsValidCityPlacement(map, tileId, cornerIndex, player))
+                    {
+                        continue;
+                    }
+
+                    simulatedMap = *map;
+                    if (!gameTryBuyCity(&simulatedMap))
+                    {
+                        continue;
+                    }
+
+                    PlaceSettlementOnSharedCorner(&simulatedMap, tileId, cornerIndex, player, STRUCTURE_CITY);
+                    gameRefreshAwards(&simulatedMap);
+                    gameCheckVictory(&simulatedMap, player);
+                    score = search_turn_score(&simulatedMap, player, difficulty, nextState, NULL);
+                    if (score > bestScore + epsilon)
+                    {
+                        bestScore = score;
+                        foundAction = true;
+                        if (bestAction != NULL)
+                        {
+                            bestAction->type = AI_ACTION_BUILD_CITY;
+                            bestAction->tileId = tileId;
+                            bestAction->cornerIndex = cornerIndex;
+                        }
+                    }
+                }
+            }
+        }
+
         if (gameCanAffordSettlement(map))
         {
             for (int tileId = 0; tileId < LAND_TILE_COUNT; tileId++)
@@ -2228,46 +2828,26 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
             }
         }
 
-        if (gameCanAffordCity(map))
+        if (gameCanBuyDevelopment(map))
         {
-            for (int tileId = 0; tileId < LAND_TILE_COUNT; tileId++)
+            struct Map simulatedMap = *map;
+            enum DevelopmentCardType drawnCard = DEVELOPMENT_CARD_KNIGHT;
+            if (ai_search_timed_out())
             {
-                for (int cornerIndex = 0; cornerIndex < HEX_CORNERS; cornerIndex++)
+                return bestScore;
+            }
+
+            if (gameTryBuyDevelopment(&simulatedMap, &drawnCard))
+            {
+                gameCheckVictory(&simulatedMap, player);
+                const float score = search_turn_score(&simulatedMap, player, difficulty, nextState, NULL);
+                if (score > bestScore + epsilon)
                 {
-                    struct Map simulatedMap;
-                    float score;
-
-                    if (ai_search_timed_out())
+                    bestScore = score;
+                    foundAction = true;
+                    if (bestAction != NULL)
                     {
-                        return bestScore;
-                    }
-
-                    if (!IsCanonicalSharedCorner(tileId, cornerIndex) ||
-                        !boardIsValidCityPlacement(map, tileId, cornerIndex, player))
-                    {
-                        continue;
-                    }
-
-                    simulatedMap = *map;
-                    if (!gameTryBuyCity(&simulatedMap))
-                    {
-                        continue;
-                    }
-
-                    PlaceSettlementOnSharedCorner(&simulatedMap, tileId, cornerIndex, player, STRUCTURE_CITY);
-                    gameRefreshAwards(&simulatedMap);
-                    gameCheckVictory(&simulatedMap, player);
-                    score = search_turn_score(&simulatedMap, player, difficulty, nextState, NULL);
-                    if (score > bestScore + epsilon)
-                    {
-                        bestScore = score;
-                        foundAction = true;
-                        if (bestAction != NULL)
-                        {
-                            bestAction->type = AI_ACTION_BUILD_CITY;
-                            bestAction->tileId = tileId;
-                            bestAction->cornerIndex = cornerIndex;
-                        }
+                        bestAction->type = AI_ACTION_BUY_DEVELOPMENT;
                     }
                 }
             }
@@ -2318,31 +2898,6 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
                 }
             }
         }
-
-        if (gameCanBuyDevelopment(map))
-        {
-            struct Map simulatedMap = *map;
-            enum DevelopmentCardType drawnCard = DEVELOPMENT_CARD_KNIGHT;
-            if (ai_search_timed_out())
-            {
-                return bestScore;
-            }
-
-            if (gameTryBuyDevelopment(&simulatedMap, &drawnCard))
-            {
-                gameCheckVictory(&simulatedMap, player);
-                const float score = search_turn_score(&simulatedMap, player, difficulty, nextState, NULL);
-                if (score > bestScore + epsilon)
-                {
-                    bestScore = score;
-                    foundAction = true;
-                    if (bestAction != NULL)
-                    {
-                        bestAction->type = AI_ACTION_BUY_DEVELOPMENT;
-                    }
-                }
-            }
-        }
     }
 
     if (!foundAction && bestAction != NULL)
@@ -2353,7 +2908,10 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
     return bestScore;
 }
 
-static bool find_best_play_phase_action(const struct Map *map, enum AiDifficulty difficulty, struct AiAction *action)
+static bool find_best_play_phase_action_core(const struct Map *map, enum AiDifficulty difficulty,
+                                             int buildActionsThisTurn, int maritimeTradesThisTurn,
+                                             struct AiAction *action, float *scoreOut, double *budgetUsedOut,
+                                             unsigned int *nodesVisitedOut, bool *timedOutOut, double *elapsedOut)
 {
     struct AiSearchState state;
     float score;
@@ -2367,8 +2925,8 @@ static bool find_best_play_phase_action(const struct Map *map, enum AiDifficulty
         return false;
     }
 
-    state.buildActionsRemaining = ai_build_action_budget(difficulty) - gAiBuildActionsThisTurn;
-    state.maritimeTradesRemaining = ai_maritime_trade_budget(difficulty) - gAiMaritimeTradesThisTurn;
+    state.buildActionsRemaining = ai_build_action_budget(difficulty) - buildActionsThisTurn;
+    state.maritimeTradesRemaining = ai_maritime_trade_budget(difficulty) - maritimeTradesThisTurn;
     if (state.buildActionsRemaining < 0)
     {
         state.buildActionsRemaining = 0;
@@ -2384,14 +2942,61 @@ static bool find_best_play_phase_action(const struct Map *map, enum AiDifficulty
     nodesVisited = gAiSearchNodesVisited;
     timedOut = gAiSearchTimedOut;
     ai_end_play_phase_search();
+    if (budgetUsedOut != NULL)
+    {
+        *budgetUsedOut = budgetUsed;
+    }
+    if (scoreOut != NULL)
+    {
+        *scoreOut = score;
+    }
+    if (nodesVisitedOut != NULL)
+    {
+        *nodesVisitedOut = nodesVisited;
+    }
+    if (timedOutOut != NULL)
+    {
+        *timedOutOut = timedOut;
+    }
+    if (elapsedOut != NULL)
+    {
+        *elapsedOut = GetTime() - started;
+    }
+    return action->type != AI_ACTION_NONE;
+}
+
+static bool find_best_play_phase_action(const struct Map *map, enum AiDifficulty difficulty, struct AiAction *action)
+{
+    float score = 0.0f;
+    double budgetUsed = 0.0;
+    unsigned int nodesVisited = 0;
+    bool timedOut = false;
+    double elapsed = 0.0;
+    bool found;
+
+    if (map == NULL || action == NULL)
+    {
+        return false;
+    }
+
+    found = find_best_play_phase_action_core(map,
+                                             difficulty,
+                                             gAiBuildActionsThisTurn,
+                                             gAiMaritimeTradesThisTurn,
+                                             action,
+                                             &score,
+                                             &budgetUsed,
+                                             &nodesVisited,
+                                             &timedOut,
+                                             &elapsed);
     debugLog("AI", "play phase search action=%s score=%.3f elapsed=%.3f budget=%.3f nodes=%u timedOut=%d",
              ai_action_type_label(action->type),
              score,
-             GetTime() - started,
+             elapsed,
              budgetUsed,
              nodesVisited,
              timedOut ? 1 : 0);
-    return action->type != AI_ACTION_NONE;
+    return found;
 }
 
 static bool execute_ai_action(struct Map *map, const struct AiAction *action)
@@ -2515,7 +3120,7 @@ static float search_setup_road_score(const struct Map *map, enum PlayerType play
 {
     const float epsilon = 0.001f;
     Vector2 origin = {(float)GetScreenWidth() * BOARD_ORIGIN_X_FACTOR, (float)GetScreenHeight() * BOARD_ORIGIN_Y_FACTOR};
-    float bestScore = -AI_SEARCH_WIN_SCORE;
+    float bestScore = evaluate_setup_player_strength(map, player, difficulty);
     bool found = false;
 
     if (bestAction != NULL)
@@ -2526,7 +3131,7 @@ static float search_setup_road_score(const struct Map *map, enum PlayerType play
 
     if (map == NULL || !gameIsSetupRoadTurn(map))
     {
-        return evaluate_player_position(map, player, difficulty);
+        return evaluate_setup_player_strength(map, player, difficulty);
     }
 
     for (int tileId = 0; tileId < LAND_TILE_COUNT; tileId++)
@@ -2548,7 +3153,7 @@ static float search_setup_road_score(const struct Map *map, enum PlayerType play
             PlaceRoadOnSharedEdge(&simulatedMap, tileId, sideIndex, player);
             gameRefreshAwards(&simulatedMap);
             gameHandlePlacedRoad(&simulatedMap);
-            score = evaluate_player_position(&simulatedMap, player, difficulty);
+            score = evaluate_setup_player_strength(&simulatedMap, player, difficulty);
             if (!found || score > bestScore + epsilon)
             {
                 found = true;
@@ -2578,7 +3183,7 @@ static float search_setup_road_score(const struct Map *map, enum PlayerType play
         }
     }
 
-    return found ? bestScore : evaluate_player_position(map, player, difficulty);
+    return bestScore;
 }
 
 static bool choose_best_setup_settlement_action(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty, struct AiAction *action)
@@ -2654,6 +3259,7 @@ static bool choose_best_setup_road_action(const struct Map *map, enum PlayerType
 static bool choose_best_thief_move_action(const struct Map *map, enum AiDifficulty difficulty, struct AiAction *action)
 {
     struct AiSearchState state;
+    bool found = false;
 
     if (map == NULL || action == NULL || !gameNeedsThiefPlacement(map))
     {
@@ -2662,13 +3268,17 @@ static bool choose_best_thief_move_action(const struct Map *map, enum AiDifficul
 
     state.buildActionsRemaining = max_int(ai_build_action_budget(difficulty) - gAiBuildActionsThisTurn, 0);
     state.maritimeTradesRemaining = max_int(ai_maritime_trade_budget(difficulty) - gAiMaritimeTradesThisTurn, 0);
+    ai_begin_play_phase_search(difficulty);
     search_thief_move_score(map, map->currentPlayer, difficulty, state, action);
-    return action->type == AI_ACTION_MOVE_THIEF;
+    found = action->type == AI_ACTION_MOVE_THIEF;
+    ai_end_play_phase_search();
+    return found;
 }
 
 static bool choose_best_thief_victim_action(const struct Map *map, enum AiDifficulty difficulty, struct AiAction *action)
 {
     struct AiSearchState state;
+    bool found = false;
 
     if (map == NULL || action == NULL || !gameNeedsThiefVictimSelection(map))
     {
@@ -2677,13 +3287,19 @@ static bool choose_best_thief_victim_action(const struct Map *map, enum AiDiffic
 
     state.buildActionsRemaining = max_int(ai_build_action_budget(difficulty) - gAiBuildActionsThisTurn, 0);
     state.maritimeTradesRemaining = max_int(ai_maritime_trade_budget(difficulty) - gAiMaritimeTradesThisTurn, 0);
+    ai_begin_play_phase_search(difficulty);
     search_thief_victim_score(map, map->currentPlayer, difficulty, state, action);
-    return action->type == AI_ACTION_CHOOSE_THIEF_VICTIM;
+    found = action->type == AI_ACTION_CHOOSE_THIEF_VICTIM;
+    ai_end_play_phase_search();
+    return found;
 }
 
 static bool choose_best_free_road_action(const struct Map *map, enum AiDifficulty difficulty, struct AiAction *action)
 {
     struct AiSearchState state;
+    struct EdgeCandidate fallbackCandidate;
+    bool found = false;
+    bool timedOut = false;
 
     if (map == NULL || action == NULL || !gameHasFreeRoadPlacements(map))
     {
@@ -2692,6 +3308,29 @@ static bool choose_best_free_road_action(const struct Map *map, enum AiDifficult
 
     state.buildActionsRemaining = max_int(ai_build_action_budget(difficulty) - gAiBuildActionsThisTurn, 0);
     state.maritimeTradesRemaining = max_int(ai_maritime_trade_budget(difficulty) - gAiMaritimeTradesThisTurn, 0);
+    ai_begin_play_phase_search(difficulty);
     search_free_road_score(map, map->currentPlayer, difficulty, state, action);
-    return action->type == AI_ACTION_BUILD_ROAD;
+    found = action->type == AI_ACTION_BUILD_ROAD;
+    timedOut = gAiSearchTimedOut;
+    ai_end_play_phase_search();
+    if (found)
+    {
+        return true;
+    }
+
+    if (find_best_road_candidate(map, map->currentPlayer, difficulty, false, &fallbackCandidate))
+    {
+        memset(action, 0, sizeof(*action));
+        action->type = AI_ACTION_BUILD_ROAD;
+        action->tileId = fallbackCandidate.tileId;
+        action->sideIndex = fallbackCandidate.sideIndex;
+        debugLog("AI", "free road fallback timedOut=%d tile=%d side=%d score=%.3f",
+                 timedOut ? 1 : 0,
+                 fallbackCandidate.tileId,
+                 fallbackCandidate.sideIndex,
+                 fallbackCandidate.score);
+        return true;
+    }
+
+    return false;
 }

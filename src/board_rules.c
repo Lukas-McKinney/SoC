@@ -22,6 +22,7 @@ static Vector2 point_on_hex(Vector2 center, float radius, int cornerIndex);
 static void get_road_edge_key(Vector2 center, float radius, int sideIndex, int *ax, int *ay, int *bx, int *by);
 static void get_corner_key(Vector2 center, float radius, int cornerIndex, int *x, int *y);
 static bool corner_keys_match(int x1, int y1, int x2, int y2);
+static bool edge_keys_match(int ax1, int ay1, int bx1, int by1, int ax2, int ay2, int bx2, int by2);
 static bool is_shared_corner_occupied(const struct Map *map, int tileId, int cornerIndex, Vector2 origin, float radius);
 static bool has_adjacent_settlement(const struct Map *map, int tileId, int cornerIndex, Vector2 origin, float radius);
 static int count_player_roads_touching_corner(const struct Map *map, enum PlayerType player, int tileId, int cornerIndex, Vector2 origin, float radius);
@@ -225,6 +226,11 @@ static bool corner_keys_match(int x1, int y1, int x2, int y2)
     return x1 == x2 && y1 == y2;
 }
 
+static bool edge_keys_match(int ax1, int ay1, int bx1, int by1, int ax2, int ay2, int bx2, int by2)
+{
+    return ax1 == ax2 && ay1 == ay2 && bx1 == bx2 && by1 == by2;
+}
+
 static bool is_shared_corner_occupied(const struct Map *map, int tileId, int cornerIndex, Vector2 origin, float radius)
 {
     const Vector2 center = axial_to_world(kLandCoords[tileId], origin, radius);
@@ -294,6 +300,11 @@ static bool has_adjacent_settlement(const struct Map *map, int tileId, int corne
 static int count_player_roads_touching_corner(const struct Map *map, enum PlayerType player, int tileId, int cornerIndex, Vector2 origin, float radius)
 {
     int count = 0;
+    int seenAx[LAND_TILE_COUNT * HEX_CORNERS];
+    int seenAy[LAND_TILE_COUNT * HEX_CORNERS];
+    int seenBx[LAND_TILE_COUNT * HEX_CORNERS];
+    int seenBy[LAND_TILE_COUNT * HEX_CORNERS];
+    int seenCount = 0;
     const Vector2 cornerCenter = axial_to_world(kLandCoords[tileId], origin, radius);
     int cx = 0;
     int cy = 0;
@@ -314,9 +325,29 @@ static int count_player_roads_touching_corner(const struct Map *map, enum Player
             int ay = 0;
             int bx = 0;
             int by = 0;
+            bool duplicate = false;
             get_road_edge_key(otherCenter, radius, otherSide, &ax, &ay, &bx, &by);
-            if (corner_keys_match(cx, cy, ax, ay) || corner_keys_match(cx, cy, bx, by))
+            if (!corner_keys_match(cx, cy, ax, ay) && !corner_keys_match(cx, cy, bx, by))
             {
+                continue;
+            }
+
+            for (int i = 0; i < seenCount; i++)
+            {
+                if (edge_keys_match(ax, ay, bx, by, seenAx[i], seenAy[i], seenBx[i], seenBy[i]))
+                {
+                    duplicate = true;
+                    break;
+                }
+            }
+
+            if (!duplicate)
+            {
+                seenAx[seenCount] = ax;
+                seenAy[seenCount] = ay;
+                seenBx[seenCount] = bx;
+                seenBy[seenCount] = by;
+                seenCount++;
                 count++;
             }
         }
