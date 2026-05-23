@@ -13,6 +13,7 @@
 #include <math.h>
 #include <raylib.h>
 #include <stdio.h>
+#include <string.h>
 
 const struct AxialCoord kLandCoords[LAND_TILE_COUNT] = {
     {0, -2}, {1, -2}, {2, -2}, {-1, -1}, {0, -1}, {1, -1}, {2, -1}, {-2, 0}, {-1, 0}, {0, 0}, {1, 0}, {2, 0}, {-2, 1}, {-1, 1}, {0, 1}, {1, 1}, {-2, 2}, {-1, 2}, {0, 2}};
@@ -1139,22 +1140,60 @@ void HandleMapInput(struct MatchSession *session)
         IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
         gHoveredCornerTileId >= 0 &&
         gHoveredCornerIndex >= 0 &&
-        (setupSettlementMode || gameCanAffordSettlement(map)) &&
-        boardIsValidSettlementPlacement(map, gHoveredCornerTileId, gHoveredCornerIndex, map->currentPlayer, boardOrigin, radius))
+        (setupSettlementMode || gameCanAffordSettlement(map)))
     {
-        if (matchSessionSubmitAction(session,
-                                     &(struct GameAction){
-                                         .type = GAME_ACTION_PLACE_SETTLEMENT,
-                                         .tileId = gHoveredCornerTileId,
-                                         .cornerIndex = gHoveredCornerIndex},
-                                     &actionContext,
-                                     NULL))
+        if (boardIsValidSettlementPlacement(map, gHoveredCornerTileId, gHoveredCornerIndex, map->currentPlayer, boardOrigin, radius))
         {
-            if (setupSettlementMode)
+            if (matchSessionSubmitAction(session,
+                                         &(struct GameAction){
+                                             .type = GAME_ACTION_PLACE_SETTLEMENT,
+                                             .tileId = gHoveredCornerTileId,
+                                             .cornerIndex = gHoveredCornerIndex},
+                                         &actionContext,
+                                         NULL))
             {
-                gBuildMode = BUILD_MODE_ROAD;
+                if (setupSettlementMode)
+                {
+                    gBuildMode = BUILD_MODE_ROAD;
+                }
+                else
+                {
+                    if (gameHasWinner(map))
+                    {
+                        uiSetBuildPanelOpen(false);
+                        uiSetTradeMenuOpen(false);
+                        uiSetPlayerTradeMenuOpen(false);
+                    }
+                    gBuildMode = BUILD_MODE_NONE;
+                }
+                gHoveredCornerTileId = -1;
+                gHoveredCornerIndex = -1;
             }
-            else
+            return;
+        }
+
+        const char *reason = boardGetSettlementPlacementFailureReason(map, gHoveredCornerTileId, gHoveredCornerIndex, map->currentPlayer, boardOrigin, radius);
+        if (reason != NULL && strcmp(reason, "settlement limit reached") == 0)
+        {
+            uiShowCenteredWarning(loc("You have no settlement tokens left. Upgrade a settlement to a city to free one."));
+        }
+        return;
+    }
+
+    if (gBuildMode == BUILD_MODE_CITY &&
+        IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+        gHoveredCornerTileId >= 0 &&
+        gHoveredCornerIndex >= 0)
+    {
+        if (boardIsValidCityPlacement(map, gHoveredCornerTileId, gHoveredCornerIndex, map->currentPlayer))
+        {
+            if (matchSessionSubmitAction(session,
+                                         &(struct GameAction){
+                                             .type = GAME_ACTION_PLACE_CITY,
+                                             .tileId = gHoveredCornerTileId,
+                                             .cornerIndex = gHoveredCornerIndex},
+                                         &actionContext,
+                                         NULL))
             {
                 if (gameHasWinner(map))
                 {
@@ -1163,36 +1202,18 @@ void HandleMapInput(struct MatchSession *session)
                     uiSetPlayerTradeMenuOpen(false);
                 }
                 gBuildMode = BUILD_MODE_NONE;
+                gHoveredCornerTileId = -1;
+                gHoveredCornerIndex = -1;
             }
-            gHoveredCornerTileId = -1;
-            gHoveredCornerIndex = -1;
+            return;
         }
-    }
 
-    if (gBuildMode == BUILD_MODE_CITY &&
-        IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
-        gHoveredCornerTileId >= 0 &&
-        gHoveredCornerIndex >= 0 &&
-        boardIsValidCityPlacement(map, gHoveredCornerTileId, gHoveredCornerIndex, map->currentPlayer))
-    {
-        if (matchSessionSubmitAction(session,
-                                     &(struct GameAction){
-                                         .type = GAME_ACTION_PLACE_CITY,
-                                         .tileId = gHoveredCornerTileId,
-                                         .cornerIndex = gHoveredCornerIndex},
-                                     &actionContext,
-                                     NULL))
+        const char *reason = boardGetCityPlacementFailureReason(map, gHoveredCornerTileId, gHoveredCornerIndex, map->currentPlayer);
+        if (reason != NULL && strcmp(reason, "city limit reached") == 0)
         {
-            if (gameHasWinner(map))
-            {
-                uiSetBuildPanelOpen(false);
-                uiSetTradeMenuOpen(false);
-                uiSetPlayerTradeMenuOpen(false);
-            }
-            gBuildMode = BUILD_MODE_NONE;
-            gHoveredCornerTileId = -1;
-            gHoveredCornerIndex = -1;
+            uiShowCenteredWarning(loc("You have no city tokens left. Upgrade a settlement first."));
         }
+        return;
     }
 }
 

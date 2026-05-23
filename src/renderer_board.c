@@ -1,4 +1,5 @@
 #include "board_rules.h"
+#include "debug_log.h"
 #include "game_logic.h"
 #include "match_session.h"
 #include "renderer_internal.h"
@@ -313,6 +314,7 @@ void DrawMap(const struct Map *map)
 
         if (showPlacementPreviews && (gBuildMode == BUILD_MODE_SETTLEMENT || gBuildMode == BUILD_MODE_CITY))
         {
+            int settlementPreviewCount = 0;
             for (int tileId = 0; tileId < LAND_TILE_COUNT; tileId++)
             {
                 Vector2 center = AxialToWorld(kLandCoords[tileId], origin, radius);
@@ -341,8 +343,41 @@ void DrawMap(const struct Map *map)
                         continue;
                     }
 
+                    if (gBuildMode == BUILD_MODE_SETTLEMENT)
+                    {
+                        settlementPreviewCount++;
+                    }
+
                     const bool hovered = tileId == gHoveredCornerTileId && cornerIndex == gHoveredCornerIndex;
                     DrawStructure(center, radius, cornerIndex, map->currentPlayer, previewStructure, true, hovered, 0.0f);
+                }
+            }
+
+            if (gBuildMode == BUILD_MODE_SETTLEMENT && gHoveredCornerTileId >= 0 && gHoveredCornerIndex >= 0)
+            {
+                const char *reason = boardGetSettlementPlacementFailureReason(map, gHoveredCornerTileId, gHoveredCornerIndex, map->currentPlayer, origin, radius);
+                static int lastLoggedTile = -1;
+                static int lastLoggedCorner = -1;
+                static enum PlayerType lastLoggedPlayer = PLAYER_NONE;
+                static float lastLoggedTime = 0.0f;
+                const float now = (float)GetTime();
+
+                if (reason != NULL &&
+                    (gHoveredCornerTileId != lastLoggedTile ||
+                     gHoveredCornerIndex != lastLoggedCorner ||
+                     map->currentPlayer != lastLoggedPlayer ||
+                     now - lastLoggedTime > 0.5f))
+                {
+                    debugLog("RENDER", "settlement preview invalid tile=%d corner=%d player=%d reason=%s validPreviewCount=%d",
+                             gHoveredCornerTileId,
+                             gHoveredCornerIndex,
+                             map->currentPlayer,
+                             reason,
+                             settlementPreviewCount);
+                    lastLoggedTile = gHoveredCornerTileId;
+                    lastLoggedCorner = gHoveredCornerIndex;
+                    lastLoggedPlayer = map->currentPlayer;
+                    lastLoggedTime = now;
                 }
             }
         }

@@ -94,6 +94,8 @@ static bool test_setup_settlement_requires_distance_rule(void);
 static bool test_play_roads_must_connect_to_network(void);
 static bool test_road_cannot_continue_only_through_opponent_settlement(void);
 static bool test_second_setup_settlement_grants_each_adjacent_non_desert_resource(void);
+static bool test_unique_settlement_tokens_survive_two_settlements_and_two_cities(void);
+static bool test_unique_city_tokens_survive_two_cities(void);
 static bool test_two_player_matches_skip_closed_seats_in_setup_and_turn_order(void);
 static bool test_roll_pays_all_structures_and_thief_blocks_the_tile(void);
 static bool test_development_cards_are_locked_until_next_turn_and_limited_to_one_play(void);
@@ -145,6 +147,8 @@ int main(void)
         {"roads connect to existing network", test_play_roads_must_connect_to_network},
         {"roads blocked by opponent settlement", test_road_cannot_continue_only_through_opponent_settlement},
         {"second setup settlement grants resources", test_second_setup_settlement_grants_each_adjacent_non_desert_resource},
+        {"settlement tokens count unique corners", test_unique_settlement_tokens_survive_two_settlements_and_two_cities},
+        {"city tokens count unique corners", test_unique_city_tokens_survive_two_cities},
         {"two-player matches skip closed seats", test_two_player_matches_skip_closed_seats_in_setup_and_turn_order},
         {"roll payout and thief blocking", test_roll_pays_all_structures_and_thief_blocks_the_tile},
         {"development card timing limits", test_development_cards_are_locked_until_next_turn_and_limited_to_one_play},
@@ -288,6 +292,51 @@ static bool test_second_setup_settlement_grants_each_adjacent_non_desert_resourc
     ASSERT_EQ_INT(0, map.players[PLAYER_BLUE].resources[RESOURCE_CLAY]);
     ASSERT_EQ_INT(0, map.players[PLAYER_BLUE].resources[RESOURCE_SHEEP]);
     ASSERT_TRUE(map.setupNeedsRoad);
+    return true;
+}
+
+static bool test_unique_settlement_tokens_survive_two_settlements_and_two_cities(void)
+{
+    struct Map map;
+    struct Topology topology;
+    initialize_test_map(&map);
+    build_topology(&topology);
+
+    map.phase = GAME_PHASE_SETUP;
+    map.setupNeedsRoad = false;
+
+    place_structure_on_node(&map, &topology, 0, PLAYER_RED, STRUCTURE_TOWN);
+    place_structure_on_node(&map, &topology, 10, PLAYER_RED, STRUCTURE_TOWN);
+    place_structure_on_node(&map, &topology, 20, PLAYER_RED, STRUCTURE_CITY);
+    place_structure_on_node(&map, &topology, 30, PLAYER_RED, STRUCTURE_CITY);
+
+    for (int nodeIndex = 0; nodeIndex < topology.nodeCount; nodeIndex++)
+    {
+        const struct NodeRef *node = &topology.nodes[nodeIndex];
+        if (boardIsValidSettlementPlacement(&map, node->tileId, node->cornerIndex, PLAYER_BLUE, kBoardOrigin, kBoardRadius))
+        {
+            return true;
+        }
+    }
+
+    ASSERT_TRUE(false);
+    return false;
+}
+
+static bool test_unique_city_tokens_survive_two_cities(void)
+{
+    struct Map map;
+    struct Topology topology;
+    initialize_test_map(&map);
+    build_topology(&topology);
+
+    map.phase = GAME_PHASE_PLAY;
+
+    place_structure_on_node(&map, &topology, 0, PLAYER_BLUE, STRUCTURE_CITY);
+    place_structure_on_node(&map, &topology, 10, PLAYER_BLUE, STRUCTURE_CITY);
+    place_structure_on_node(&map, &topology, 20, PLAYER_BLUE, STRUCTURE_TOWN);
+
+    ASSERT_TRUE(boardIsValidCityPlacement(&map, topology.nodes[20].tileId, topology.nodes[20].cornerIndex, PLAYER_BLUE));
     return true;
 }
 

@@ -2,8 +2,29 @@
 
 #include <raylib.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
+
+static FILE *OpenDebugLogFile(void)
+{
+    static FILE *logFile = NULL;
+    static int attemptedOpen = 0;
+
+    if (!attemptedOpen)
+    {
+        const char *logPath = getenv("SOC_DEBUG_LOG_PATH");
+        attemptedOpen = 1;
+        if (logPath == NULL || *logPath == '\0')
+        {
+            logPath = "debug.log";
+        }
+
+        logFile = fopen(logPath, "a");
+    }
+
+    return logFile;
+}
 
 void debugLog(const char *scope, const char *format, ...)
 {
@@ -35,4 +56,11 @@ void debugLog(const char *scope, const char *format, ...)
 
     fprintf(stdout, "[%s][%s] %s\n", timeBuffer, scope == NULL ? "LOG" : scope, messageBuffer);
     fflush(stdout);
+
+    FILE *logFile = OpenDebugLogFile();
+    if (logFile != NULL)
+    {
+        fprintf(logFile, "[%s][%s] %s\n", timeBuffer, scope == NULL ? "LOG" : scope, messageBuffer);
+        fflush(logFile);
+    }
 }

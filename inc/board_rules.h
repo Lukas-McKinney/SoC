@@ -7,6 +7,8 @@
 bool boardEdgeTouchesCorner(int edgeTileId, int sideIndex, int cornerTileId, int cornerIndex, Vector2 origin, float radius);
 bool boardIsValidRoadPlacement(const struct Map *map, int tileId, int sideIndex, enum PlayerType player, Vector2 origin, float radius);
 bool boardIsValidSettlementPlacement(const struct Map *map, int tileId, int cornerIndex, enum PlayerType player, Vector2 origin, float radius);
+const char *boardGetSettlementPlacementFailureReason(const struct Map *map, int tileId, int cornerIndex, enum PlayerType player, Vector2 origin, float radius);
+const char *boardGetCityPlacementFailureReason(const struct Map *map, int tileId, int cornerIndex, enum PlayerType player);
 bool boardIsValidCityPlacement(const struct Map *map, int tileId, int cornerIndex, enum PlayerType player);
 
 #endif

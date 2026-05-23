@@ -1,4 +1,5 @@
 #include "board_rules.h"
+#include "debug_log.h"
 
 #include <stddef.h>
 #include <math.h>
@@ -26,6 +27,9 @@ static bool has_adjacent_settlement(const struct Map *map, int tileId, int corne
 static bool corner_touches_owned_road(const struct Map *map, int tileId, int cornerIndex, enum PlayerType player, Vector2 origin, float radius);
 static enum PlayerType get_shared_corner_owner_by_key(const struct Map *map, int x, int y, Vector2 origin, float radius);
 static bool player_has_road_at_corner_key(const struct Map *map, enum PlayerType player, int x, int y, Vector2 origin, float radius);
+static const char *settlement_placement_failure_reason(const struct Map *map, int tileId, int cornerIndex, enum PlayerType player, Vector2 origin, float radius);
+static const char *city_placement_failure_reason(const struct Map *map, int tileId, int cornerIndex, enum PlayerType player);
+static bool is_canonical_shared_corner(int tileId, int cornerIndex, Vector2 origin, float radius);
 
 bool boardEdgeTouchesCorner(int edgeTileId, int sideIndex, int cornerTileId, int cornerIndex, Vector2 origin, float radius)
 {
@@ -96,11 +100,15 @@ bool boardIsValidRoadPlacement(const struct Map *map, int tileId, int sideIndex,
 static int count_player_settlements(const struct Map *map, enum PlayerType player)
 {
     int count = 0;
+    const Vector2 origin = {(float)GetScreenWidth() * 0.42f, (float)GetScreenHeight() * 0.46f};
+    const float radius = 68.0f;
     for (int i = 0; i < LAND_TILE_COUNT; i++)
     {
         for (int j = 0; j < HEX_CORNERS; j++)
         {
-            if (map->tiles[i].corners[j].owner == player && map->tiles[i].corners[j].structure == STRUCTURE_TOWN)
+            if (map->tiles[i].corners[j].owner == player &&
+                map->tiles[i].corners[j].structure == STRUCTURE_TOWN &&
+                is_canonical_shared_corner(i, j, origin, radius))
             {
                 count++;
             }
@@ -113,11 +121,15 @@ static int count_player_settlements(const struct Map *map, enum PlayerType playe
 static int count_player_cities(const struct Map *map, enum PlayerType player)
 {
     int count = 0;
+    const Vector2 origin = {(float)GetScreenWidth() * 0.42f, (float)GetScreenHeight() * 0.46f};
+    const float radius = 68.0f;
     for (int i = 0; i < LAND_TILE_COUNT; i++)
     {
         for (int j = 0; j < HEX_CORNERS; j++)
         {
-            if (map->tiles[i].corners[j].owner == player && map->tiles[i].corners[j].structure == STRUCTURE_CITY)
+            if (map->tiles[i].corners[j].owner == player &&
+                map->tiles[i].corners[j].structure == STRUCTURE_CITY &&
+                is_canonical_shared_corner(i, j, origin, radius))
             {
                 count++;
             }
@@ -128,55 +140,22 @@ static int count_player_cities(const struct Map *map, enum PlayerType player)
 
 bool boardIsValidSettlementPlacement(const struct Map *map, int tileId, int cornerIndex, enum PlayerType player, Vector2 origin, float radius)
 {
-    if (tileId < 0 || cornerIndex < 0)
-    {
-        return false;
-    }
+    return settlement_placement_failure_reason(map, tileId, cornerIndex, player, origin, radius) == NULL;
+}
 
-    /* Check if player has reached their 5-settlement limit */
-    if (count_player_settlements(map, player) >= 5)
-    {
-        return false;
-    }
-
-    if (is_shared_corner_occupied(map, tileId, cornerIndex, origin, radius))
-    {
-        return false;
-    }
-
-    if (has_adjacent_settlement(map, tileId, cornerIndex, origin, radius))
-    {
-        return false;
-    }
-
-    if (map->phase == GAME_PHASE_SETUP)
-    {
-        return !map->setupNeedsRoad;
-    }
-
-    return corner_touches_owned_road(map, tileId, cornerIndex, player, origin, radius);
+const char *boardGetSettlementPlacementFailureReason(const struct Map *map, int tileId, int cornerIndex, enum PlayerType player, Vector2 origin, float radius)
+{
+    return settlement_placement_failure_reason(map, tileId, cornerIndex, player, origin, radius);
 }
 
 bool boardIsValidCityPlacement(const struct Map *map, int tileId, int cornerIndex, enum PlayerType player)
 {
-    if (map == NULL || tileId < 0 || tileId >= LAND_TILE_COUNT || cornerIndex < 0 || cornerIndex >= HEX_CORNERS)
-    {
-        return false;
-    }
+    return city_placement_failure_reason(map, tileId, cornerIndex, player) == NULL;
+}
 
-    if (map->phase != GAME_PHASE_PLAY)
-    {
-        return false;
-    }
-
-    /* Check if player has reached their 4-city limit */
-    if (count_player_cities(map, player) >= 4)
-    {
-        return false;
-    }
-
-    const struct Corner *corner = &map->tiles[tileId].corners[cornerIndex];
-    return corner->owner == player && corner->structure == STRUCTURE_TOWN;
+const char *boardGetCityPlacementFailureReason(const struct Map *map, int tileId, int cornerIndex, enum PlayerType player)
+{
+    return city_placement_failure_reason(map, tileId, cornerIndex, player);
 }
 
 static Vector2 axial_to_world(struct AxialCoord coord, Vector2 origin, float radius)
@@ -391,4 +370,100 @@ static bool player_has_road_at_corner_key(const struct Map *map, enum PlayerType
     }
 
     return false;
+}
+
+static bool is_canonical_shared_corner(int tileId, int cornerIndex, Vector2 origin, float radius)
+{
+    const Vector2 center = axial_to_world(kLandCoords[tileId], origin, radius);
+    int tx = 0;
+    int ty = 0;
+    get_corner_key(center, radius, cornerIndex, &tx, &ty);
+
+    for (int otherTile = 0; otherTile < tileId; otherTile++)
+    {
+        const Vector2 otherCenter = axial_to_world(kLandCoords[otherTile], origin, radius);
+        for (int otherCorner = 0; otherCorner < HEX_CORNERS; otherCorner++)
+        {
+            int ox = 0;
+            int oy = 0;
+            get_corner_key(otherCenter, radius, otherCorner, &ox, &oy);
+            if (corner_keys_match(tx, ty, ox, oy))
+            {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+static const char *city_placement_failure_reason(const struct Map *map, int tileId, int cornerIndex, enum PlayerType player)
+{
+    if (map == NULL)
+    {
+        return "map is null";
+    }
+
+    if (tileId < 0 || tileId >= LAND_TILE_COUNT || cornerIndex < 0 || cornerIndex >= HEX_CORNERS)
+    {
+        return "invalid tile or corner";
+    }
+
+    if (map->phase != GAME_PHASE_PLAY)
+    {
+        return "cities can only be placed in play phase";
+    }
+
+    if (count_player_cities(map, player) >= 4)
+    {
+        return "city limit reached";
+    }
+
+    const struct Corner *corner = &map->tiles[tileId].corners[cornerIndex];
+    if (corner->owner != player || corner->structure != STRUCTURE_TOWN)
+    {
+        return "you do not own a settlement here";
+    }
+
+    return NULL;
+}
+
+static const char *settlement_placement_failure_reason(const struct Map *map, int tileId, int cornerIndex, enum PlayerType player, Vector2 origin, float radius)
+{
+    if (map == NULL)
+    {
+        return "map is null";
+    }
+
+    if (tileId < 0 || cornerIndex < 0)
+    {
+        return "invalid tile or corner";
+    }
+
+    if (count_player_settlements(map, player) >= 5)
+    {
+        return "settlement limit reached";
+    }
+
+    if (is_shared_corner_occupied(map, tileId, cornerIndex, origin, radius))
+    {
+        return "corner already occupied";
+    }
+
+    if (has_adjacent_settlement(map, tileId, cornerIndex, origin, radius))
+    {
+        return "adjacent settlement too close";
+    }
+
+    if (map->phase == GAME_PHASE_SETUP)
+    {
+        return map->setupNeedsRoad ? "setup settlement is waiting for a road" : NULL;
+    }
+
+    if (!corner_touches_owned_road(map, tileId, cornerIndex, player, origin, radius))
+    {
+        return "no owned road touches this corner";
+    }
+
+    return NULL;
 }
