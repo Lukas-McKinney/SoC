@@ -46,31 +46,11 @@ void HandleMapInput(struct MatchSession *session)
     const Vector2 mouse = GetMousePosition();
     float bestDistance = 22.0f;
     const Rectangle buildPanel = GetBuildPanelBounds();
-    const Rectangle buildHeaderToggle = {
-        buildPanel.x,
-        buildPanel.y,
-        buildPanel.width,
-        46.0f};
-    const Rectangle buildButton = {
-        buildPanel.x + 10.0f,
-        buildPanel.y + 50.0f,
-        175.0f,
-        60.0f};
-    const Rectangle settlementButton = {
-        buildPanel.x + 196.0f,
-        buildPanel.y + 50.0f,
-        175.0f,
-        60.0f};
-    const Rectangle cityButton = {
-        buildPanel.x + 10.0f,
-        buildPanel.y + 112.0f,
-        175.0f,
-        60.0f};
-    const Rectangle devButton = {
-        buildPanel.x + 196.0f,
-        buildPanel.y + 112.0f,
-        175.0f,
-        60.0f};
+    const Rectangle buildHeaderToggle = GetBuildPanelHeaderBounds();
+    const Rectangle buildButton = GetBuildPanelRoadCardBounds();
+    const Rectangle settlementButton = GetBuildPanelSettlementCardBounds();
+    const Rectangle cityButton = GetBuildPanelCityCardBounds();
+    const Rectangle devButton = GetBuildPanelDevelopmentCardBounds();
     const Rectangle developmentPurchaseOverlay = GetDevelopmentPurchaseOverlayBounds();
     const Rectangle developmentPurchaseConfirmButton = GetDevelopmentPurchaseConfirmButtonBounds();
     const Rectangle developmentPurchaseCancelButton = GetDevelopmentPurchaseCancelButtonBounds();

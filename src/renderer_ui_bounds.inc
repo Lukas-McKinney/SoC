@@ -126,6 +126,30 @@ Rectangle GetBuildPanelBounds(void)
     return (Rectangle){(float)GetScreenWidth() - panelWidth - margin, (float)GetScreenHeight() - panelHeight - margin, panelWidth, panelHeight};
 }
 
+Rectangle GetBuildPanelHeaderBounds(void)
+{
+    const Rectangle panel = GetBuildPanelBounds();
+    return (Rectangle){panel.x, panel.y, panel.width, UiScaled(46.0f)};
+}
+
+Rectangle GetBuildPanelRoadCardBounds(void)
+{
+    const Rectangle panel = GetBuildPanelBounds();
+    return (Rectangle){panel.x + UiScaled(10.0f), panel.y + UiScaled(50.0f), UiScaled(175.0f), UiScaled(60.0f)};
+}
+
+Rectangle GetBuildPanelSettlementCardBounds(void)
+{
+    const Rectangle panel = GetBuildPanelBounds();
+    return (Rectangle){panel.x + UiScaled(196.0f), panel.y + UiScaled(50.0f), UiScaled(175.0f), UiScaled(60.0f)};
+}
+
+Rectangle GetBuildPanelCityCardBounds(void)
+{
+    const Rectangle panel = GetBuildPanelBounds();
+    return (Rectangle){panel.x + UiScaled(10.0f), panel.y + UiScaled(112.0f), UiScaled(175.0f), UiScaled(60.0f)};
+}
+
 Rectangle GetBuildPanelDevelopmentCardBounds(void)
 {
     const Rectangle panel = GetBuildPanelBounds();
