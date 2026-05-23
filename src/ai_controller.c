@@ -12,6 +12,7 @@
 #include <math.h>
 #include <raylib.h>
 #include <stddef.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -77,16 +78,45 @@ struct AiSearchState
     int maritimeTradesRemaining;
 };
 
+struct AiAsyncPlayPhaseRequest
+{
+    struct Map snapshot;
+    enum AiDifficulty difficulty;
+    int buildActionsThisTurn;
+    int maritimeTradesThisTurn;
+    unsigned int generation;
+};
+
+struct AiAsyncPlayPhaseResult
+{
+    struct Map snapshot;
+    enum AiDifficulty difficulty;
+    int buildActionsThisTurn;
+    int maritimeTradesThisTurn;
+    struct AiAction action;
+    bool foundAction;
+    double budgetUsed;
+    unsigned int nodesVisited;
+    bool timedOut;
+    double elapsed;
+    unsigned int generation;
+};
+
 static enum PlayerType gTrackedDecisionPlayer = PLAYER_NONE;
 static enum PlayerType gTrackedTurnPlayer = PLAYER_NONE;
 static double gNextAiActionTime = 0.0;
 static int gAiBuildActionsThisTurn = 0;
 static int gAiMaritimeTradesThisTurn = 0;
 static bool gAiUiPreparedForTurn = false;
-static double gAiSearchDeadline = 0.0;
-static double gAiSearchBudget = 0.0;
-static unsigned int gAiSearchNodesVisited = 0;
-static bool gAiSearchTimedOut = false;
+static _Thread_local double gAiSearchDeadline = 0.0;
+static _Thread_local double gAiSearchBudget = 0.0;
+static _Thread_local unsigned int gAiSearchNodesVisited = 0;
+static _Thread_local bool gAiSearchTimedOut = false;
+static bool gAiAsyncPlayPhaseRunning = false;
+static bool gAiAsyncPlayPhaseReady = false;
+static unsigned int gAiAsyncPlayPhaseGeneration = 0;
+static struct AiAsyncPlayPhaseResult gAiAsyncPlayPhaseResult;
+static pthread_mutex_t gAiAsyncMutex = PTHREAD_MUTEX_INITIALIZER;
 
 static bool player_is_ai(const struct Map *map, enum PlayerType player);
 static enum PlayerType active_decision_player(const struct Map *map);
@@ -107,6 +137,20 @@ static void reset_ai_turn_state(void);
 static void prepare_ui_for_ai_turn(void);
 static bool ai_is_blocked_by_ui(void);
 static bool ai_action_to_game_action(const struct AiAction *action, struct GameAction *gameAction);
+static void ai_async_lock(void);
+static void ai_async_unlock(void);
+static void ai_async_invalidate_play_phase_plan(void);
+static bool ai_async_try_start_play_phase_plan(const struct Map *map, enum AiDifficulty difficulty);
+static bool ai_async_has_play_phase_plan_in_flight(void);
+static bool ai_async_try_consume_play_phase_plan(const struct Map *map, enum AiDifficulty difficulty,
+                                                 struct AiAction *action, bool *foundAction,
+                                                 double *budgetUsed, unsigned int *nodesVisited,
+                                                 bool *timedOut, double *elapsed);
+static bool ai_async_map_matches_snapshot(const struct Map *map, const struct Map *snapshot);
+static bool find_best_play_phase_action_core(const struct Map *map, enum AiDifficulty difficulty,
+                                             int buildActionsThisTurn, int maritimeTradesThisTurn,
+                                             struct AiAction *action, float *scoreOut, double *budgetUsed,
+                                             unsigned int *nodesVisited, bool *timedOut, double *elapsed);
 
 static int min_int(int a, int b);
 static int max_int(int a, int b);
@@ -163,6 +207,7 @@ static bool handle_ai_roll(struct Map *map);
 
 void aiResetController(void)
 {
+    ai_async_invalidate_play_phase_plan();
     gTrackedDecisionPlayer = PLAYER_NONE;
     gTrackedTurnPlayer = PLAYER_NONE;
     gNextAiActionTime = 0.0;
@@ -205,6 +250,178 @@ void aiConfigureAIMatch(struct Map *map, enum PlayerType humanPlayer, enum AiDif
         map->players[player].controlMode = PLAYER_CONTROL_AI;
         map->players[player].aiDifficulty = difficulty;
     }
+}
+
+static void ai_async_lock(void)
+{
+    pthread_mutex_lock(&gAiAsyncMutex);
+}
+
+static void ai_async_unlock(void)
+{
+    pthread_mutex_unlock(&gAiAsyncMutex);
+}
+
+static bool ai_async_map_matches_snapshot(const struct Map *map, const struct Map *snapshot)
+{
+    return map != NULL &&
+           snapshot != NULL &&
+           memcmp(map, snapshot, sizeof(*map)) == 0;
+}
+
+static void ai_async_invalidate_play_phase_plan(void)
+{
+    ai_async_lock();
+    gAiAsyncPlayPhaseGeneration++;
+    gAiAsyncPlayPhaseReady = false;
+    ai_async_unlock();
+}
+
+static void *ai_async_play_phase_worker(void *userdata)
+{
+    struct AiAsyncPlayPhaseRequest *request = (struct AiAsyncPlayPhaseRequest *)userdata;
+    struct AiAsyncPlayPhaseResult result;
+
+    memset(&result, 0, sizeof(result));
+    if (request != NULL)
+    {
+        float searchScore = 0.0f;
+
+        result.snapshot = request->snapshot;
+        result.difficulty = request->difficulty;
+        result.buildActionsThisTurn = request->buildActionsThisTurn;
+        result.maritimeTradesThisTurn = request->maritimeTradesThisTurn;
+        result.generation = request->generation;
+        result.foundAction = find_best_play_phase_action_core(&request->snapshot,
+                                                              request->difficulty,
+                                                              request->buildActionsThisTurn,
+                                                              request->maritimeTradesThisTurn,
+                                                              &result.action,
+                                                              &searchScore,
+                                                              &result.budgetUsed,
+                                                              &result.nodesVisited,
+                                                              &result.timedOut,
+                                                              &result.elapsed);
+    }
+
+    ai_async_lock();
+    if (request != NULL && gAiAsyncPlayPhaseGeneration == request->generation)
+    {
+        gAiAsyncPlayPhaseResult = result;
+        gAiAsyncPlayPhaseReady = true;
+    }
+    gAiAsyncPlayPhaseRunning = false;
+    ai_async_unlock();
+
+    free(request);
+    return NULL;
+}
+
+static bool ai_async_try_start_play_phase_plan(const struct Map *map, enum AiDifficulty difficulty)
+{
+    struct AiAsyncPlayPhaseRequest *request;
+
+    if (map == NULL)
+    {
+        return false;
+    }
+
+    ai_async_lock();
+    if (gAiAsyncPlayPhaseRunning || gAiAsyncPlayPhaseReady)
+    {
+        ai_async_unlock();
+        return false;
+    }
+
+    request = (struct AiAsyncPlayPhaseRequest *)malloc(sizeof(*request));
+    if (request == NULL)
+    {
+        ai_async_unlock();
+        return false;
+    }
+
+    memset(request, 0, sizeof(*request));
+    request->snapshot = *map;
+    request->difficulty = difficulty;
+    request->buildActionsThisTurn = gAiBuildActionsThisTurn;
+    request->maritimeTradesThisTurn = gAiMaritimeTradesThisTurn;
+    request->generation = gAiAsyncPlayPhaseGeneration;
+    gAiAsyncPlayPhaseRunning = true;
+    ai_async_unlock();
+
+    {
+        pthread_t threadId;
+        if (pthread_create(&threadId, NULL, ai_async_play_phase_worker, request) != 0)
+        {
+            ai_async_lock();
+            gAiAsyncPlayPhaseRunning = false;
+            ai_async_unlock();
+            free(request);
+            return false;
+        }
+        pthread_detach(threadId);
+    }
+
+    return true;
+}
+
+static bool ai_async_has_play_phase_plan_in_flight(void)
+{
+    bool inFlight;
+
+    ai_async_lock();
+    inFlight = gAiAsyncPlayPhaseRunning || gAiAsyncPlayPhaseReady;
+    ai_async_unlock();
+    return inFlight;
+}
+
+static bool ai_async_try_consume_play_phase_plan(const struct Map *map, enum AiDifficulty difficulty,
+                                                 struct AiAction *action, bool *foundAction,
+                                                 double *budgetUsed, unsigned int *nodesVisited,
+                                                 bool *timedOut, double *elapsed)
+{
+    bool consumed = false;
+
+    ai_async_lock();
+    if (gAiAsyncPlayPhaseReady)
+    {
+        if (gAiAsyncPlayPhaseResult.generation == gAiAsyncPlayPhaseGeneration &&
+            gAiAsyncPlayPhaseResult.difficulty == difficulty &&
+            gAiAsyncPlayPhaseResult.buildActionsThisTurn == gAiBuildActionsThisTurn &&
+            gAiAsyncPlayPhaseResult.maritimeTradesThisTurn == gAiMaritimeTradesThisTurn &&
+            ai_async_map_matches_snapshot(map, &gAiAsyncPlayPhaseResult.snapshot))
+        {
+            if (action != NULL)
+            {
+                *action = gAiAsyncPlayPhaseResult.action;
+            }
+            if (foundAction != NULL)
+            {
+                *foundAction = gAiAsyncPlayPhaseResult.foundAction;
+            }
+            if (budgetUsed != NULL)
+            {
+                *budgetUsed = gAiAsyncPlayPhaseResult.budgetUsed;
+            }
+            if (nodesVisited != NULL)
+            {
+                *nodesVisited = gAiAsyncPlayPhaseResult.nodesVisited;
+            }
+            if (timedOut != NULL)
+            {
+                *timedOut = gAiAsyncPlayPhaseResult.timedOut;
+            }
+            if (elapsed != NULL)
+            {
+                *elapsed = gAiAsyncPlayPhaseResult.elapsed;
+            }
+            consumed = true;
+        }
+
+        gAiAsyncPlayPhaseReady = false;
+    }
+    ai_async_unlock();
+    return consumed;
 }
 
 bool aiControlsActiveDecision(const struct Map *map)
@@ -325,7 +542,17 @@ void aiUpdateTurn(struct Map *map)
         gAiUiPreparedForTurn = true;
     }
 
-    if (ai_is_blocked_by_ui() || GetTime() < gNextAiActionTime)
+    if (map->phase == GAME_PHASE_PLAY &&
+        map->rolledThisTurn &&
+        !gameHasPendingDiscards(map) &&
+        !gameNeedsThiefPlacement(map) &&
+        !gameNeedsThiefVictimSelection(map) &&
+        !gameHasFreeRoadPlacements(map))
+    {
+        ai_async_try_start_play_phase_plan(map, difficulty);
+    }
+
+    if (GetTime() < gNextAiActionTime || ai_is_blocked_by_ui())
     {
         return;
     }
@@ -422,13 +649,43 @@ void aiUpdateTurn(struct Map *map)
 
     {
         struct AiAction action;
-        const double planningStart = GetTime();
-        if (find_best_play_phase_action(map, difficulty, &action))
+        bool planCompleted = false;
+        bool foundAction = false;
+        double planBudget = 0.0;
+        double planElapsed = 0.0;
+        unsigned int planNodes = 0;
+        bool planTimedOut = false;
+
+        planCompleted = ai_async_try_consume_play_phase_plan(map, difficulty,
+                                                             &action, &foundAction,
+                                                             &planBudget, &planNodes,
+                                                             &planTimedOut, &planElapsed);
+        if (planCompleted)
+        {
+            debugLog("AI", "play phase async ready action=%s elapsed=%.3f budget=%.3f nodes=%u timedOut=%d",
+                     ai_action_type_label(action.type),
+                     planElapsed,
+                     planBudget,
+                     planNodes,
+                     planTimedOut ? 1 : 0);
+        }
+        else if (ai_async_has_play_phase_plan_in_flight())
+        {
+            return;
+        }
+        else
+        {
+            const double planningStart = GetTime();
+            foundAction = find_best_play_phase_action(map, difficulty, &action);
+            planElapsed = GetTime() - planningStart;
+        }
+
+        if (foundAction)
         {
             log_ai_action("play phase decision", map, &action);
             if (execute_ai_action(map, &action))
             {
-                debugLog("AI", "play phase elapsed=%.3f", GetTime() - planningStart);
+                debugLog("AI", "play phase elapsed=%.3f", planElapsed);
                 if (action.type == AI_ACTION_MARITIME_TRADE)
                 {
                     gAiMaritimeTradesThisTurn++;
@@ -443,11 +700,11 @@ void aiUpdateTurn(struct Map *map)
                 schedule_next_ai_action(map, difficulty);
                 return;
             }
-            debugLog("AI", "play phase execute failed elapsed=%.3f", GetTime() - planningStart);
+            debugLog("AI", "play phase execute failed elapsed=%.3f", planElapsed);
             schedule_next_ai_action(map, difficulty);
             return;
         }
-        debugLog("AI", "play phase no action elapsed=%.3f", GetTime() - planningStart);
+        debugLog("AI", "play phase no action elapsed=%.3f", planElapsed);
     }
 
     if (gameCanEndTurn(map))
@@ -690,6 +947,7 @@ static void schedule_next_ai_action(const struct Map *map, enum AiDifficulty dif
 
 static void reset_ai_turn_state(void)
 {
+    ai_async_invalidate_play_phase_plan();
     gAiBuildActionsThisTurn = 0;
     gAiMaritimeTradesThisTurn = 0;
     gAiUiPreparedForTurn = false;
@@ -2650,7 +2908,10 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
     return bestScore;
 }
 
-static bool find_best_play_phase_action(const struct Map *map, enum AiDifficulty difficulty, struct AiAction *action)
+static bool find_best_play_phase_action_core(const struct Map *map, enum AiDifficulty difficulty,
+                                             int buildActionsThisTurn, int maritimeTradesThisTurn,
+                                             struct AiAction *action, float *scoreOut, double *budgetUsedOut,
+                                             unsigned int *nodesVisitedOut, bool *timedOutOut, double *elapsedOut)
 {
     struct AiSearchState state;
     float score;
@@ -2664,8 +2925,8 @@ static bool find_best_play_phase_action(const struct Map *map, enum AiDifficulty
         return false;
     }
 
-    state.buildActionsRemaining = ai_build_action_budget(difficulty) - gAiBuildActionsThisTurn;
-    state.maritimeTradesRemaining = ai_maritime_trade_budget(difficulty) - gAiMaritimeTradesThisTurn;
+    state.buildActionsRemaining = ai_build_action_budget(difficulty) - buildActionsThisTurn;
+    state.maritimeTradesRemaining = ai_maritime_trade_budget(difficulty) - maritimeTradesThisTurn;
     if (state.buildActionsRemaining < 0)
     {
         state.buildActionsRemaining = 0;
@@ -2681,14 +2942,61 @@ static bool find_best_play_phase_action(const struct Map *map, enum AiDifficulty
     nodesVisited = gAiSearchNodesVisited;
     timedOut = gAiSearchTimedOut;
     ai_end_play_phase_search();
+    if (budgetUsedOut != NULL)
+    {
+        *budgetUsedOut = budgetUsed;
+    }
+    if (scoreOut != NULL)
+    {
+        *scoreOut = score;
+    }
+    if (nodesVisitedOut != NULL)
+    {
+        *nodesVisitedOut = nodesVisited;
+    }
+    if (timedOutOut != NULL)
+    {
+        *timedOutOut = timedOut;
+    }
+    if (elapsedOut != NULL)
+    {
+        *elapsedOut = GetTime() - started;
+    }
+    return action->type != AI_ACTION_NONE;
+}
+
+static bool find_best_play_phase_action(const struct Map *map, enum AiDifficulty difficulty, struct AiAction *action)
+{
+    float score = 0.0f;
+    double budgetUsed = 0.0;
+    unsigned int nodesVisited = 0;
+    bool timedOut = false;
+    double elapsed = 0.0;
+    bool found;
+
+    if (map == NULL || action == NULL)
+    {
+        return false;
+    }
+
+    found = find_best_play_phase_action_core(map,
+                                             difficulty,
+                                             gAiBuildActionsThisTurn,
+                                             gAiMaritimeTradesThisTurn,
+                                             action,
+                                             &score,
+                                             &budgetUsed,
+                                             &nodesVisited,
+                                             &timedOut,
+                                             &elapsed);
     debugLog("AI", "play phase search action=%s score=%.3f elapsed=%.3f budget=%.3f nodes=%u timedOut=%d",
              ai_action_type_label(action->type),
              score,
-             GetTime() - started,
+             elapsed,
              budgetUsed,
              nodesVisited,
              timedOut ? 1 : 0);
-    return action->type != AI_ACTION_NONE;
+    return found;
 }
 
 static bool execute_ai_action(struct Map *map, const struct AiAction *action)
