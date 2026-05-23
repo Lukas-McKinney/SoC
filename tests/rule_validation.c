@@ -93,6 +93,7 @@ static void apply_path_roads(struct Map *map, const struct Topology *topology, c
 static bool test_setup_settlement_requires_distance_rule(void);
 static bool test_play_roads_must_connect_to_network(void);
 static bool test_road_cannot_continue_only_through_opponent_settlement(void);
+static bool test_settlement_cannot_split_an_opponent_road_pair(void);
 static bool test_second_setup_settlement_grants_each_adjacent_non_desert_resource(void);
 static bool test_unique_settlement_tokens_survive_two_settlements_and_two_cities(void);
 static bool test_unique_city_tokens_survive_two_cities(void);
@@ -146,6 +147,7 @@ int main(void)
         {"setup settlement distance rule", test_setup_settlement_requires_distance_rule},
         {"roads connect to existing network", test_play_roads_must_connect_to_network},
         {"roads blocked by opponent settlement", test_road_cannot_continue_only_through_opponent_settlement},
+        {"settlements cannot split opponent road pair", test_settlement_cannot_split_an_opponent_road_pair},
         {"second setup settlement grants resources", test_second_setup_settlement_grants_each_adjacent_non_desert_resource},
         {"settlement tokens count unique corners", test_unique_settlement_tokens_survive_two_settlements_and_two_cities},
         {"city tokens count unique corners", test_unique_city_tokens_survive_two_cities},
@@ -244,6 +246,60 @@ static bool test_road_cannot_continue_only_through_opponent_settlement(void)
                                                PLAYER_RED, kBoardOrigin, kBoardRadius));
     }
     return true;
+}
+
+static bool test_settlement_cannot_split_an_opponent_road_pair(void)
+{
+    struct Map map;
+    struct Topology topology;
+    initialize_test_map(&map);
+    build_topology(&topology);
+
+    map.phase = GAME_PHASE_PLAY;
+
+    for (int nodeIndex = 0; nodeIndex < topology.nodeCount; nodeIndex++)
+    {
+        int incidentEdges[3] = {-1, -1, -1};
+        int incidentCount = 0;
+
+        for (int edgeIndex = 0; edgeIndex < topology.edgeCount; edgeIndex++)
+        {
+            const struct EdgeRef *edge = &topology.edges[edgeIndex];
+            if (edge->nodeA != nodeIndex && edge->nodeB != nodeIndex)
+            {
+                continue;
+            }
+
+            if (incidentCount < 3)
+            {
+                incidentEdges[incidentCount] = edgeIndex;
+            }
+            incidentCount++;
+        }
+
+        if (incidentCount < 3)
+        {
+            continue;
+        }
+
+        place_structure_on_node(&map, &topology, nodeIndex, PLAYER_RED, STRUCTURE_TOWN);
+        place_road_on_edge(&map, &topology, incidentEdges[0], PLAYER_RED);
+        place_road_on_edge(&map, &topology, incidentEdges[1], PLAYER_BLUE);
+        place_road_on_edge(&map, &topology, incidentEdges[2], PLAYER_BLUE);
+
+        {
+            const struct NodeRef *node = &topology.nodes[nodeIndex];
+            ASSERT_FALSE(boardIsValidSettlementPlacement(&map, node->tileId, node->cornerIndex,
+                                                         PLAYER_RED, kBoardOrigin, kBoardRadius));
+            ASSERT_TRUE(boardGetSettlementPlacementFailureReason(&map, node->tileId, node->cornerIndex,
+                                                                 PLAYER_RED, kBoardOrigin, kBoardRadius) != NULL);
+        }
+
+        return true;
+    }
+
+    ASSERT_TRUE(false);
+    return false;
 }
 
 static bool test_second_setup_settlement_grants_each_adjacent_non_desert_resource(void)

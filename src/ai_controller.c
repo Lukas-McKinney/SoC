@@ -993,14 +993,14 @@ static float positional_priority_for_corner(const struct Map *map, int tileId, i
     /* Weighted combination: centrality + connectivity, stronger at higher difficulties */
     if (difficulty == AI_DIFFICULTY_HARD)
     {
-        return invDist * 1.8f + (float)roads * 0.55f;  /* Prefer central, connected positions */
+        return invDist * 1.4f + (float)roads * 0.60f;  /* Prefer connected positions without over-favoring the board center */
     }
     else if (difficulty == AI_DIFFICULTY_MEDIUM)
     {
-        return invDist * 1.2f + (float)roads * 0.35f;
+        return invDist * 0.9f + (float)roads * 0.40f;
     }
 
-    return invDist * 0.7f + (float)roads * 0.15f;
+    return invDist * 0.5f + (float)roads * 0.18f;
 }
 
 static float positional_priority_for_edge(const struct Map *map, int tileId, int sideIndex, enum AiDifficulty difficulty, enum PlayerType player)
@@ -1073,7 +1073,7 @@ static float evaluate_corner_value(const struct Map *map, int tileId, int corner
 
             if (map->tiles[otherTile].type == TILE_DESERT)
             {
-                score += 0.2f;
+                score -= 0.35f;
                 break;
             }
 

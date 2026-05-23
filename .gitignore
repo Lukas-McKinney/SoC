@@ -60,3 +60,7 @@ settlers
 
 dist/
 
+
+*.log
+*.txt
+

@@ -24,6 +24,7 @@ static void get_corner_key(Vector2 center, float radius, int cornerIndex, int *x
 static bool corner_keys_match(int x1, int y1, int x2, int y2);
 static bool is_shared_corner_occupied(const struct Map *map, int tileId, int cornerIndex, Vector2 origin, float radius);
 static bool has_adjacent_settlement(const struct Map *map, int tileId, int cornerIndex, Vector2 origin, float radius);
+static int count_player_roads_touching_corner(const struct Map *map, enum PlayerType player, int tileId, int cornerIndex, Vector2 origin, float radius);
 static bool corner_touches_owned_road(const struct Map *map, int tileId, int cornerIndex, enum PlayerType player, Vector2 origin, float radius);
 static enum PlayerType get_shared_corner_owner_by_key(const struct Map *map, int x, int y, Vector2 origin, float radius);
 static bool player_has_road_at_corner_key(const struct Map *map, enum PlayerType player, int x, int y, Vector2 origin, float radius);
@@ -290,6 +291,40 @@ static bool has_adjacent_settlement(const struct Map *map, int tileId, int corne
     return false;
 }
 
+static int count_player_roads_touching_corner(const struct Map *map, enum PlayerType player, int tileId, int cornerIndex, Vector2 origin, float radius)
+{
+    int count = 0;
+    const Vector2 cornerCenter = axial_to_world(kLandCoords[tileId], origin, radius);
+    int cx = 0;
+    int cy = 0;
+    get_corner_key(cornerCenter, radius, cornerIndex, &cx, &cy);
+
+    for (int otherTile = 0; otherTile < LAND_TILE_COUNT; otherTile++)
+    {
+        const Vector2 otherCenter = axial_to_world(kLandCoords[otherTile], origin, radius);
+        for (int otherSide = 0; otherSide < HEX_CORNERS; otherSide++)
+        {
+            if (!map->tiles[otherTile].sides[otherSide].isset ||
+                map->tiles[otherTile].sides[otherSide].player != player)
+            {
+                continue;
+            }
+
+            int ax = 0;
+            int ay = 0;
+            int bx = 0;
+            int by = 0;
+            get_road_edge_key(otherCenter, radius, otherSide, &ax, &ay, &bx, &by);
+            if (corner_keys_match(cx, cy, ax, ay) || corner_keys_match(cx, cy, bx, by))
+            {
+                count++;
+            }
+        }
+    }
+
+    return count;
+}
+
 static bool corner_touches_owned_road(const struct Map *map, int tileId, int cornerIndex, enum PlayerType player, Vector2 origin, float radius)
 {
     const Vector2 cornerCenter = axial_to_world(kLandCoords[tileId], origin, radius);
@@ -458,6 +493,19 @@ static const char *settlement_placement_failure_reason(const struct Map *map, in
     if (map->phase == GAME_PHASE_SETUP)
     {
         return map->setupNeedsRoad ? "setup settlement is waiting for a road" : NULL;
+    }
+
+    for (enum PlayerType otherPlayer = PLAYER_RED; otherPlayer <= PLAYER_BLACK; otherPlayer++)
+    {
+        if (otherPlayer == player)
+        {
+            continue;
+        }
+
+        if (count_player_roads_touching_corner(map, otherPlayer, tileId, cornerIndex, origin, radius) >= 2)
+        {
+            return "corner blocks another player's road";
+        }
     }
 
     if (!corner_touches_owned_road(map, tileId, cornerIndex, player, origin, radius))
