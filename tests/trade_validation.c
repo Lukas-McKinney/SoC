@@ -128,6 +128,8 @@ static bool test_authoritative_snapshot_restores_local_discard_control_after_rej
     ASSERT_EQ_INT((int)mapSnapshotSerializedSize(), (int)snapshotSize);
     ASSERT_TRUE(matchSessionApplyAuthoritativeSnapshot(&session, snapshot, snapshotSize));
     ASSERT_TRUE(matchSessionHasStarted(&session));
+    ASSERT_TRUE(matchSessionConsumePendingMatchInitUiReset(&session));
+    ASSERT_FALSE(matchSessionConsumePendingMatchInitUiReset(&session));
     ASSERT_EQ_INT(PLAYER_BLUE, gameGetCurrentDiscardPlayer(&session.map));
     ASSERT_TRUE(matchSessionLocalControlsPlayer(&session, PLAYER_BLUE));
     ASSERT_TRUE(matchSessionLocalCanActOnCurrentDecision(&session));
