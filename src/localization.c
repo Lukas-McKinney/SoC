@@ -17,7 +17,6 @@ static const struct TranslationEntry kTranslations[] = {
     {"Quick Start", "Schnellstart"},
     {"Build, trade, and test a full match flow.", "Baue, handle und teste einen kompletten Spielablauf."},
     {"Start Game", "Spiel starten"},
-    {"Start vs AI", "Gegen KI starten"},
     {"Lobby", "Lobby"},
     {"Statistics", "Statistiken"},
     {"Theme", "Design"},
