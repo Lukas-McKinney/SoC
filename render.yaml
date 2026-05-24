@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: soc-relay
+    runtime: native
+    buildCommand: make relay-server
+    startCommand: ./soc_relay
+    healthCheckPath: /healthz

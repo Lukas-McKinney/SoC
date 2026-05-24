@@ -578,18 +578,6 @@ static bool websocket_frame_parse(struct RelayClient *clients, int index)
         size_t headerLength = 2u;
         size_t payloadOffset = 0u;
 
-        if (opcode == 0x8u)
-        {
-            disconnect_client(clients, index, "peer disconnected");
-            return false;
-        }
-
-        if (opcode == 0x9u)
-        {
-            disconnect_client(clients, index, "ping unsupported");
-            return false;
-        }
-
         if (!fin || opcode == 0x0u)
         {
             disconnect_client(clients, index, "fragmented frame unsupported");
@@ -651,8 +639,34 @@ static bool websocket_frame_parse(struct RelayClient *clients, int index)
             fprintf(stderr, "[relay] websocket frame unmasked: idx=%d payloadLen=%zu\n", index, (size_t)payloadLength);
             fflush(stderr);
 
-            if (!websocket_frame_append(clients, index, payload, (size_t)payloadLength))
+            if (opcode == 0x8u)
             {
+                disconnect_client(clients, index, "peer disconnected");
+                return false;
+            }
+
+            if (opcode == 0x9u)
+            {
+                if (!websocket_frame_send(client->socketHandle, 0xAu, payload, (size_t)payloadLength))
+                {
+                    disconnect_client(clients, index, "pong failed");
+                    return false;
+                }
+            }
+            else if (opcode == 0xAu)
+            {
+                /* Ignore pongs; the relay only needs to keep the socket alive. */
+            }
+            else if (opcode == 0x1u || opcode == 0x2u)
+            {
+                if (!websocket_frame_append(clients, index, payload, (size_t)payloadLength))
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                disconnect_client(clients, index, "unsupported websocket opcode");
                 return false;
             }
 
@@ -778,8 +792,7 @@ static void flush_client(struct RelayClient *clients, int index)
     {
         fprintf(stderr, "[relay] websocket relay: idx=%d -> peer=%d size=%zu\n", index, client->peerIndex, client->pendingLength);
         fflush(stderr);
-        /* Send as a text frame so browser/text clients can parse easily */
-        if (!websocket_frame_send(peer->socketHandle, 0x1u, client->pendingBuffer, client->pendingLength))
+        if (!websocket_frame_send(peer->socketHandle, 0x2u, client->pendingBuffer, client->pendingLength))
         {
             disconnect_client(clients, index, "send failed");
             return;

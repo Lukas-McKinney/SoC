@@ -1783,11 +1783,11 @@ static float evaluate_road_candidate(const struct Map *map, int tileId, int side
     int cornerA = 0;
     int cornerB = 1;
     float score = 0.0f;
+    const float cornerMultiplier = difficulty == AI_DIFFICULTY_HARD ? 1.35f : (difficulty == AI_DIFFICULTY_MEDIUM ? 1.2f : 1.0f);
 
     GetSideCornerIndices(sideIndex, &cornerA, &cornerB);
     if (corner_can_host_future_settlement(map, tileId, cornerA))
     {
-        const float cornerMultiplier = difficulty == AI_DIFFICULTY_HARD ? 1.9f : (difficulty == AI_DIFFICULTY_MEDIUM ? 1.3f : 1.0f);
         score += evaluate_corner_value(map, tileId, cornerA, difficulty) * cornerMultiplier;
     }
     else if (map->tiles[tileId].corners[cornerA].owner == player)
@@ -1797,7 +1797,6 @@ static float evaluate_road_candidate(const struct Map *map, int tileId, int side
 
     if (corner_can_host_future_settlement(map, tileId, cornerB))
     {
-        const float cornerMultiplier = difficulty == AI_DIFFICULTY_HARD ? 1.9f : (difficulty == AI_DIFFICULTY_MEDIUM ? 1.3f : 1.0f);
         score += evaluate_corner_value(map, tileId, cornerB, difficulty) * cornerMultiplier;
     }
     else if (map->tiles[tileId].corners[cornerB].owner == player)
@@ -1807,17 +1806,16 @@ static float evaluate_road_candidate(const struct Map *map, int tileId, int side
 
     if (difficulty == AI_DIFFICULTY_HARD && gameGetLongestRoadOwner(map) != player)
     {
-        score += 12.5f;  /* Aggressively pursue longest road on hard difficulty */
+        score += 6.0f;
     }
 
-    /* scaled bonus to encourage road construction on smarter AIs */
     if (difficulty == AI_DIFFICULTY_HARD)
     {
-        score += 8.0f;  /* Strongly encourage road expansion on hard difficulty */
+        score += 2.5f;
     }
     else if (difficulty == AI_DIFFICULTY_MEDIUM)
     {
-        score += 1.8f;
+        score += 1.2f;
     }
 
     return score;
@@ -2162,12 +2160,22 @@ static float evaluate_player_strength(const struct Map *map, enum PlayerType pla
     struct EdgeCandidate roadCandidate;
     float score = 0.0f;
     int totalResources;
+    bool canAffordCity;
+    bool canAffordSettlement;
+    bool canAffordRoad;
+    bool canBuyDevelopment;
+    bool hasSettlementCandidate;
 
     if (map == NULL || player < PLAYER_RED || player > PLAYER_BLACK)
     {
         return -AI_SEARCH_WIN_SCORE;
     }
 
+    canAffordCity = player_can_afford_cost(map, player, kCityCost);
+    canAffordSettlement = player_can_afford_cost(map, player, kSettlementCost);
+    canAffordRoad = player_can_afford_cost(map, player, kRoadCost);
+    canBuyDevelopment = gameGetDevelopmentDeckCount(map) > 0 && player_can_afford_cost(map, player, kDevelopmentCost);
+    hasSettlementCandidate = find_best_settlement_candidate(map, player, difficulty, &settlementCandidate);
     totalResources = resource_total_for_player(map, player);
     score += (float)gameComputeVictoryPoints(map, player) * 160.0f;
     score += (float)gameComputeVisibleVictoryPoints(map, player) * 28.0f;
@@ -2178,14 +2186,28 @@ static float evaluate_player_strength(const struct Map *map, enum PlayerType pla
         /* make cities significantly more attractive on Hard */
         score += cityCandidate.score * 4.0f;
     }
-    if (find_best_settlement_candidate(map, player, difficulty, &settlementCandidate))
+    if (hasSettlementCandidate)
     {
-        score += settlementCandidate.score * 3.0f;
+        const float settlementWeight = difficulty == AI_DIFFICULTY_HARD ? 4.4f : (difficulty == AI_DIFFICULTY_MEDIUM ? 3.6f : 3.0f);
+        score += settlementCandidate.score * settlementWeight;
+        if (canAffordSettlement)
+        {
+            /* If a settlement is already available, stop overvaluing extra road potential. */
+            score += difficulty == AI_DIFFICULTY_HARD ? 18.0f : (difficulty == AI_DIFFICULTY_MEDIUM ? 10.0f : 4.0f);
+            score += settlementCandidate.score * (difficulty == AI_DIFFICULTY_HARD ? 1.1f : (difficulty == AI_DIFFICULTY_MEDIUM ? 0.6f : 0.25f));
+        }
     }
     if (find_best_road_candidate(map, player, difficulty, false, &roadCandidate))
     {
-        /* Hard AI values road candidates significantly higher for strategic expansion */
-        const float roadWeight = difficulty == AI_DIFFICULTY_HARD ? 14.5f : (difficulty == AI_DIFFICULTY_MEDIUM ? 5.0f : 2.0f);
+        float roadWeight = difficulty == AI_DIFFICULTY_HARD ? 6.2f : (difficulty == AI_DIFFICULTY_MEDIUM ? 3.6f : 1.8f);
+        if (hasSettlementCandidate)
+        {
+            roadWeight *= difficulty == AI_DIFFICULTY_HARD ? 0.68f : (difficulty == AI_DIFFICULTY_MEDIUM ? 0.78f : 0.9f);
+            if (canAffordSettlement)
+            {
+                roadWeight *= difficulty == AI_DIFFICULTY_HARD ? 0.45f : (difficulty == AI_DIFFICULTY_MEDIUM ? 0.62f : 0.85f);
+            }
+        }
         score += roadCandidate.score * roadWeight;
     }
 
@@ -2204,21 +2226,21 @@ static float evaluate_player_strength(const struct Map *map, enum PlayerType pla
         score += 38.0f + (float)gameGetLongestRoadLength(map) * 2.5f;  /* Higher bonus for long roads */
     }
 
-    if (player_can_afford_cost(map, player, kCityCost))
+    if (canAffordCity)
     {
-        score += difficulty == AI_DIFFICULTY_HARD ? 62.0f : (difficulty == AI_DIFFICULTY_MEDIUM ? 30.0f : 10.0f);
+        score += difficulty == AI_DIFFICULTY_HARD ? 58.0f : (difficulty == AI_DIFFICULTY_MEDIUM ? 30.0f : 10.0f);
     }
-    if (player_can_afford_cost(map, player, kSettlementCost))
+    if (canAffordSettlement)
     {
-        score += difficulty == AI_DIFFICULTY_HARD ? 38.0f : (difficulty == AI_DIFFICULTY_MEDIUM ? 20.0f : 7.0f);
+        score += difficulty == AI_DIFFICULTY_HARD ? 48.0f : (difficulty == AI_DIFFICULTY_MEDIUM ? 24.0f : 7.0f);
     }
-    if (gameGetDevelopmentDeckCount(map) > 0 && player_can_afford_cost(map, player, kDevelopmentCost))
+    if (canBuyDevelopment)
     {
         score += difficulty == AI_DIFFICULTY_HARD ? 16.0f : (difficulty == AI_DIFFICULTY_MEDIUM ? 9.0f : 3.0f);
     }
-    if (player_can_afford_cost(map, player, kRoadCost))
+    if (canAffordRoad)
     {
-        score += difficulty == AI_DIFFICULTY_HARD ? 18.0f : (difficulty == AI_DIFFICULTY_MEDIUM ? 11.0f : 4.0f);
+        score += difficulty == AI_DIFFICULTY_HARD ? 8.0f : (difficulty == AI_DIFFICULTY_MEDIUM ? 6.0f : 4.0f);
     }
 
     score -= (float)max_int(totalResources - 7, 0) * 1.1f;
