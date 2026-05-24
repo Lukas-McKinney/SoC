@@ -16,9 +16,14 @@ static void ConfigureLocalMatch(struct MatchSession *session, const struct MainM
     aiConfigureHotseatMatch(&session->map);
     for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
     {
-        const enum PlayerControlMode controlMode = config->seatControl[player] == PLAYER_CONTROL_AI
-                                                       ? PLAYER_CONTROL_AI
-                                                       : PLAYER_CONTROL_HUMAN;
+        enum PlayerControlMode controlMode = config->seatControl[player];
+
+        if (controlMode != PLAYER_CONTROL_HUMAN &&
+            controlMode != PLAYER_CONTROL_AI &&
+            controlMode != PLAYER_CONTROL_DISABLED)
+        {
+            controlMode = PLAYER_CONTROL_HUMAN;
+        }
 
         session->map.players[player].controlMode = controlMode;
         session->map.players[player].aiDifficulty = controlMode == PLAYER_CONTROL_AI

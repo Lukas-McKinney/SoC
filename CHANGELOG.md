@@ -2,7 +2,13 @@
 
 This changelog summarizes user-visible changes from `v0.1.5` to the current `HEAD`.
 
-## Unreleased (since v0.1.5)
+## Unreleased (since v0.1.6)
+
+### Changed
+
+- Simplified the main menu by removing the redundant `Start vs AI` button, leaving a single `Start Game` entry that opens the unified local match seat picker.
+
+## v0.1.6 (since v0.1.5)
 
 ### Added
 

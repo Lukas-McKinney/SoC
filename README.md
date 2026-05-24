@@ -10,7 +10,6 @@ Implemented already:
 
 - Main menu with:
   - `Start Game` popup
-  - `Start vs AI` popup
   - theme toggle
   - player color selection
   - AI difficulty selection

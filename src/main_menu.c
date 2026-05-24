@@ -55,7 +55,6 @@ struct LocalLobbyLayout
 
 static Rectangle GetMainMenuPanelBounds(void);
 static Rectangle GetStartButtonBounds(void);
-static Rectangle GetAiStartButtonBounds(void);
 static Rectangle GetMultiplayerButtonBounds(void);
 static Rectangle GetStatisticsButtonBounds(void);
 static Rectangle GetMainMenuSettingsButtonBounds(void);
@@ -81,7 +80,7 @@ static void DrawSettingsPopup(void);
 static void DrawMultiplayerPopup(void);
 static void FormatElapsedDuration(unsigned long long totalSeconds, char *buffer, size_t bufferSize);
 static const char *PlayerName(enum PlayerType player);
-static void OpenLocalLobby(enum MainMenuAction action);
+static void OpenLocalLobby(void);
 static void NormalizeLocalLobbySelection(void);
 static enum PlayerType FirstLocalLobbyHumanColor(void);
 static void CycleLocalLobbySeat(enum PlayerType player);
@@ -133,7 +132,6 @@ void DrawMainMenu(void)
 {
     const Rectangle panel = GetMainMenuPanelBounds();
     const Rectangle startButton = GetStartButtonBounds();
-    const Rectangle aiStartButton = GetAiStartButtonBounds();
     const Rectangle multiplayerButton = GetMultiplayerButtonBounds();
     const Rectangle statisticsButton = GetStatisticsButtonBounds();
     const Rectangle settingsButton = GetMainMenuSettingsButtonBounds();
@@ -162,7 +160,6 @@ void DrawMainMenu(void)
     DrawUiText(captionLabel, panel.x + panel.width * 0.5f - captionWidth * 0.5f, panel.y + 160.0f, 17, bodyColor);
 
     DrawMenuButton(startButton, loc("Start Game"), accentColor, borderColor, RAYWHITE, true);
-    DrawMenuButton(aiStartButton, loc("Start vs AI"), goldColor, borderColor, darkTheme ? (Color){38, 32, 24, 255} : RAYWHITE, true);
     DrawMenuButton(multiplayerButton, loc("Multiplayer"), darkTheme ? (Color){88, 103, 129, 255} : (Color){222, 216, 204, 255}, borderColor, titleColor, false);
     DrawMenuButton(statisticsButton, loc("Statistics"), darkTheme ? (Color){63, 77, 95, 255} : (Color){233, 226, 207, 255}, borderColor, titleColor, false);
     DrawMenuButton(settingsButton, loc("Settings"), darkTheme ? (Color){63, 77, 95, 255} : (Color){233, 226, 207, 255}, borderColor, titleColor, false);
@@ -466,12 +463,7 @@ enum MainMenuAction HandleMainMenuInput(void)
 
     if (CheckCollisionPointRec(mouse, GetStartButtonBounds()))
     {
-        OpenLocalLobby(MAIN_MENU_ACTION_START_GAME);
-        return MAIN_MENU_ACTION_NONE;
-    }
-    if (CheckCollisionPointRec(mouse, GetAiStartButtonBounds()))
-    {
-        OpenLocalLobby(MAIN_MENU_ACTION_START_AI_GAME);
+        OpenLocalLobby();
         return MAIN_MENU_ACTION_NONE;
     }
     if (CheckCollisionPointRec(mouse, GetMultiplayerButtonBounds()))
@@ -514,7 +506,7 @@ enum MainMenuAction HandleMainMenuInput(void)
 static Rectangle GetMainMenuPanelBounds(void)
 {
     const float panelWidth = 452.0f;
-    const float panelHeight = 588.0f;
+    const float panelHeight = 522.0f;
     return (Rectangle){
         (float)GetScreenWidth() * 0.5f - panelWidth * 0.5f,
         (float)GetScreenHeight() * 0.5f - panelHeight * 0.5f - 18.0f,
@@ -528,58 +520,41 @@ static Rectangle GetStartButtonBounds(void)
     return (Rectangle){panel.x + 34.0f, panel.y + 214.0f, panel.width - 68.0f, 52.0f};
 }
 
-static Rectangle GetAiStartButtonBounds(void)
-{
-    const Rectangle panel = GetMainMenuPanelBounds();
-    return (Rectangle){panel.x + 34.0f, panel.y + 280.0f, panel.width - 68.0f, 52.0f};
-}
-
 static Rectangle GetMultiplayerButtonBounds(void)
 {
     const Rectangle panel = GetMainMenuPanelBounds();
-    return (Rectangle){panel.x + 34.0f, panel.y + 346.0f, panel.width - 68.0f, 46.0f};
+    return (Rectangle){panel.x + 34.0f, panel.y + 280.0f, panel.width - 68.0f, 46.0f};
 }
 
 static Rectangle GetStatisticsButtonBounds(void)
 {
     const Rectangle panel = GetMainMenuPanelBounds();
-    return (Rectangle){panel.x + 34.0f, panel.y + 404.0f, panel.width - 68.0f, 46.0f};
+    return (Rectangle){panel.x + 34.0f, panel.y + 338.0f, panel.width - 68.0f, 46.0f};
 }
 
 static Rectangle GetMainMenuSettingsButtonBounds(void)
 {
     const Rectangle panel = GetMainMenuPanelBounds();
-    return (Rectangle){panel.x + 34.0f, panel.y + 462.0f, panel.width - 68.0f, 46.0f};
+    return (Rectangle){panel.x + 34.0f, panel.y + 396.0f, panel.width - 68.0f, 46.0f};
 }
 
 static Rectangle GetQuitButtonBounds(void)
 {
     const Rectangle panel = GetMainMenuPanelBounds();
-    return (Rectangle){panel.x + 34.0f, panel.y + 520.0f, panel.width - 68.0f, 40.0f};
+    return (Rectangle){panel.x + 34.0f, panel.y + 454.0f, panel.width - 68.0f, 40.0f};
 }
 
-static void OpenLocalLobby(enum MainMenuAction action)
+static void OpenLocalLobby(void)
 {
-    gMainMenuPopupStartAction = action;
+    gMainMenuPopupStartAction = MAIN_MENU_ACTION_START_GAME;
     gMainMenuStatisticsOpen = false;
     gMainMenuSettingsOpen = false;
     gMainMenuMultiplayerOpen = false;
     gMainMenuLobbyError[0] = '\0';
 
-    if (action == MAIN_MENU_ACTION_START_AI_GAME)
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
     {
-        for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
-        {
-            gMainMenuLobbySeatControl[player] = PLAYER_CONTROL_AI;
-        }
-        gMainMenuLobbySeatControl[gMainMenuHumanColor] = PLAYER_CONTROL_HUMAN;
-    }
-    else
-    {
-        for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
-        {
-            gMainMenuLobbySeatControl[player] = PLAYER_CONTROL_HUMAN;
-        }
+        gMainMenuLobbySeatControl[player] = PLAYER_CONTROL_HUMAN;
     }
 
     NormalizeLocalLobbySelection();
