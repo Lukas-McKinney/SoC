@@ -55,6 +55,9 @@ static bool wait_for_sessions_to_sync(struct MatchSession *host,
                                       struct MatchSession *client,
                                       unsigned int timeoutMs,
                                       bool (*predicate)(const struct MatchSession *host, const struct MatchSession *client));
+static bool keep_sessions_connected_while_idle(struct MatchSession *host,
+                                               struct MatchSession *client,
+                                               unsigned int durationMs);
 static bool lobby_ready_for_match_start(const struct MatchSession *host, const struct MatchSession *client);
 static bool match_started_and_synced(const struct MatchSession *host, const struct MatchSession *client);
 static bool action_sync_complete(const struct MatchSession *host, const struct MatchSession *client);
@@ -208,6 +211,7 @@ static bool test_relay_remote_play_starts_and_syncs_remote_setup_actions(void)
     REQUIRE_EQ_INT(MATCH_SEAT_LOCAL, matchSessionGetSeatAuthority(&client, PLAYER_RED));
     REQUIRE_EQ_INT(PLAYER_CONTROL_DISABLED, client.map.players[PLAYER_GREEN].controlMode);
     REQUIRE_EQ_INT(PLAYER_CONTROL_DISABLED, client.map.players[PLAYER_BLACK].controlMode);
+    REQUIRE_TRUE(keep_sessions_connected_while_idle(&host, &client, 100u));
 
     if (!start_match_until_remote_player_turn(&host, &client, PLAYER_RED, 8))
     {
@@ -215,6 +219,7 @@ static bool test_relay_remote_play_starts_and_syncs_remote_setup_actions(void)
     }
     REQUIRE_TRUE(gameIsSetupSettlementTurn(&client.map));
     REQUIRE_TRUE(matchSessionLocalCanActOnCurrentDecision(&client));
+    REQUIRE_TRUE(keep_sessions_connected_while_idle(&host, &client, 100u));
 
     REQUIRE_TRUE(find_valid_setup_settlement(&client.map, PLAYER_RED, &settlementAction));
     REQUIRE_TRUE(matchSessionSubmitAction(&client, &settlementAction, &actionContext, &actionResult));
@@ -415,6 +420,30 @@ static bool wait_for_sessions_to_sync(struct MatchSession *host,
     }
 
     return predicate(host, client);
+}
+
+static bool keep_sessions_connected_while_idle(struct MatchSession *host,
+                                               struct MatchSession *client,
+                                               unsigned int durationMs)
+{
+    const uint64_t deadline = now_ms() + durationMs;
+
+    while (now_ms() < deadline)
+    {
+        pump_sessions_once(host, client);
+        if (host == NULL ||
+            client == NULL ||
+            host->connectionStatus == MATCH_CONNECTION_DISCONNECTED ||
+            host->connectionStatus == MATCH_CONNECTION_ERROR ||
+            client->connectionStatus == MATCH_CONNECTION_DISCONNECTED ||
+            client->connectionStatus == MATCH_CONNECTION_ERROR)
+        {
+            return false;
+        }
+        sleep_ms(10u);
+    }
+
+    return true;
 }
 
 static bool lobby_ready_for_match_start(const struct MatchSession *host, const struct MatchSession *client)

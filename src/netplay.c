@@ -869,6 +869,13 @@ static DWORD WINAPI relay_receive_thread_main(LPVOID context)
                     return 0;
                 }
 
+                if (result == ERROR_WINHTTP_TIMEOUT)
+                {
+                    Sleep(1u);
+                    totalBytes = 0u;
+                    break;
+                }
+
                 EnterCriticalSection(&state->relayReceiveLock);
                 state->relayReceiveStatus = result;
                 LeaveCriticalSection(&state->relayReceiveLock);
