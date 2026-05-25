@@ -19,7 +19,7 @@
 
 #define AI_BUILD_ACTIONS_EASY 1
 #define AI_BUILD_ACTIONS_MEDIUM 2
-#define AI_BUILD_ACTIONS_HARD 12
+#define AI_BUILD_ACTIONS_HARD 4
 #define AI_SEARCH_WIN_SCORE 100000.0f
 
 static const int kRoadCost[5] = {1, 0, 1, 0, 0};
@@ -186,6 +186,7 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
 static float search_free_road_score(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty, struct AiSearchState state, struct AiAction *bestAction);
 static float search_thief_move_score(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty, struct AiSearchState state, struct AiAction *bestAction);
 static float search_thief_victim_score(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty, struct AiSearchState state, struct AiAction *bestAction);
+static bool choose_immediate_play_phase_fallback_action(const struct Map *map, enum AiDifficulty difficulty, bool searchTimedOut, struct AiAction *action);
 static bool find_best_play_phase_action(const struct Map *map, enum AiDifficulty difficulty, struct AiAction *action);
 static bool execute_ai_action(struct Map *map, const struct AiAction *action);
 static float score_discard_plan(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty, const int discardPlan[5]);
@@ -867,8 +868,8 @@ static double ai_search_time_budget(enum AiDifficulty difficulty)
     switch (difficulty)
     {
     case AI_DIFFICULTY_HARD:
-        /* Keep single-frame planning short enough that local UI stays responsive during AI turns. */
-        return 0.250;
+        /* Hard planning runs asynchronously, so allow a bit more time for real build sequences. */
+        return 0.350;
     case AI_DIFFICULTY_MEDIUM:
         return 0.140;
     case AI_DIFFICULTY_EASY:
@@ -1787,37 +1788,37 @@ static float evaluate_road_candidate(const struct Map *map, int tileId, int side
     GetSideCornerIndices(sideIndex, &cornerA, &cornerB);
     if (corner_can_host_future_settlement(map, tileId, cornerA))
     {
-        const float cornerMultiplier = difficulty == AI_DIFFICULTY_HARD ? 1.9f : (difficulty == AI_DIFFICULTY_MEDIUM ? 1.3f : 1.0f);
+        const float cornerMultiplier = difficulty == AI_DIFFICULTY_HARD ? 0.55f : (difficulty == AI_DIFFICULTY_MEDIUM ? 0.42f : 0.30f);
         score += evaluate_corner_value(map, tileId, cornerA, difficulty) * cornerMultiplier;
     }
     else if (map->tiles[tileId].corners[cornerA].owner == player)
     {
-        score += 2.4f + 0.85f * count_player_roads_touching_corner(map, player, tileId, cornerA);
+        score += 1.1f + 0.35f * count_player_roads_touching_corner(map, player, tileId, cornerA);
     }
 
     if (corner_can_host_future_settlement(map, tileId, cornerB))
     {
-        const float cornerMultiplier = difficulty == AI_DIFFICULTY_HARD ? 1.9f : (difficulty == AI_DIFFICULTY_MEDIUM ? 1.3f : 1.0f);
+        const float cornerMultiplier = difficulty == AI_DIFFICULTY_HARD ? 0.55f : (difficulty == AI_DIFFICULTY_MEDIUM ? 0.42f : 0.30f);
         score += evaluate_corner_value(map, tileId, cornerB, difficulty) * cornerMultiplier;
     }
     else if (map->tiles[tileId].corners[cornerB].owner == player)
     {
-        score += 2.4f + 0.85f * count_player_roads_touching_corner(map, player, tileId, cornerB);
+        score += 1.1f + 0.35f * count_player_roads_touching_corner(map, player, tileId, cornerB);
     }
 
     if (difficulty == AI_DIFFICULTY_HARD && gameGetLongestRoadOwner(map) != player)
     {
-        score += 12.5f;  /* Aggressively pursue longest road on hard difficulty */
+        score += 4.5f;
     }
 
-    /* scaled bonus to encourage road construction on smarter AIs */
+    /* Roads should help expansion, not dominate every spend decision. */
     if (difficulty == AI_DIFFICULTY_HARD)
     {
-        score += 8.0f;  /* Strongly encourage road expansion on hard difficulty */
+        score += 1.6f;
     }
     else if (difficulty == AI_DIFFICULTY_MEDIUM)
     {
-        score += 1.8f;
+        score += 0.6f;
     }
 
     return score;
@@ -2145,8 +2146,7 @@ static int ai_maritime_trade_budget(enum AiDifficulty difficulty)
     switch (difficulty)
     {
     case AI_DIFFICULTY_HARD:
-        /* allow extra maritime trades for Hard AI to enable flexible builds and combo strategies */
-        return 12;
+        return 2;
     case AI_DIFFICULTY_MEDIUM:
         return 4;
     case AI_DIFFICULTY_EASY:
@@ -2175,17 +2175,15 @@ static float evaluate_player_strength(const struct Map *map, enum PlayerType pla
 
     if (find_best_city_candidate(map, player, difficulty, &cityCandidate))
     {
-        /* make cities significantly more attractive on Hard */
-        score += cityCandidate.score * 4.0f;
+        score += cityCandidate.score * 4.4f;
     }
     if (find_best_settlement_candidate(map, player, difficulty, &settlementCandidate))
     {
-        score += settlementCandidate.score * 3.0f;
+        score += settlementCandidate.score * 3.8f;
     }
     if (find_best_road_candidate(map, player, difficulty, false, &roadCandidate))
     {
-        /* Hard AI values road candidates significantly higher for strategic expansion */
-        const float roadWeight = difficulty == AI_DIFFICULTY_HARD ? 14.5f : (difficulty == AI_DIFFICULTY_MEDIUM ? 5.0f : 2.0f);
+        const float roadWeight = difficulty == AI_DIFFICULTY_HARD ? 1.9f : (difficulty == AI_DIFFICULTY_MEDIUM ? 1.1f : 0.5f);
         score += roadCandidate.score * roadWeight;
     }
 
@@ -2210,7 +2208,7 @@ static float evaluate_player_strength(const struct Map *map, enum PlayerType pla
     }
     if (player_can_afford_cost(map, player, kSettlementCost))
     {
-        score += difficulty == AI_DIFFICULTY_HARD ? 38.0f : (difficulty == AI_DIFFICULTY_MEDIUM ? 20.0f : 7.0f);
+        score += difficulty == AI_DIFFICULTY_HARD ? 56.0f : (difficulty == AI_DIFFICULTY_MEDIUM ? 28.0f : 9.0f);
     }
     if (gameGetDevelopmentDeckCount(map) > 0 && player_can_afford_cost(map, player, kDevelopmentCost))
     {
@@ -2218,7 +2216,7 @@ static float evaluate_player_strength(const struct Map *map, enum PlayerType pla
     }
     if (player_can_afford_cost(map, player, kRoadCost))
     {
-        score += difficulty == AI_DIFFICULTY_HARD ? 18.0f : (difficulty == AI_DIFFICULTY_MEDIUM ? 11.0f : 4.0f);
+        score += difficulty == AI_DIFFICULTY_HARD ? 6.0f : (difficulty == AI_DIFFICULTY_MEDIUM ? 3.5f : 1.5f);
     }
 
     score -= (float)max_int(totalResources - 7, 0) * 1.1f;
@@ -2525,6 +2523,7 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
     Vector2 origin = {(float)GetScreenWidth() * BOARD_ORIGIN_X_FACTOR, (float)GetScreenHeight() * BOARD_ORIGIN_Y_FACTOR};
     float bestScore;
     bool foundAction = false;
+    bool prioritizeDirectBuilds = false;
 
     if (bestAction != NULL)
     {
@@ -2536,6 +2535,8 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
     {
         return -AI_SEARCH_WIN_SCORE;
     }
+
+    prioritizeDirectBuilds = gameCanAffordCity(map) || gameCanAffordSettlement(map);
 
     if (gameHasWinner(map))
     {
@@ -2675,7 +2676,7 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
         }
     }
 
-    if (state.maritimeTradesRemaining > 0)
+    if (state.maritimeTradesRemaining > 0 && !prioritizeDirectBuilds)
     {
         struct AiSearchState nextState = state;
         nextState.maritimeTradesRemaining--;
@@ -2734,7 +2735,14 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
     if (state.buildActionsRemaining > 0)
     {
         struct AiSearchState nextState = state;
+        bool settlementBuildAvailableNow = false;
         nextState.buildActionsRemaining--;
+
+        if (gameCanAffordSettlement(map))
+        {
+            struct CornerCandidate currentSettlementCandidate;
+            settlementBuildAvailableNow = find_best_settlement_candidate(map, player, difficulty, &currentSettlementCandidate);
+        }
 
         /* Explore the highest-impact direct builds first so bounded searches spend
            their budget on cities/dev cards before the much wider road scan. */
@@ -2884,6 +2892,13 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
                     gameRefreshAwards(&simulatedMap);
                     gameCheckVictory(&simulatedMap, player);
                     score = search_turn_score(&simulatedMap, player, difficulty, nextState, NULL);
+
+                    if (settlementBuildAvailableNow && !gameCanAffordSettlement(&simulatedMap))
+                    {
+                        score -= difficulty == AI_DIFFICULTY_HARD ? 110.0f
+                               : (difficulty == AI_DIFFICULTY_MEDIUM ? 70.0f : 35.0f);
+                    }
+
                     if (score > bestScore + epsilon)
                     {
                         bestScore = score;
@@ -2906,6 +2921,78 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
     }
 
     return bestScore;
+}
+
+static bool choose_immediate_play_phase_fallback_action(const struct Map *map, enum AiDifficulty difficulty, bool searchTimedOut, struct AiAction *action)
+{
+    struct CornerCandidate cityCandidate;
+    struct CornerCandidate settlementCandidate;
+    struct EdgeCandidate roadCandidate;
+    float bestScore = -FLT_MAX;
+    bool found = false;
+    bool canAffordCity = false;
+    bool canAffordSettlement = false;
+
+    if (map == NULL || action == NULL || map->currentPlayer < PLAYER_RED || map->currentPlayer > PLAYER_BLACK)
+    {
+        return false;
+    }
+
+    canAffordCity = gameCanAffordCity(map);
+    canAffordSettlement = gameCanAffordSettlement(map);
+
+    memset(action, 0, sizeof(*action));
+    action->type = AI_ACTION_NONE;
+
+    if (canAffordCity && find_best_city_candidate(map, map->currentPlayer, difficulty, &cityCandidate))
+    {
+        const float score = 120.0f + cityCandidate.score * 6.5f;
+        if (!found || score > bestScore)
+        {
+            bestScore = score;
+            action->type = AI_ACTION_BUILD_CITY;
+            action->tileId = cityCandidate.tileId;
+            action->cornerIndex = cityCandidate.cornerIndex;
+            found = true;
+        }
+    }
+
+    if (canAffordSettlement && find_best_settlement_candidate(map, map->currentPlayer, difficulty, &settlementCandidate))
+    {
+        const float score = 105.0f + settlementCandidate.score * 5.6f;
+        if (!found || score > bestScore)
+        {
+            bestScore = score;
+            action->type = AI_ACTION_BUILD_SETTLEMENT;
+            action->tileId = settlementCandidate.tileId;
+            action->cornerIndex = settlementCandidate.cornerIndex;
+            found = true;
+        }
+    }
+
+    if (!canAffordCity && !canAffordSettlement &&
+        gameCanAffordRoad(map) &&
+        find_best_road_candidate(map, map->currentPlayer, difficulty, false, &roadCandidate))
+    {
+        const float score = 18.0f + roadCandidate.score * 2.4f;
+        if (!found || score > bestScore)
+        {
+            bestScore = score;
+            action->type = AI_ACTION_BUILD_ROAD;
+            action->tileId = roadCandidate.tileId;
+            action->sideIndex = roadCandidate.sideIndex;
+            found = true;
+        }
+    }
+
+    if (found)
+    {
+        debugLog("AI", "play phase fallback action=%s timedOut=%d",
+                 ai_action_type_label(action->type),
+                 searchTimedOut ? 1 : 0);
+    }
+
+    return found;
 }
 
 static bool find_best_play_phase_action_core(const struct Map *map, enum AiDifficulty difficulty,
@@ -2989,6 +3076,10 @@ static bool find_best_play_phase_action(const struct Map *map, enum AiDifficulty
                                              &nodesVisited,
                                              &timedOut,
                                              &elapsed);
+    if (!found)
+    {
+        found = choose_immediate_play_phase_fallback_action(map, difficulty, timedOut, action);
+    }
     debugLog("AI", "play phase search action=%s score=%.3f elapsed=%.3f budget=%.3f nodes=%u timedOut=%d",
              ai_action_type_label(action->type),
              score,

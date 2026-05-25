@@ -7,6 +7,7 @@ This changelog summarizes user-visible changes from `v0.1.5` to the current `HEA
 ### Changed
 
 - Simplified the main menu by removing the redundant `Start vs AI` button, leaving a single `Start Game` entry that opens the unified local match seat picker.
+- Rebalanced AI build planning so harder AIs stop stalling on no-action turns and more reliably spend resources on settlements, cities, and follow-up roads.
 
 ## v0.1.6 (since v0.1.5)
 
