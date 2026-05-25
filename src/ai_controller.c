@@ -186,7 +186,7 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
 static float search_free_road_score(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty, struct AiSearchState state, struct AiAction *bestAction);
 static float search_thief_move_score(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty, struct AiSearchState state, struct AiAction *bestAction);
 static float search_thief_victim_score(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty, struct AiSearchState state, struct AiAction *bestAction);
-static bool choose_immediate_play_phase_fallback_action(const struct Map *map, enum AiDifficulty difficulty, bool searchTimedOut, struct AiAction *action);
+static bool choose_immediate_play_phase_fallback_action(const struct Map *map, enum AiDifficulty difficulty, int buildActionsRemaining, bool searchTimedOut, struct AiAction *action);
 static bool find_best_play_phase_action(const struct Map *map, enum AiDifficulty difficulty, struct AiAction *action);
 static bool execute_ai_action(struct Map *map, const struct AiAction *action);
 static float score_discard_plan(const struct Map *map, enum PlayerType player, enum AiDifficulty difficulty, const int discardPlan[5]);
@@ -2923,7 +2923,7 @@ static float search_turn_score(const struct Map *map, enum PlayerType player, en
     return bestScore;
 }
 
-static bool choose_immediate_play_phase_fallback_action(const struct Map *map, enum AiDifficulty difficulty, bool searchTimedOut, struct AiAction *action)
+static bool choose_immediate_play_phase_fallback_action(const struct Map *map, enum AiDifficulty difficulty, int buildActionsRemaining, bool searchTimedOut, struct AiAction *action)
 {
     struct CornerCandidate cityCandidate;
     struct CornerCandidate settlementCandidate;
@@ -2934,6 +2934,11 @@ static bool choose_immediate_play_phase_fallback_action(const struct Map *map, e
     bool canAffordSettlement = false;
 
     if (map == NULL || action == NULL || map->currentPlayer < PLAYER_RED || map->currentPlayer > PLAYER_BLACK)
+    {
+        return false;
+    }
+
+    if (buildActionsRemaining <= 0)
     {
         return false;
     }
@@ -3059,11 +3064,18 @@ static bool find_best_play_phase_action(const struct Map *map, enum AiDifficulty
     unsigned int nodesVisited = 0;
     bool timedOut = false;
     double elapsed = 0.0;
+    int buildActionsRemaining = 0;
     bool found;
 
     if (map == NULL || action == NULL)
     {
         return false;
+    }
+
+    buildActionsRemaining = ai_build_action_budget(difficulty) - gAiBuildActionsThisTurn;
+    if (buildActionsRemaining < 0)
+    {
+        buildActionsRemaining = 0;
     }
 
     found = find_best_play_phase_action_core(map,
@@ -3078,7 +3090,7 @@ static bool find_best_play_phase_action(const struct Map *map, enum AiDifficulty
                                              &elapsed);
     if (!found)
     {
-        found = choose_immediate_play_phase_fallback_action(map, difficulty, timedOut, action);
+        found = choose_immediate_play_phase_fallback_action(map, difficulty, buildActionsRemaining, timedOut, action);
     }
     debugLog("AI", "play phase search action=%s score=%.3f elapsed=%.3f budget=%.3f nodes=%u timedOut=%d",
              ai_action_type_label(action->type),
