@@ -47,10 +47,13 @@ struct RelayProcess
 };
 
 static bool test_relay_remote_play_starts_and_syncs_remote_setup_actions(void);
+static bool test_relay_remote_play_survives_partial_websocket_sends(void);
 static bool test_relay_disconnect_emits_single_disconnect_event(void);
+static bool run_relay_remote_play_sync_test(const char *relaySendChunk);
 
 static bool choose_and_start_relay(struct RelayProcess *process);
-static bool start_relay_process_at_port(struct RelayProcess *process, unsigned short port);
+static bool choose_and_start_relay_with_send_chunk(struct RelayProcess *process, const char *relaySendChunk);
+static bool start_relay_process_at_port(struct RelayProcess *process, unsigned short port, const char *relaySendChunk);
 static void stop_relay_process(struct RelayProcess *process);
 static bool wait_for_relay_ready(unsigned short port, unsigned int timeoutMs);
 static bool wait_for_sessions_to_sync(struct MatchSession *host,
@@ -78,6 +81,7 @@ static void sleep_ms(unsigned int milliseconds);
 static bool socket_layer_init(void);
 static void socket_layer_shutdown(void);
 static bool can_connect_loopback(unsigned short port);
+static void set_process_env(const char *name, const char *value);
 
 #define ASSERT_TRUE(expr)                                                                                              \
     do                                                                                                                 \
@@ -112,6 +116,8 @@ int main(void)
     } tests[] = {
         {"relay remote play starts a match and syncs remote setup actions",
          test_relay_remote_play_starts_and_syncs_remote_setup_actions},
+        {"relay remote play survives partial websocket sends",
+         test_relay_remote_play_survives_partial_websocket_sends},
         {"relay disconnect emits one disconnect event",
          test_relay_disconnect_emits_single_disconnect_event},
     };
@@ -142,6 +148,16 @@ int main(void)
 }
 
 static bool test_relay_remote_play_starts_and_syncs_remote_setup_actions(void)
+{
+    return run_relay_remote_play_sync_test(NULL);
+}
+
+static bool test_relay_remote_play_survives_partial_websocket_sends(void)
+{
+    return run_relay_remote_play_sync_test("1024");
+}
+
+static bool run_relay_remote_play_sync_test(const char *relaySendChunk)
 {
     struct RelayProcess relayProcess;
     struct MatchSession host;
@@ -186,7 +202,7 @@ static bool test_relay_remote_play_starts_and_syncs_remote_setup_actions(void)
     matchSessionInit(&host);
     matchSessionInit(&client);
 
-    if (!choose_and_start_relay(&relayProcess))
+    if (!choose_and_start_relay_with_send_chunk(&relayProcess, relaySendChunk))
     {
         goto cleanup;
     }
@@ -420,6 +436,11 @@ cleanup:
 
 static bool choose_and_start_relay(struct RelayProcess *process)
 {
+    return choose_and_start_relay_with_send_chunk(process, NULL);
+}
+
+static bool choose_and_start_relay_with_send_chunk(struct RelayProcess *process, const char *relaySendChunk)
+{
     if (process == NULL)
     {
         return false;
@@ -428,7 +449,7 @@ static bool choose_and_start_relay(struct RelayProcess *process)
     for (unsigned int attempt = 0; attempt < 16u; attempt++)
     {
         const unsigned short port = choose_test_port(attempt);
-        if (start_relay_process_at_port(process, port))
+        if (start_relay_process_at_port(process, port, relaySendChunk))
         {
             return true;
         }
@@ -437,12 +458,14 @@ static bool choose_and_start_relay(struct RelayProcess *process)
     return false;
 }
 
-static bool start_relay_process_at_port(struct RelayProcess *process, unsigned short port)
+static bool start_relay_process_at_port(struct RelayProcess *process, unsigned short port, const char *relaySendChunk)
 {
     if (process == NULL)
     {
         return false;
     }
+
+    set_process_env("SOC_RELAY_TEST_SEND_CHUNK", relaySendChunk);
 
 #ifdef _WIN32
     {
@@ -470,6 +493,7 @@ static bool start_relay_process_at_port(struct RelayProcess *process, unsigned s
                             &startupInfo,
                             &process->processInfo))
         {
+            set_process_env("SOC_RELAY_TEST_SEND_CHUNK", NULL);
             return false;
         }
     }
@@ -480,6 +504,7 @@ static bool start_relay_process_at_port(struct RelayProcess *process, unsigned s
         process->pid = fork();
         if (process->pid < 0)
         {
+            set_process_env("SOC_RELAY_TEST_SEND_CHUNK", NULL);
             return false;
         }
 
@@ -494,6 +519,8 @@ static bool start_relay_process_at_port(struct RelayProcess *process, unsigned s
         }
     }
 #endif
+
+    set_process_env("SOC_RELAY_TEST_SEND_CHUNK", NULL);
 
     process->port = port;
     if (wait_for_relay_ready(port, kRelayReadyTimeoutMs))
@@ -826,6 +853,27 @@ static void socket_layer_shutdown(void)
 {
 #ifdef _WIN32
     WSACleanup();
+#endif
+}
+
+static void set_process_env(const char *name, const char *value)
+{
+    if (name == NULL || name[0] == '\0')
+    {
+        return;
+    }
+
+#ifdef _WIN32
+    _putenv_s(name, value != NULL ? value : "");
+#else
+    if (value != NULL)
+    {
+        setenv(name, value, 1);
+    }
+    else
+    {
+        unsetenv(name);
+    }
 #endif
 }
 

@@ -66,6 +66,13 @@ enum RelayTransportMode
     RELAY_TRANSPORT_WEBSOCKET
 };
 
+enum RelaySendResult
+{
+    RELAY_SEND_COMPLETE,
+    RELAY_SEND_BLOCKED,
+    RELAY_SEND_FAILED
+};
+
 struct RelayClient
 {
     RelaySocket socketHandle;
@@ -80,9 +87,15 @@ struct RelayClient
     size_t recvLength;
     unsigned char pendingBuffer[RELAY_PENDING_BUFFER_SIZE];
     size_t pendingLength;
+    unsigned char websocketSendHeader[10];
+    size_t websocketSendHeaderLength;
+    size_t websocketSendHeaderSent;
+    size_t websocketSendPayloadLength;
+    size_t websocketSendPayloadSent;
 };
 
 static bool gSocketLayerReady = false;
+static size_t gRelayTestSendChunk = 0u;
 
 static bool relay_socket_layer_init(void);
 static bool set_socket_nonblocking(RelaySocket socketHandle);
@@ -103,6 +116,9 @@ static bool send_http_text_response(RelaySocket socketHandle, int statusCode, co
 static bool websocket_frame_append(struct RelayClient *clients, int index, const unsigned char *payload, size_t payloadSize);
 static bool websocket_frame_send(RelaySocket socketHandle, unsigned char opcode, const unsigned char *payload, size_t payloadSize);
 static bool websocket_frame_parse(struct RelayClient *clients, int index);
+static void reset_websocket_send_state(struct RelayClient *client);
+static bool begin_websocket_send(struct RelayClient *client);
+static enum RelaySendResult send_socket_progress(RelaySocket socketHandle, const unsigned char *buffer, size_t length, size_t *offset);
 
 static bool relay_socket_layer_init(void)
 {
@@ -209,6 +225,107 @@ static bool send_all_socket(RelaySocket socketHandle, const unsigned char *buffe
     }
 
     return true;
+}
+
+static void reset_websocket_send_state(struct RelayClient *client)
+{
+    if (client == NULL)
+    {
+        return;
+    }
+
+    client->websocketSendHeaderLength = 0u;
+    client->websocketSendHeaderSent = 0u;
+    client->websocketSendPayloadLength = 0u;
+    client->websocketSendPayloadSent = 0u;
+}
+
+static bool begin_websocket_send(struct RelayClient *client)
+{
+    size_t payloadSize = 0u;
+
+    if (client == NULL)
+    {
+        return false;
+    }
+
+    if (client->websocketSendPayloadLength > 0u || client->pendingLength == 0u)
+    {
+        return true;
+    }
+
+    payloadSize = client->pendingLength;
+    client->websocketSendHeader[0] = 0x82u;
+    if (payloadSize <= 125u)
+    {
+        client->websocketSendHeader[1] = (unsigned char)payloadSize;
+        client->websocketSendHeaderLength = 2u;
+    }
+    else if (payloadSize <= 65535u)
+    {
+        client->websocketSendHeader[1] = 126u;
+        client->websocketSendHeader[2] = (unsigned char)((payloadSize >> 8) & 0xFFu);
+        client->websocketSendHeader[3] = (unsigned char)(payloadSize & 0xFFu);
+        client->websocketSendHeaderLength = 4u;
+    }
+    else
+    {
+        client->websocketSendHeader[1] = 127u;
+        client->websocketSendHeader[2] = 0u;
+        client->websocketSendHeader[3] = 0u;
+        client->websocketSendHeader[4] = 0u;
+        client->websocketSendHeader[5] = 0u;
+        client->websocketSendHeader[6] = (unsigned char)((payloadSize >> 24) & 0xFFu);
+        client->websocketSendHeader[7] = (unsigned char)((payloadSize >> 16) & 0xFFu);
+        client->websocketSendHeader[8] = (unsigned char)((payloadSize >> 8) & 0xFFu);
+        client->websocketSendHeader[9] = (unsigned char)(payloadSize & 0xFFu);
+        client->websocketSendHeaderLength = 10u;
+    }
+
+    client->websocketSendHeaderSent = 0u;
+    client->websocketSendPayloadLength = payloadSize;
+    client->websocketSendPayloadSent = 0u;
+    return true;
+}
+
+static enum RelaySendResult send_socket_progress(RelaySocket socketHandle, const unsigned char *buffer, size_t length, size_t *offset)
+{
+    while (*offset < length)
+    {
+        size_t remaining = length - *offset;
+
+        if (gRelayTestSendChunk > 0u && remaining > gRelayTestSendChunk)
+        {
+            remaining = gRelayTestSendChunk;
+        }
+
+        {
+            const int sent = send(socketHandle, (const char *)(buffer + *offset), (int)remaining, 0);
+            if (sent == RELAY_SOCKET_ERROR)
+            {
+                const int errorCode = relay_last_error_code();
+                if (RELAY_WOULD_BLOCK(errorCode))
+                {
+                    return RELAY_SEND_BLOCKED;
+                }
+                return RELAY_SEND_FAILED;
+            }
+
+            if (sent <= 0)
+            {
+                return RELAY_SEND_FAILED;
+            }
+
+            *offset += (size_t)sent;
+        }
+
+        if (gRelayTestSendChunk > 0u && *offset < length)
+        {
+            return RELAY_SEND_BLOCKED;
+        }
+    }
+
+    return RELAY_SEND_COMPLETE;
 }
 
 /* SHA1 helpers are provided by src/websocket.c; remove local duplicates. */
@@ -749,6 +866,7 @@ static void disconnect_client(struct RelayClient *clients, int index, const char
     clients[index].peerIndex = -1;
     clients[index].recvLength = 0u;
     clients[index].pendingLength = 0u;
+    reset_websocket_send_state(&clients[index]);
 
     if (peerIndex >= 0 && peerIndex < RELAY_MAX_CLIENTS && clients[peerIndex].inUse)
     {
@@ -762,6 +880,7 @@ static void disconnect_client(struct RelayClient *clients, int index, const char
         clients[peerIndex].peerIndex = -1;
         clients[peerIndex].recvLength = 0u;
         clients[peerIndex].pendingLength = 0u;
+        reset_websocket_send_state(&clients[peerIndex]);
     }
 }
 
@@ -795,15 +914,52 @@ static void flush_client(struct RelayClient *clients, int index)
 
     if (client->transportMode == RELAY_TRANSPORT_WEBSOCKET)
     {
+        enum RelaySendResult sendResult = RELAY_SEND_COMPLETE;
+
         fprintf(stderr, "[relay] websocket relay: idx=%d -> peer=%d size=%zu\n", index, client->peerIndex, client->pendingLength);
         fflush(stderr);
-        if (!websocket_frame_send(peer->socketHandle, 0x2u, client->pendingBuffer, client->pendingLength))
+        if (!begin_websocket_send(client))
         {
             disconnect_client(clients, index, "send failed");
             return;
         }
 
-        client->pendingLength = 0u;
+        sendResult = send_socket_progress(peer->socketHandle,
+                                          client->websocketSendHeader,
+                                          client->websocketSendHeaderLength,
+                                          &client->websocketSendHeaderSent);
+        if (sendResult == RELAY_SEND_FAILED)
+        {
+            disconnect_client(clients, index, "send failed");
+            return;
+        }
+        if (sendResult == RELAY_SEND_BLOCKED)
+        {
+            return;
+        }
+
+        sendResult = send_socket_progress(peer->socketHandle,
+                                          client->pendingBuffer,
+                                          client->websocketSendPayloadLength,
+                                          &client->websocketSendPayloadSent);
+        if (sendResult == RELAY_SEND_FAILED)
+        {
+            disconnect_client(clients, index, "send failed");
+            return;
+        }
+        if (sendResult == RELAY_SEND_BLOCKED)
+        {
+            return;
+        }
+
+        if (client->websocketSendPayloadLength < client->pendingLength)
+        {
+            memmove(client->pendingBuffer,
+                    client->pendingBuffer + client->websocketSendPayloadLength,
+                    client->pendingLength - client->websocketSendPayloadLength);
+        }
+        client->pendingLength -= client->websocketSendPayloadLength;
+        reset_websocket_send_state(client);
         return;
     }
 
@@ -1130,8 +1286,8 @@ int main(int argc, char **argv)
     struct RelayClient *clients = NULL;
     unsigned short port = 24680u;
     const char *portEnv = getenv("PORT");
+    const char *testSendChunkEnv = getenv("SOC_RELAY_TEST_SEND_CHUNK");
     fd_set readSet;
-    fd_set writeSet;
     int maxSocket = 0;
 
     if (portEnv != NULL && portEnv[0] != '\0')
@@ -1142,7 +1298,20 @@ int main(int argc, char **argv)
             port = (unsigned short)parsedPort;
         }
     }
-    else if (argc > 1)
+
+    if (testSendChunkEnv != NULL && testSendChunkEnv[0] != '\0')
+    {
+        char *parseEnd = NULL;
+        const unsigned long parsedChunk = strtoul(testSendChunkEnv, &parseEnd, 10);
+        if (parseEnd != testSendChunkEnv && parsedChunk > 0ul)
+        {
+            gRelayTestSendChunk = (size_t)parsedChunk;
+            fprintf(stderr, "[relay] test websocket send chunk enabled: %zu\n", gRelayTestSendChunk);
+            fflush(stderr);
+        }
+    }
+
+    if (argc > 1)
     {
         long parsedPort = strtol(argv[1], NULL, 10);
         if (parsedPort > 0 && parsedPort <= 65535)
@@ -1221,7 +1390,6 @@ int main(int argc, char **argv)
         maxSocket = (int)listenSocket;
 
         FD_ZERO(&readSet);
-        FD_ZERO(&writeSet);
         FD_SET(listenSocket, &readSet);
 
         for (int i = 0; i < RELAY_MAX_CLIENTS; i++)
@@ -1232,10 +1400,6 @@ int main(int argc, char **argv)
             }
 
             FD_SET(clients[i].socketHandle, &readSet);
-            if (clients[i].paired && clients[i].pendingLength > 0u)
-            {
-                FD_SET(clients[i].socketHandle, &writeSet);
-            }
             if ((int)clients[i].socketHandle > maxSocket)
             {
                 maxSocket = (int)clients[i].socketHandle;
@@ -1244,7 +1408,7 @@ int main(int argc, char **argv)
 
         timeout.tv_sec = 0;
         timeout.tv_usec = 100000;
-        if (select(maxSocket + 1, &readSet, &writeSet, NULL, &timeout) < 0)
+        if (select(maxSocket + 1, &readSet, NULL, NULL, &timeout) < 0)
         {
             const int errorCode = relay_last_error_code();
             if (errorCode != EINTR)
@@ -1296,6 +1460,7 @@ int main(int argc, char **argv)
                 clients[slot].peerIndex = -1;
                 clients[slot].recvLength = 0u;
                 clients[slot].pendingLength = 0u;
+                reset_websocket_send_state(&clients[slot]);
                 fprintf(stderr, "[relay] accepted connection: slot=%d socket=%d\n", slot, (int)clientSocket);
                 fflush(stderr);
             }
@@ -1312,11 +1477,16 @@ int main(int argc, char **argv)
             {
                 process_client_input(clients, i);
             }
+        }
 
-            if (FD_ISSET(clients[i].socketHandle, &writeSet))
+        for (int i = 0; i < RELAY_MAX_CLIENTS; i++)
+        {
+            if (!clients[i].inUse || !clients[i].paired || clients[i].pendingLength == 0u)
             {
-                flush_client(clients, i);
+                continue;
             }
+
+            flush_client(clients, i);
         }
     }
 
