@@ -36,6 +36,7 @@ static enum PlayerType LocalHumanPlayer(const struct Map *map);
 static bool IsPrivateInfoPinnedToLocalHuman(const struct Map *map);
 static const struct PlayerState *CurrentPlayerState(const struct Map *map);
 static const char *PlayerName(enum PlayerType player);
+static const char *ScoreboardPlayerName(const struct Map *map, enum PlayerType player);
 static const char *ResourceName(enum ResourceType resource);
 static const char *DevelopmentCardTitle(enum DevelopmentCardType type);
 static const char *DevelopmentCardDescription(enum DevelopmentCardType type);
@@ -930,6 +931,8 @@ void DrawPlayerPanel(const struct Map *map)
         return;
     }
 
+    const char *playerLabel = ScoreboardPlayerName(map, player->type);
+
     const Rectangle panel = GetPlayerPanelBounds();
     const float panelX = panel.x;
     const float panelY = panel.y;
@@ -940,7 +943,7 @@ void DrawPlayerPanel(const struct Map *map)
 
     DrawPanelFrame(panel, 0.08f, UiScaled(6.0f), UiScaled(8.0f), 0.10f, panelColor, borderColor);
 
-    DrawUiText(PlayerName(player->type), panelX + UiScaled(16.0f), panelY + UiScaled(14.0f), UiScaledFont(26), UiReadablePlayerColor(player->type));
+    DrawUiText(playerLabel, panelX + UiScaled(16.0f), panelY + UiScaled(14.0f), UiScaledFont(26), UiReadablePlayerColor(player->type));
     DrawUiText(showingPinnedLocalInfo ? loc("Your Hand") : loc("Current Player"), panelX + UiScaled(16.0f), panelY + UiScaled(44.0f), UiScaledFont(16), mutedText);
 
     const int totalVp = gameComputeVictoryPoints(map, player->type);
@@ -994,9 +997,13 @@ void DrawPlayerPanel(const struct Map *map)
 
 void DrawOpponentVictoryBar(const struct Map *map)
 {
-    enum PlayerType opponents[MAX_PLAYERS - 1];
-    int opponentCount = 0;
+    enum PlayerType displayedPlayers[MAX_PLAYERS];
+    int displayedPlayerCount = 0;
     const struct PlayerState *player = CurrentPlayerState(map);
+    const enum PlayerType localHuman = LocalHumanPlayer(map);
+    const bool includeLocalPlayer = localHuman >= PLAYER_RED &&
+                                    localHuman <= PLAYER_BLACK &&
+                                    gameIsPlayerActive(map, localHuman);
     Rectangle bar;
     const Color panelColor = UiPanelColor();
     const Color borderColor = UiPanelBorderColor();
@@ -1015,21 +1022,39 @@ void DrawOpponentVictoryBar(const struct Map *map)
         return;
     }
 
-    for (int candidate = PLAYER_RED; candidate <= PLAYER_BLACK; candidate++)
+    if (includeLocalPlayer)
     {
-        if (candidate != player->type &&
-            gameIsPlayerActive(map, (enum PlayerType)candidate))
-        {
-            opponents[opponentCount++] = (enum PlayerType)candidate;
-        }
+        displayedPlayers[displayedPlayerCount++] = localHuman;
     }
 
-    if (opponentCount <= 0)
+    for (int candidate = PLAYER_RED; candidate <= PLAYER_BLACK; candidate++)
+    {
+        if (!gameIsPlayerActive(map, (enum PlayerType)candidate))
+        {
+            continue;
+        }
+
+        if (includeLocalPlayer)
+        {
+            if (candidate == localHuman)
+            {
+                continue;
+            }
+        }
+        else if (candidate == player->type)
+        {
+            continue;
+        }
+
+        displayedPlayers[displayedPlayerCount++] = (enum PlayerType)candidate;
+    }
+
+    if (displayedPlayerCount <= 0)
     {
         return;
     }
 
-    slotsWidth = opponentCount * slotWidth + (opponentCount - 1) * slotGap;
+    slotsWidth = displayedPlayerCount * slotWidth + (displayedPlayerCount - 1) * slotGap;
     bar = (Rectangle){
         (float)GetScreenWidth() * 0.5f - (labelWidth + slotsWidth + padding * 3.0f) * 0.5f,
         UiScaled(24.0f),
@@ -1038,33 +1063,48 @@ void DrawOpponentVictoryBar(const struct Map *map)
     startX = bar.x + bar.width - padding - slotsWidth;
 
     DrawPanelFrame(bar, 0.14f, UiScaled(6.0f), UiScaled(8.0f), 0.10f, panelColor, borderColor);
-    DrawUiText(loc("Opponents"), bar.x + padding, bar.y + UiScaled(8.0f), UiScaledFont(18), textColor);
+    DrawUiText(loc(includeLocalPlayer ? "Players" : "Opponents"), bar.x + padding, bar.y + UiScaled(8.0f), UiScaledFont(18), textColor);
     DrawUiText(loc("Visible VP"), bar.x + padding, bar.y + UiScaled(30.0f), UiScaledFont(13), mutedText);
 
-    for (int i = 0; i < opponentCount; i++)
+    for (int i = 0; i < displayedPlayerCount; i++)
     {
-        const int notificationCount = uiGetPlayerNotificationCount(opponents[i]);
+        const enum PlayerType displayedPlayer = displayedPlayers[i];
+        const int notificationCount = uiGetPlayerNotificationCount(displayedPlayer);
         const Rectangle slot = {
             startX + i * (slotWidth + slotGap),
             bar.y + UiScaled(10.0f),
             slotWidth,
             slotHeight};
-        const char *name = PlayerName(opponents[i]);
-        const char *score = TextFormat("%d", gameComputeVisibleVictoryPoints(map, opponents[i]));
-        const int nameFont = UiScaledFont(16);
+        const char *name = ScoreboardPlayerName(map, displayedPlayer);
+        const char *score = TextFormat("%d", gameComputeVisibleVictoryPoints(map, displayedPlayer));
         const int scoreFont = UiScaledFont(22);
         const int scoreWidth = MeasureUiText(score, scoreFont);
+        const float scorePadding = UiScaled(14.0f);
+        const float nameGap = UiScaled(10.0f);
+        const Rectangle nameBounds = {
+            slot.x + UiScaled(12.0f),
+            slot.y,
+            slot.width - UiScaled(12.0f) - scorePadding - (float)scoreWidth - nameGap,
+            slot.height};
 
-        DrawRectangleRounded(slot, 0.24f, 8, Fade(UiReadablePlayerColor(opponents[i]), IsDarkUiTheme() ? 0.26f : 0.18f));
-        DrawRectangleLinesEx(slot, 1.5f, Fade(UiReadablePlayerColor(opponents[i]), 0.85f));
-        DrawUiText(name, slot.x + UiScaled(12.0f), slot.y + UiScaled(8.0f), nameFont, textColor);
-        DrawUiText(score, slot.x + slot.width - UiScaled(14.0f) - scoreWidth, slot.y + UiScaled(5.0f), scoreFont, UiReadablePlayerColor(opponents[i]));
+        DrawRectangleRounded(slot, 0.24f, 8, Fade(UiReadablePlayerColor(displayedPlayer), IsDarkUiTheme() ? 0.26f : 0.18f));
+        DrawRectangleLinesEx(slot, 1.5f, Fade(UiReadablePlayerColor(displayedPlayer), 0.85f));
+        if (nameBounds.width > 0.0f)
+        {
+            BeginScissorMode((int)nameBounds.x,
+                             (int)nameBounds.y,
+                             (int)nameBounds.width,
+                             (int)nameBounds.height);
+            DrawLeftUiTextFitted(name, nameBounds, 0.0f, 16, 10, 0.0f, textColor);
+            EndScissorMode();
+        }
+        DrawUiText(score, slot.x + slot.width - scorePadding - scoreWidth, slot.y + UiScaled(5.0f), scoreFont, UiReadablePlayerColor(displayedPlayer));
 
         for (int notificationIndex = 0; notificationIndex < notificationCount; notificationIndex++)
         {
-            const char *notificationText = uiGetPlayerNotificationText(opponents[i], notificationIndex);
-            const enum UiNotificationTone tone = uiGetPlayerNotificationTone(opponents[i], notificationIndex);
-            const float dismissProgress = uiGetPlayerNotificationDismissProgress(opponents[i], notificationIndex);
+            const char *notificationText = uiGetPlayerNotificationText(displayedPlayer, notificationIndex);
+            const enum UiNotificationTone tone = uiGetPlayerNotificationTone(displayedPlayer, notificationIndex);
+            const float dismissProgress = uiGetPlayerNotificationDismissProgress(displayedPlayer, notificationIndex);
             const int notificationFont = UiScaledFont(16);
             const int notificationWidth = MeasureUiText(notificationText, notificationFont);
             const float chipWidth = (float)(notificationWidth + UiScaled(20.0f));
@@ -1096,7 +1136,7 @@ void DrawOpponentVictoryBar(const struct Map *map)
                 chipBorder = (Color){190, 150, 58, 255};
             }
 
-            if (uiIsPlayerNotificationDismissing(opponents[i], notificationIndex))
+            if (uiIsPlayerNotificationDismissing(displayedPlayer, notificationIndex))
             {
                 alpha = 1.0f - dismissProgress;
                 y -= dismissProgress * UiScaled(22.0f);
