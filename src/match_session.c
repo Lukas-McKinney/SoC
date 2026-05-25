@@ -38,7 +38,8 @@ static bool apply_authoritative_action_to_client_map(struct MatchSession *sessio
 static void apply_client_authoritative_result(struct MatchSession *session,
                                               const struct GameAction *action,
                                               const struct GameActionResult *result,
-                                              uint32_t authoritativeStateHash);
+                                              uint32_t authoritativeStateHash,
+                                              bool predictedLocally);
 static void init_action_result(struct GameActionResult *result);
 static enum DevelopmentCardType development_card_for_action(enum GameActionType type);
 static bool action_actor_is_local_viewer(const struct MatchSession *session, enum PlayerType actor);
@@ -1534,17 +1535,27 @@ static bool apply_authoritative_action_to_client_map(struct MatchSession *sessio
 static void apply_client_authoritative_result(struct MatchSession *session,
                                               const struct GameAction *action,
                                               const struct GameActionResult *result,
-                                              uint32_t authoritativeStateHash)
+                                              uint32_t authoritativeStateHash,
+                                              bool predictedLocally)
 {
     bool needsApply = false;
     const enum PlayerType actor = active_decision_player(session);
+    const bool locallyPredictedAction = predictedLocally &&
+                                        !is_authoritative_only_action(action->type);
 
     if (session == NULL || action == NULL || result == NULL)
     {
         return;
     }
 
-    needsApply = !action_actor_is_local_viewer(session, actor) || is_authoritative_only_action(action->type);
+    if (locallyPredictedAction)
+    {
+        needsApply = false;
+    }
+    else
+    {
+        needsApply = !action_actor_is_local_viewer(session, actor) || is_authoritative_only_action(action->type);
+    }
     if (needsApply)
     {
         if (!apply_authoritative_action_to_client_map(session, action, result))
@@ -2161,8 +2172,11 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
         break;
 
     case NETPLAY_EVENT_ACTION_RESULT:
-        session->awaitingAuthoritativeUpdate = false;
-        apply_client_authoritative_result(session, &event->action, &event->result, event->stateHash);
+        {
+            const bool predictedLocally = session->awaitingAuthoritativeUpdate;
+            session->awaitingAuthoritativeUpdate = false;
+            apply_client_authoritative_result(session, &event->action, &event->result, event->stateHash, predictedLocally);
+        }
         break;
 
     case NETPLAY_EVENT_ACTION_REJECT:

@@ -228,6 +228,15 @@ Run the relay server on the default port:
 
 Render can host the relay server as a free web service.
 
+The repo now includes a `render.yaml` Blueprint that configures:
+
+- a public `web` service
+- `make relay-server` as the build command
+- `./soc_relay` as the start command
+- `/healthz` as the HTTP health check path
+
+If you use the Blueprint flow in Render, those settings are applied automatically.
+
 Use these settings:
 
 - Build command: `make relay-server`
@@ -238,6 +247,8 @@ If you deploy Render as a Docker service instead, Render will build the reposito
 Render will provide a `PORT` environment variable automatically, and the relay server uses it when present.
 
 The Render endpoint is exposed over `wss://`, so the game client should use the relay mode against the Render hostname on port `443`.
+
+Current client limitation: secure `wss://` relay transport is implemented for Windows builds. Non-Windows builds can still use LAN/direct TCP play and non-secure relay setups, but they do not yet support Render's public `wss://` endpoint.
 
 If you want to run multiple rooms, you only need one Render instance; each room is identified by its room code.
 
