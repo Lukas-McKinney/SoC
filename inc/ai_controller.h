@@ -1,6 +1,7 @@
 #ifndef AI_CONTROLLER_H
 #define AI_CONTROLLER_H
 
+#include "game_action.h"
 #include "map.h"
 
 /* Resets AI pacing and per-turn state, typically when starting or restarting a match. */
@@ -17,6 +18,11 @@ bool aiControlsActiveDecision(const struct Map *map);
 
 /* Advances one AI decision when the current game state is AI-controlled. */
 void aiUpdateTurn(struct Map *map);
+
+/* Selects the AI's next play-phase action without pacing or async scheduling, primarily for tests/debugging. */
+bool aiChoosePlayPhaseActionForTesting(const struct Map *map, enum AiDifficulty difficulty,
+                                       int buildActionsThisTurn, int maritimeTradesThisTurn,
+                                       struct GameAction *actionOut);
 
 /* Returns true when an AI target accepts a player-trade offer using the same give/receive perspective as gameTryTradeWithPlayer(). */
 bool aiShouldAcceptPlayerTradeOffer(const struct Map *map, enum PlayerType aiPlayer, enum ResourceType give, int giveAmount, enum ResourceType receive, int receiveAmount);
