@@ -1077,14 +1077,28 @@ void DrawOpponentVictoryBar(const struct Map *map)
             slotHeight};
         const char *name = ScoreboardPlayerName(map, displayedPlayer);
         const char *score = TextFormat("%d", gameComputeVisibleVictoryPoints(map, displayedPlayer));
-        const int nameFont = UiScaledFont(16);
         const int scoreFont = UiScaledFont(22);
         const int scoreWidth = MeasureUiText(score, scoreFont);
+        const float scorePadding = UiScaled(14.0f);
+        const float nameGap = UiScaled(10.0f);
+        const Rectangle nameBounds = {
+            slot.x + UiScaled(12.0f),
+            slot.y,
+            slot.width - UiScaled(12.0f) - scorePadding - (float)scoreWidth - nameGap,
+            slot.height};
 
         DrawRectangleRounded(slot, 0.24f, 8, Fade(UiReadablePlayerColor(displayedPlayer), IsDarkUiTheme() ? 0.26f : 0.18f));
         DrawRectangleLinesEx(slot, 1.5f, Fade(UiReadablePlayerColor(displayedPlayer), 0.85f));
-        DrawUiText(name, slot.x + UiScaled(12.0f), slot.y + UiScaled(8.0f), nameFont, textColor);
-        DrawUiText(score, slot.x + slot.width - UiScaled(14.0f) - scoreWidth, slot.y + UiScaled(5.0f), scoreFont, UiReadablePlayerColor(displayedPlayer));
+        if (nameBounds.width > 0.0f)
+        {
+            BeginScissorMode((int)nameBounds.x,
+                             (int)nameBounds.y,
+                             (int)nameBounds.width,
+                             (int)nameBounds.height);
+            DrawLeftUiTextFitted(name, nameBounds, 0.0f, 16, 10, 0.0f, textColor);
+            EndScissorMode();
+        }
+        DrawUiText(score, slot.x + slot.width - scorePadding - scoreWidth, slot.y + UiScaled(5.0f), scoreFont, UiReadablePlayerColor(displayedPlayer));
 
         for (int notificationIndex = 0; notificationIndex < notificationCount; notificationIndex++)
         {
