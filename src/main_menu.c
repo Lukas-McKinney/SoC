@@ -100,6 +100,8 @@ static void TrimMultiplayerHostAddress(void);
 static bool MultiplayerRelayModeRequested(void);
 static void SyncMultiplayerRelayDefaults(void);
 static const char *MultiplayerJoinDiagnosis(const char *errorMessage);
+static const char *MultiplayerRelayAddressPlaceholder(void);
+static const char *MultiplayerRelayAddressHelpText(void);
 static void HandleProfileNameKeyboardInput(void);
 static void AppendProfileNameChar(char *buffer, size_t bufferSize, int codepoint);
 static void ApplyProfileNameFromBuffer(void);
@@ -1227,10 +1229,10 @@ static void DrawMultiplayerPopup(void)
                                    ? loc("Relay Address")
                                    : (joinMode ? loc("Host Address") : loc("Relay Address"));
     const char *addressPlaceholder = relayMode
-                                         ? "wss://your-service.onrender.com"
-                                         : (joinMode ? "127.0.0.1" : "wss://your-service.onrender.com");
+                                         ? MultiplayerRelayAddressPlaceholder()
+                                         : (joinMode ? "127.0.0.1" : MultiplayerRelayAddressPlaceholder());
     const char *addressHelpText = relayMode
-                                      ? loc("Paste the relay hostname or a ws:// / wss:// URL. Render usually uses port 443.")
+                                      ? MultiplayerRelayAddressHelpText()
                                       : (joinMode
                                              ? loc("For another machine, use host LAN IP (not 127.0.0.1).")
                                              : loc("Optional: add a room code to use a relay such as Render."));
@@ -1825,6 +1827,10 @@ static const char *MultiplayerJoinDiagnosis(const char *errorMessage)
     {
         return loc("Likely issue: use the relay hostname and port 443.");
     }
+    if (strstr(lowered, "tls") != NULL || strstr(lowered, "certificate") != NULL)
+    {
+        return loc("Likely issue: secure relay TLS handshake or certificate validation failed.");
+    }
     if (strstr(lowered, "lan ip") != NULL || strstr(lowered, "localhost") != NULL || strstr(lowered, "127.0.0.1") != NULL)
     {
         return loc("Likely issue: use host LAN IP, not localhost.");
@@ -1843,6 +1849,16 @@ static const char *MultiplayerJoinDiagnosis(const char *errorMessage)
     }
 
     return loc("Likely issue: check address, port, and firewall.");
+}
+
+static const char *MultiplayerRelayAddressPlaceholder(void)
+{
+    return "wss://your-service.onrender.com";
+}
+
+static const char *MultiplayerRelayAddressHelpText(void)
+{
+    return loc("Paste the relay hostname or a ws:// / wss:// URL. Render usually uses port 443.");
 }
 
 static void TrimMultiplayerHostAddress(void)
