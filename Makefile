@@ -30,10 +30,13 @@ else
 PKG_CONFIG ?= pkg-config
 RAYLIB_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags raylib 2>/dev/null)
 RAYLIB_LIBS ?= $(shell $(PKG_CONFIG) --libs raylib 2>/dev/null)
+OPENSSL_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags openssl 2>/dev/null)
+OPENSSL_LIBS ?= $(shell $(PKG_CONFIG) --libs openssl 2>/dev/null)
 RAYLIB_MISSING_MESSAGE = raylib was not found via pkg-config. Install raylib and pkg-config, or pass RAYLIB_CFLAGS/RAYLIB_LIBS to make
+OPENSSL_MISSING_MESSAGE = OpenSSL was not found via pkg-config. Install OpenSSL and pkg-config, or pass OPENSSL_CFLAGS/OPENSSL_LIBS to make
 
-CFLAGS = $(COMMON_CFLAGS) $(RAYLIB_CFLAGS) -pthread
-GAME_LDFLAGS = $(RAYLIB_LIBS) -pthread
+CFLAGS = $(COMMON_CFLAGS) $(RAYLIB_CFLAGS) $(OPENSSL_CFLAGS) -pthread
+GAME_LDFLAGS = $(RAYLIB_LIBS) $(OPENSSL_LIBS) -pthread
 RULE_TEST_LDFLAGS = $(GAME_LDFLAGS) -lm
 RELAY_SERVER_CFLAGS = $(COMMON_CFLAGS)
 RELAY_SERVER_LDFLAGS =
@@ -47,6 +50,8 @@ CLEAN_CMD = rm -f $(TARGET) $(RULE_TEST_TARGET) $(TRADE_TEST_TARGET) $(REMOTE_PL
 
 ifeq ($(strip $(RAYLIB_LIBS)),)
 ENSURE_RAYLIB = @echo "$(RAYLIB_MISSING_MESSAGE)" >&2; exit 1
+else ifeq ($(strip $(OPENSSL_LIBS)),)
+ENSURE_RAYLIB = @echo "$(OPENSSL_MISSING_MESSAGE)" >&2; exit 1
 else
 ENSURE_RAYLIB = @:
 endif

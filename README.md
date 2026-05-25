@@ -172,10 +172,10 @@ Install the Apple command-line toolchain once:
 xcode-select --install
 ```
 
-Install Raylib and `pkg-config` with Homebrew:
+Install Raylib, OpenSSL, and `pkg-config` with Homebrew:
 
 ```bash
-brew install raylib pkg-config
+brew install raylib openssl pkg-config
 ```
 
 Build the game:
@@ -202,10 +202,10 @@ This produces:
 ./soc_console
 ```
 
-The macOS build path uses `pkg-config` to discover Raylib automatically. If your Raylib install is not exposed through `pkg-config`, pass the flags explicitly:
+The macOS build path uses `pkg-config` to discover Raylib and OpenSSL automatically. If your installs are not exposed through `pkg-config`, pass the flags explicitly:
 
 ```bash
-make RAYLIB_CFLAGS="..." RAYLIB_LIBS="..."
+make RAYLIB_CFLAGS="..." RAYLIB_LIBS="..." OPENSSL_CFLAGS="..." OPENSSL_LIBS="..."
 ```
 
 ## Internet Relay
@@ -248,7 +248,7 @@ Render will provide a `PORT` environment variable automatically, and the relay s
 
 The Render endpoint is exposed over `wss://`, so the game client should use the relay mode against the Render hostname on port `443`.
 
-Current client limitation: secure `wss://` relay transport is implemented for Windows builds. Non-Windows builds can still use LAN/direct TCP play and non-secure relay setups, but they do not yet support Render's public `wss://` endpoint.
+Non-Windows builds use OpenSSL for secure relay transport. Make sure the game is built with the OpenSSL dependency available via `pkg-config` or explicit `OPENSSL_CFLAGS` / `OPENSSL_LIBS` overrides.
 
 If you want to run multiple rooms, you only need one Render instance; each room is identified by its room code.
 

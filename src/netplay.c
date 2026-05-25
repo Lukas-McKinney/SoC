@@ -30,6 +30,9 @@ typedef int NetSockLen;
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <openssl/err.h>
+#include <openssl/ssl.h>
+#include <openssl/x509v3.h>
 #include <sys/ioctl.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -55,6 +58,7 @@ typedef socklen_t NetSockLen;
 #define NETPLAY_HEARTBEAT_INTERVAL_MS 2000u
 #define NETPLAY_STALE_TIMEOUT_MS 10000u
 #define NETPLAY_RELAY_HANDSHAKE_MAX (NETPLAY_MAX_RELAY_ROOM_CODE + 32)
+#define NETPLAY_RELAY_WS_BUFFER_SIZE (NETPLAY_RECV_BUFFER_SIZE + 32u)
 
 enum NetplayPacketType
 {
@@ -196,6 +200,11 @@ struct NetplayState
     DWORD relayReceiveStatus;
     bool relayReceiveClosed;
     volatile LONG relayReceiveStopRequested;
+#else
+    SSL_CTX *relayTlsContext;
+    SSL *relayTlsHandle;
+    unsigned char relayWebSocketBuffer[NETPLAY_RELAY_WS_BUFFER_SIZE];
+    size_t relayWebSocketBufferLength;
 #endif
     unsigned char recvBuffer[NETPLAY_RECV_BUFFER_SIZE];
     size_t recvLength;
@@ -358,7 +367,7 @@ static int count_tracked_host_peers(const struct NetplayState *state)
 #ifdef _WIN32
         return state->relayWebSocket != NULL ? 1 : 0;
 #else
-        return 0;
+        return state->peerSocket != NET_INVALID_SOCKET ? 1 : 0;
 #endif
     }
 
@@ -534,6 +543,11 @@ static bool net_socket_layer_init(void)
     }
 
     gSocketLayerReady = true;
+#else
+    if (OPENSSL_init_ssl(0, NULL) != 1)
+    {
+        return false;
+    }
 #endif
     return true;
 }
@@ -981,9 +995,428 @@ static void close_relay_transport(struct NetplayState *state)
         state->relayReceiveLockReady = false;
     }
 #else
-    (void)state;
+    if (state == NULL)
+    {
+        return;
+    }
+
+    state->relayWebSocketBufferLength = 0u;
+    if (state->relayTlsHandle != NULL)
+    {
+        if (state->peerSocket != NET_INVALID_SOCKET)
+        {
+            (void)SSL_shutdown(state->relayTlsHandle);
+        }
+        SSL_free(state->relayTlsHandle);
+        state->relayTlsHandle = NULL;
+    }
+    if (state->relayTlsContext != NULL)
+    {
+        SSL_CTX_free(state->relayTlsContext);
+        state->relayTlsContext = NULL;
+    }
+    close_socket_if_open(&state->peerSocket);
 #endif
 }
+
+#ifndef _WIN32
+static bool set_socket_blocking_mode(NetSocket socketHandle, bool blocking)
+{
+    int flags = 0;
+
+    if (socketHandle == NET_INVALID_SOCKET)
+    {
+        return false;
+    }
+
+    flags = fcntl(socketHandle, F_GETFL, 0);
+    if (flags < 0)
+    {
+        return false;
+    }
+
+    if (blocking)
+    {
+        flags &= ~O_NONBLOCK;
+    }
+    else
+    {
+        flags |= O_NONBLOCK;
+    }
+
+    return fcntl(socketHandle, F_SETFL, flags) == 0;
+}
+
+static int relay_transport_read_some(struct NetplayState *state, unsigned char *buffer, size_t bufferSize)
+{
+    if (state == NULL || buffer == NULL || bufferSize == 0u || state->peerSocket == NET_INVALID_SOCKET)
+    {
+        return NET_SOCKET_ERROR;
+    }
+
+    if (state->relayTlsHandle != NULL)
+    {
+        const int received = SSL_read(state->relayTlsHandle, buffer, (int)bufferSize);
+        if (received > 0)
+        {
+            return received;
+        }
+
+        switch (SSL_get_error(state->relayTlsHandle, received))
+        {
+        case SSL_ERROR_ZERO_RETURN:
+            return 0;
+        case SSL_ERROR_WANT_READ:
+        case SSL_ERROR_WANT_WRITE:
+            return -2;
+        case SSL_ERROR_SYSCALL:
+        {
+            const int errorCode = net_last_error_code();
+            if (NET_WOULD_BLOCK(errorCode))
+            {
+                return -2;
+            }
+            return received == 0 ? 0 : NET_SOCKET_ERROR;
+        }
+        default:
+            return NET_SOCKET_ERROR;
+        }
+    }
+
+    {
+        const int received = recv(state->peerSocket, (char *)buffer, (int)bufferSize, 0);
+        if (received == 0)
+        {
+            return 0;
+        }
+        if (received < 0)
+        {
+            const int errorCode = net_last_error_code();
+            if (NET_WOULD_BLOCK(errorCode))
+            {
+                return -2;
+            }
+            return NET_SOCKET_ERROR;
+        }
+        return received;
+    }
+}
+
+static int relay_transport_write_all(struct NetplayState *state, const unsigned char *buffer, size_t length)
+{
+    int originalFlags = -1;
+    bool restoreNonblocking = false;
+    size_t sentTotal = 0u;
+
+    if (state == NULL || buffer == NULL || state->peerSocket == NET_INVALID_SOCKET)
+    {
+        return NET_SOCKET_ERROR;
+    }
+
+    originalFlags = fcntl(state->peerSocket, F_GETFL, 0);
+    if (originalFlags >= 0 && (originalFlags & O_NONBLOCK) != 0)
+    {
+        if (!set_socket_blocking_mode(state->peerSocket, true))
+        {
+            return NET_SOCKET_ERROR;
+        }
+        restoreNonblocking = true;
+    }
+
+    while (sentTotal < length)
+    {
+        int sent = 0;
+
+        if (state->relayTlsHandle != NULL)
+        {
+            sent = SSL_write(state->relayTlsHandle, buffer + sentTotal, (int)(length - sentTotal));
+            if (sent <= 0)
+            {
+                const int sslError = SSL_get_error(state->relayTlsHandle, sent);
+                if (sslError == SSL_ERROR_WANT_READ || sslError == SSL_ERROR_WANT_WRITE)
+                {
+                    continue;
+                }
+                sent = NET_SOCKET_ERROR;
+            }
+        }
+        else
+        {
+            sent = send(state->peerSocket, (const char *)(buffer + sentTotal), (int)(length - sentTotal), 0);
+        }
+
+        if (sent == NET_SOCKET_ERROR || sent <= 0)
+        {
+            if (restoreNonblocking)
+            {
+                (void)set_socket_blocking_mode(state->peerSocket, false);
+            }
+            return NET_SOCKET_ERROR;
+        }
+
+        sentTotal += (size_t)sent;
+    }
+
+    if (restoreNonblocking)
+    {
+        (void)set_socket_blocking_mode(state->peerSocket, false);
+    }
+
+    return (int)sentTotal;
+}
+
+static void relay_transport_consume_buffer(struct NetplayState *state, size_t byteCount)
+{
+    if (state == NULL || byteCount == 0u)
+    {
+        return;
+    }
+
+    if (byteCount >= state->relayWebSocketBufferLength)
+    {
+        state->relayWebSocketBufferLength = 0u;
+        return;
+    }
+
+    memmove(state->relayWebSocketBuffer,
+            state->relayWebSocketBuffer + byteCount,
+            state->relayWebSocketBufferLength - byteCount);
+    state->relayWebSocketBufferLength -= byteCount;
+}
+
+static int relay_transport_send_frame(struct NetplayState *state, unsigned char opcode, const unsigned char *payload, size_t payloadLength)
+{
+    unsigned char header[14];
+    unsigned char maskKey[4];
+    unsigned char *sendBuffer = NULL;
+    size_t headerLength = 0u;
+    size_t sendSize = 0u;
+    FILE *urandom = NULL;
+
+    if (state == NULL || state->peerSocket == NET_INVALID_SOCKET)
+    {
+        return NET_SOCKET_ERROR;
+    }
+
+    if ((opcode & 0x08u) != 0u && payloadLength > 125u)
+    {
+        return NET_SOCKET_ERROR;
+    }
+
+    header[0] = (unsigned char)(0x80u | (opcode & 0x0Fu));
+    if (payloadLength <= 125u)
+    {
+        header[1] = 0x80u | (unsigned char)payloadLength;
+        headerLength = 2u;
+    }
+    else if (payloadLength <= 0xFFFFu)
+    {
+        header[1] = 0x80u | 126u;
+        header[2] = (unsigned char)((payloadLength >> 8) & 0xFFu);
+        header[3] = (unsigned char)(payloadLength & 0xFFu);
+        headerLength = 4u;
+    }
+    else
+    {
+        uint64_t extendedLength = (uint64_t)payloadLength;
+        header[1] = 0x80u | 127u;
+        for (int i = 0; i < 8; i++)
+        {
+            header[2 + i] = (unsigned char)((extendedLength >> (8 * (7 - i))) & 0xFFu);
+        }
+        headerLength = 10u;
+    }
+
+    urandom = fopen("/dev/urandom", "rb");
+    if (urandom != NULL)
+    {
+        (void)fread(maskKey, 1u, sizeof(maskKey), urandom);
+        fclose(urandom);
+    }
+    else
+    {
+        for (int i = 0; i < 4; i++)
+        {
+            maskKey[i] = (unsigned char)(rand() & 0xFF);
+        }
+    }
+
+    memcpy(header + headerLength, maskKey, sizeof(maskKey));
+    headerLength += sizeof(maskKey);
+    sendSize = headerLength + payloadLength;
+    sendBuffer = (unsigned char *)malloc(sendSize);
+    if (sendBuffer == NULL)
+    {
+        return NET_SOCKET_ERROR;
+    }
+
+    memcpy(sendBuffer, header, headerLength);
+    for (size_t i = 0; i < payloadLength; i++)
+    {
+        const unsigned char value = payload != NULL ? payload[i] : 0u;
+        sendBuffer[headerLength + i] = value ^ maskKey[i & 3u];
+    }
+
+    if (relay_transport_write_all(state, sendBuffer, sendSize) == NET_SOCKET_ERROR)
+    {
+        free(sendBuffer);
+        return NET_SOCKET_ERROR;
+    }
+
+    free(sendBuffer);
+    return (int)payloadLength;
+}
+
+static int relay_transport_receive_frame(struct NetplayState *state, unsigned char *buffer, size_t bufferSize)
+{
+    if (state == NULL || buffer == NULL || bufferSize == 0u)
+    {
+        return NET_SOCKET_ERROR;
+    }
+
+    for (;;)
+    {
+        if (state->relayWebSocketBufferLength >= 2u)
+        {
+            const unsigned char *frame = state->relayWebSocketBuffer;
+            const bool fin = (frame[0] & 0x80u) != 0u;
+            const unsigned char opcode = frame[0] & 0x0Fu;
+            const bool masked = (frame[1] & 0x80u) != 0u;
+            uint64_t payloadLength = (uint64_t)(frame[1] & 0x7Fu);
+            size_t headerLength = 2u;
+            size_t frameLength = 0u;
+            size_t payloadOffset = 0u;
+
+            if (payloadLength == 126u)
+            {
+                if (state->relayWebSocketBufferLength < 4u)
+                {
+                    goto read_more;
+                }
+                payloadLength = ((uint64_t)frame[2] << 8) | (uint64_t)frame[3];
+                headerLength = 4u;
+            }
+            else if (payloadLength == 127u)
+            {
+                if (state->relayWebSocketBufferLength < 10u)
+                {
+                    goto read_more;
+                }
+                payloadLength = 0u;
+                for (int i = 0; i < 8; i++)
+                {
+                    payloadLength = (payloadLength << 8) | (uint64_t)frame[2 + i];
+                }
+                headerLength = 10u;
+            }
+
+            if (masked)
+            {
+                headerLength += 4u;
+            }
+
+            if (payloadLength > (uint64_t)(SIZE_MAX - headerLength))
+            {
+                return NET_SOCKET_ERROR;
+            }
+
+            frameLength = headerLength + (size_t)payloadLength;
+            if (state->relayWebSocketBufferLength < frameLength)
+            {
+                goto read_more;
+            }
+
+            if (!fin)
+            {
+                return NET_SOCKET_ERROR;
+            }
+
+            payloadOffset = headerLength;
+            if (opcode == 0x8u)
+            {
+                relay_transport_consume_buffer(state, frameLength);
+                return 0;
+            }
+
+            if (opcode == 0x9u || opcode == 0xAu)
+            {
+                unsigned char controlPayload[125];
+                if (payloadLength > sizeof(controlPayload))
+                {
+                    return NET_SOCKET_ERROR;
+                }
+
+                for (size_t i = 0; i < (size_t)payloadLength; i++)
+                {
+                    unsigned char value = frame[payloadOffset + i];
+                    if (masked)
+                    {
+                        value ^= frame[headerLength - 4u + (i & 3u)];
+                    }
+                    controlPayload[i] = value;
+                }
+
+                relay_transport_consume_buffer(state, frameLength);
+                if (opcode == 0x9u &&
+                    relay_transport_send_frame(state, 0xAu, controlPayload, (size_t)payloadLength) == NET_SOCKET_ERROR)
+                {
+                    return NET_SOCKET_ERROR;
+                }
+                continue;
+            }
+
+            if (opcode != 0x1u && opcode != 0x2u)
+            {
+                return NET_SOCKET_ERROR;
+            }
+
+            if (payloadLength > bufferSize)
+            {
+                return NET_SOCKET_ERROR;
+            }
+
+            for (size_t i = 0; i < (size_t)payloadLength; i++)
+            {
+                unsigned char value = frame[payloadOffset + i];
+                if (masked)
+                {
+                    value ^= frame[headerLength - 4u + (i & 3u)];
+                }
+                buffer[i] = value;
+            }
+
+            relay_transport_consume_buffer(state, frameLength);
+            return (int)payloadLength;
+        }
+
+read_more:
+        if (state->relayWebSocketBufferLength >= sizeof(state->relayWebSocketBuffer))
+        {
+            return NET_SOCKET_ERROR;
+        }
+
+        {
+            const int received = relay_transport_read_some(state,
+                                                           state->relayWebSocketBuffer + state->relayWebSocketBufferLength,
+                                                           sizeof(state->relayWebSocketBuffer) - state->relayWebSocketBufferLength);
+            if (received == 0)
+            {
+                return 0;
+            }
+            if (received == -2)
+            {
+                return -2;
+            }
+            if (received == NET_SOCKET_ERROR)
+            {
+                return NET_SOCKET_ERROR;
+            }
+
+            state->relayWebSocketBufferLength += (size_t)received;
+        }
+    }
+}
+#endif
 
 static bool open_relay_transport(struct NetplayState *state,
                                  const char *hostAddress,
@@ -1135,21 +1568,21 @@ static bool open_relay_transport(struct NetplayState *state,
     char requestPath[128];
     char keyBase64[64];
     unsigned char keyRaw[16];
+    const char *roleText = isRelayHost ? "HOST" : "CLIENT";
 
     if (state == NULL || hostAddress == NULL || hostAddress[0] == '\0')
     {
         return false;
     }
 
-    if (secureTransport)
-    {
-        set_last_error(state, "secure relay transport is supported only on Windows builds");
-        return false;
-    }
-
     close_relay_transport(state);
+    state->relayWebSocketBufferLength = 0u;
 
-    snprintf(requestPath, sizeof(requestPath), "/?room=%s&role=%s", roomCode != NULL && roomCode[0] != '\0' ? roomCode : "default", isRelayHost ? "HOST" : "CLIENT");
+    snprintf(requestPath,
+             sizeof(requestPath),
+             "/?room=%s&role=%s",
+             roomCode != NULL && roomCode[0] != '\0' ? roomCode : "default",
+             roleText);
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
@@ -1189,7 +1622,74 @@ static bool open_relay_transport(struct NetplayState *state,
         return false;
     }
 
-    set_socket_nodelay(sock);
+    state->peerSocket = sock;
+    sock = NET_INVALID_SOCKET;
+    set_socket_nodelay(state->peerSocket);
+
+    if (secureTransport)
+    {
+        X509_VERIFY_PARAM *verifyParams = NULL;
+
+        state->relayTlsContext = SSL_CTX_new(TLS_client_method());
+        if (state->relayTlsContext == NULL)
+        {
+            set_last_error(state, "relay TLS context failed");
+            close_relay_transport(state);
+            return false;
+        }
+
+        if (SSL_CTX_set_default_verify_paths(state->relayTlsContext) != 1)
+        {
+            set_last_error(state, "relay TLS trust store failed");
+            close_relay_transport(state);
+            return false;
+        }
+
+        SSL_CTX_set_verify(state->relayTlsContext, SSL_VERIFY_PEER, NULL);
+        state->relayTlsHandle = SSL_new(state->relayTlsContext);
+        if (state->relayTlsHandle == NULL)
+        {
+            set_last_error(state, "relay TLS session failed");
+            close_relay_transport(state);
+            return false;
+        }
+
+        if (SSL_set_fd(state->relayTlsHandle, state->peerSocket) != 1)
+        {
+            set_last_error(state, "relay TLS socket bind failed");
+            close_relay_transport(state);
+            return false;
+        }
+
+        if (SSL_set_tlsext_host_name(state->relayTlsHandle, hostAddress) != 1)
+        {
+            set_last_error(state, "relay TLS server name failed");
+            close_relay_transport(state);
+            return false;
+        }
+
+        verifyParams = SSL_get0_param(state->relayTlsHandle);
+        if (verifyParams == NULL || X509_VERIFY_PARAM_set1_host(verifyParams, hostAddress, 0) != 1)
+        {
+            set_last_error(state, "relay TLS host verify setup failed");
+            close_relay_transport(state);
+            return false;
+        }
+
+        if (SSL_connect(state->relayTlsHandle) != 1)
+        {
+            set_last_error(state, "relay TLS handshake failed");
+            close_relay_transport(state);
+            return false;
+        }
+
+        if (SSL_get_verify_result(state->relayTlsHandle) != X509_V_OK)
+        {
+            set_last_error(state, "relay TLS certificate verify failed");
+            close_relay_transport(state);
+            return false;
+        }
+    }
 
     /* generate a random Sec-WebSocket-Key (base64 of 16 bytes) */
     {
@@ -1244,15 +1744,15 @@ static bool open_relay_transport(struct NetplayState *state,
 
         if (written <= 0 || (size_t)written >= sizeof(request))
         {
-            net_close_socket(sock);
             set_last_error(state, "relay handshake build failed");
+            close_relay_transport(state);
             return false;
         }
 
-        if (send(sock, request, written, 0) != written)
+        if (relay_transport_write_all(state, (const unsigned char *)request, (size_t)written) == NET_SOCKET_ERROR)
         {
-            net_close_socket(sock);
             set_last_error(state, "relay handshake send failed");
+            close_relay_transport(state);
             return false;
         }
 
@@ -1260,34 +1760,65 @@ static bool open_relay_transport(struct NetplayState *state,
         {
             char response[2048];
             size_t received = 0;
+            bool headerComplete = false;
             while (received + 1 < sizeof(response))
             {
-                int r = recv(sock, response + received, (int)(sizeof(response) - received - 1), 0);
+                const int r = relay_transport_read_some(state,
+                                                        (unsigned char *)response + received,
+                                                        sizeof(response) - received - 1u);
                 if (r == 0)
                 {
-                    net_close_socket(sock);
                     set_last_error(state, "relay handshake closed");
+                    close_relay_transport(state);
                     return false;
                 }
-                if (r < 0)
+                if (r == NET_SOCKET_ERROR)
                 {
-                    net_close_socket(sock);
                     set_last_error(state, "relay handshake recv failed");
+                    close_relay_transport(state);
                     return false;
+                }
+                if (r == -2)
+                {
+                    continue;
                 }
                 received += (size_t)r;
                 response[received] = '\0';
                 if (strstr(response, "\r\n\r\n") != NULL)
                 {
+                    const char *headerTerminator = strstr(response, "\r\n\r\n");
+                    const size_t headerLength = (size_t)((headerTerminator + 4) - response);
+                    const size_t leftoverLength = received > headerLength ? received - headerLength : 0u;
+
+                    if (leftoverLength > sizeof(state->relayWebSocketBuffer))
+                    {
+                        set_last_error(state, "relay handshake overflow");
+                        close_relay_transport(state);
+                        return false;
+                    }
+
+                    if (leftoverLength > 0u)
+                    {
+                        memcpy(state->relayWebSocketBuffer, response + headerLength, leftoverLength);
+                    }
+                    state->relayWebSocketBufferLength = leftoverLength;
+                    headerComplete = true;
                     break;
                 }
+            }
+
+            if (!headerComplete)
+            {
+                set_last_error(state, "relay handshake response too large");
+                close_relay_transport(state);
+                return false;
             }
 
             /* check status line */
             if (strncmp(response, "HTTP/1.1 101", 12) != 0 && strncmp(response, "HTTP/1.0 101", 12) != 0)
             {
-                net_close_socket(sock);
                 set_last_error(state, "relay upgrade rejected");
+                close_relay_transport(state);
                 return false;
             }
 
@@ -1300,8 +1831,8 @@ static bool open_relay_transport(struct NetplayState *state,
 
                 if (!websocket_accept_key(keyBase64, expectedAccept, sizeof(expectedAccept)))
                 {
-                    net_close_socket(sock);
                     set_last_error(state, "relay accept key compute failed");
+                    close_relay_transport(state);
                     return false;
                 }
 
@@ -1309,8 +1840,8 @@ static bool open_relay_transport(struct NetplayState *state,
                 acceptHeader = strstr(response, "Sec-WebSocket-Accept:");
                 if (acceptHeader == NULL)
                 {
-                    net_close_socket(sock);
                     set_last_error(state, "relay missing accept header");
+                    close_relay_transport(state);
                     return false;
                 }
 
@@ -1321,8 +1852,8 @@ static bool open_relay_transport(struct NetplayState *state,
                 lineLen = (size_t)(line - acceptHeader);
                 if (lineLen == 0 || lineLen >= sizeof(expectedAccept))
                 {
-                    net_close_socket(sock);
                     set_last_error(state, "relay invalid accept header");
+                    close_relay_transport(state);
                     return false;
                 }
 
@@ -1331,8 +1862,8 @@ static bool open_relay_transport(struct NetplayState *state,
                 acceptValue[lineLen] = '\0';
                 if (strcmp(acceptValue, expectedAccept) != 0)
                 {
-                    net_close_socket(sock);
                     set_last_error(state, "relay accept mismatch");
+                    close_relay_transport(state);
                     return false;
                 }
             }
@@ -1340,14 +1871,13 @@ static bool open_relay_transport(struct NetplayState *state,
     }
 
     /* set non-blocking for normal operation */
-    if (!set_socket_nonblocking(sock))
+    if (!set_socket_nonblocking(state->peerSocket))
     {
-        net_close_socket(sock);
         set_last_error(state, "relay set nonblocking failed");
+        close_relay_transport(state);
         return false;
     }
 
-    state->peerSocket = sock;
     clear_last_error(state);
     return true;
 #endif
@@ -1378,119 +1908,7 @@ static int send_relay_message(struct NetplayState *state, const unsigned char *b
     {
         return NET_SOCKET_ERROR;
     }
-
-    /* Build a single-frame unfragmented client-to-server masked frame (clients MUST mask) */
-    {
-        unsigned char header[14];
-        size_t headerLen = 0;
-        uint64_t payloadLen = length;
-
-        header[0] = binaryMessage ? 0x82u : 0x81u; /* FIN + opcode */
-
-        if (payloadLen <= 125u)
-        {
-            header[1] = 0x80u | (unsigned char)payloadLen; /* MASK bit set */
-            headerLen = 2;
-        }
-        else if (payloadLen <= 0xFFFFu)
-        {
-            header[1] = 0x80u | 126u;
-            header[2] = (unsigned char)((payloadLen >> 8) & 0xFFu);
-            header[3] = (unsigned char)(payloadLen & 0xFFu);
-            headerLen = 4;
-        }
-        else
-        {
-            header[1] = 0x80u | 127u;
-            /* network byte order 64-bit length */
-            for (int i = 0; i < 8; i++)
-            {
-                header[2 + i] = (unsigned char)((payloadLen >> (8 * (7 - i))) & 0xFFu);
-            }
-            headerLen = 10;
-        }
-
-        /* generate mask key */
-        unsigned char maskKey[4];
-        FILE *ur = fopen("/dev/urandom", "rb");
-        if (ur != NULL)
-        {
-            fread(maskKey, 1, 4, ur);
-            fclose(ur);
-        }
-        else
-        {
-            for (int i = 0; i < 4; i++)
-            {
-                maskKey[i] = (unsigned char)(rand() & 0xFF);
-            }
-        }
-
-        /* append mask key */
-        for (int i = 0; i < 4; i++)
-        {
-            header[headerLen + i] = maskKey[i];
-        }
-        headerLen += 4;
-
-        /* prepare masked payload in a temporary buffer if necessary */
-        unsigned char *sendBuffer = NULL;
-        size_t sendSize = headerLen + payloadLen;
-        sendBuffer = (unsigned char *)malloc(sendSize);
-        if (sendBuffer == NULL)
-        {
-            return NET_SOCKET_ERROR;
-        }
-
-        memcpy(sendBuffer, header, headerLen);
-        for (size_t i = 0; i < payloadLen; i++)
-        {
-            sendBuffer[headerLen + i] = ((unsigned char *)buffer)[i] ^ maskKey[i & 3];
-        }
-
-        /* Temporarily clear non-blocking so send_all_socket can block until complete */
-        /* Get flags */
-#ifdef _WIN32
-        (void)0;
-#else
-        int flags = fcntl(state->peerSocket, F_GETFL, 0);
-        if (flags >= 0)
-        {
-            fcntl(state->peerSocket, F_SETFL, flags & ~O_NONBLOCK);
-        }
-#endif
-
-        /* send all */
-        size_t sentTotal = 0u;
-        while (sentTotal < sendSize)
-        {
-            int s = send(state->peerSocket, (const char *)(sendBuffer + sentTotal), (int)(sendSize - sentTotal), 0);
-            if (s == NET_SOCKET_ERROR)
-            {
-                free(sendBuffer);
-                return NET_SOCKET_ERROR;
-            }
-            if (s <= 0)
-            {
-                free(sendBuffer);
-                return NET_SOCKET_ERROR;
-            }
-            sentTotal += (size_t)s;
-        }
-
-#ifdef _WIN32
-        (void)0;
-#else
-        /* restore flags */
-        if (flags >= 0)
-        {
-            fcntl(state->peerSocket, F_SETFL, flags);
-        }
-#endif
-
-        free(sendBuffer);
-        return (int)length;
-    }
+    return relay_transport_send_frame(state, binaryMessage ? 0x2u : 0x1u, buffer, length);
 #endif
 }
 
@@ -1536,171 +1954,7 @@ static int receive_relay_message(struct NetplayState *state, unsigned char *buff
     LeaveCriticalSection(&state->relayReceiveLock);
     return (int)bytesToCopy;
 #else
-    if (state == NULL || buffer == NULL || bufferSize == 0u || state->peerSocket == NET_INVALID_SOCKET)
-    {
-        return NET_SOCKET_ERROR;
-    }
-
-    /* Peek header (2 bytes) */
-    unsigned char hdr[2];
-    int r = recv(state->peerSocket, (char *)hdr, 2, MSG_PEEK);
-    if (r == 0)
-    {
-        return 0; /* closed */
-    }
-    if (r < 0)
-    {
-        const int err = net_last_error_code();
-        if (NET_WOULD_BLOCK(err))
-        {
-            return -2;
-        }
-        return NET_SOCKET_ERROR;
-    }
-    if (r < 2)
-    {
-        return -2;
-    }
-
-    const unsigned char b0 = hdr[0];
-    const unsigned char b1 = hdr[1];
-    const bool fin = (b0 & 0x80u) != 0;
-    const unsigned char opcode = b0 & 0x0Fu;
-    const bool masked = (b1 & 0x80u) != 0;
-    uint64_t payloadLen = b1 & 0x7Fu;
-    size_t headerLen = 2;
-
-    if (payloadLen == 126u)
-    {
-        unsigned char ext[2];
-        r = recv(state->peerSocket, (char *)ext, 2, MSG_PEEK | MSG_WAITALL);
-        if (r < 2)
-        {
-            return -2;
-        }
-        payloadLen = ((uint64_t)ext[0] << 8) | (uint64_t)ext[1];
-        headerLen += 2;
-    }
-    else if (payloadLen == 127u)
-    {
-        unsigned char ext[8];
-        r = recv(state->peerSocket, (char *)ext, 8, MSG_PEEK | MSG_WAITALL);
-        if (r < 8)
-        {
-            return -2;
-        }
-        payloadLen = 0;
-        for (int i = 0; i < 8; i++)
-        {
-            payloadLen = (payloadLen << 8) | ext[i];
-        }
-        headerLen += 8;
-    }
-
-    if (masked)
-    {
-        headerLen += 4;
-    }
-
-    /* Ensure we have the whole frame available */
-    size_t bytesNeeded = headerLen + (size_t)payloadLen;
-    /* Peek available bytes */
-    {
-        /* Use ioctl(FIONREAD) to check available bytes */
-        int available = 0;
-#ifdef _WIN32
-        unsigned long avail = 0;
-        if (ioctlsocket(state->peerSocket, FIONREAD, &avail) != 0)
-        {
-            return NET_SOCKET_ERROR;
-        }
-        available = (int)avail;
-#else
-        if (ioctl(state->peerSocket, FIONREAD, &available) != 0)
-        {
-            const int err = net_last_error_code();
-            if (NET_WOULD_BLOCK(err))
-            {
-                return -2;
-            }
-            return NET_SOCKET_ERROR;
-        }
-#endif
-        if ((size_t)available < bytesNeeded)
-        {
-            return -2;
-        }
-    }
-
-    /* Read full frame into temp buffer */
-    size_t toRead = bytesNeeded;
-    unsigned char *tmp = (unsigned char *)malloc(toRead);
-    if (tmp == NULL)
-    {
-        return NET_SOCKET_ERROR;
-    }
-    size_t readTotal = 0;
-    while (readTotal < toRead)
-    {
-        int rr = recv(state->peerSocket, (char *)(tmp + readTotal), (int)(toRead - readTotal), 0);
-        if (rr == 0)
-        {
-            free(tmp);
-            return 0;
-        }
-        if (rr < 0)
-        {
-            const int err = net_last_error_code();
-            if (NET_WOULD_BLOCK(err))
-            {
-                free(tmp);
-                return -2;
-            }
-            free(tmp);
-            return NET_SOCKET_ERROR;
-        }
-        readTotal += (size_t)rr;
-    }
-
-    /* parse payload from tmp */
-    size_t offset = 2;
-    if ((b1 & 0x7Fu) == 126u)
-    {
-        offset += 2;
-    }
-    else if ((b1 & 0x7Fu) == 127u)
-    {
-        offset += 8;
-    }
-
-    unsigned char maskKey[4] = {0, 0, 0, 0};
-    if (masked)
-    {
-        for (int i = 0; i < 4; i++)
-        {
-            maskKey[i] = tmp[offset + i];
-        }
-        offset += 4;
-    }
-
-    if (payloadLen > bufferSize)
-    {
-        free(tmp);
-        return NET_SOCKET_ERROR;
-    }
-
-    for (uint64_t i = 0; i < payloadLen; i++)
-    {
-        unsigned char val = tmp[offset + (size_t)i];
-        if (masked)
-        {
-            val ^= maskKey[i & 3];
-        }
-        buffer[i] = val;
-    }
-
-    free(tmp);
-    return (int)payloadLen;
+    return relay_transport_receive_frame(state, buffer, bufferSize);
 #endif
 }
 
@@ -1744,6 +1998,9 @@ static void reset_connection_buffers(struct NetplayState *state)
     state->lastSendMs = 0u;
     state->lastReceiveMs = 0u;
     state->lastHeartbeatSentMs = 0u;
+#ifndef _WIN32
+    state->relayWebSocketBufferLength = 0u;
+#endif
 
     for (int i = 0; i < NETPLAY_MAX_HOST_REMOTE_PLAYERS - 1; i++)
     {
@@ -1848,7 +2105,7 @@ static bool queue_packet_to_peer(struct NetplayState *state,
 #ifdef _WIN32
         relayPeerAvailable = (peerId == 0 && state->relayWebSocket != NULL);
 #else
-        relayPeerAvailable = false;
+        relayPeerAvailable = (peerId == 0 && state->peerSocket != NET_INVALID_SOCKET);
 #endif
     }
     else if (state->mode == NETPLAY_MODE_HOST)
@@ -3003,6 +3260,10 @@ struct NetplayState *netplayCreate(void)
     state->relayReceiveStatus = NO_ERROR;
     state->relayReceiveClosed = false;
     state->relayReceiveStopRequested = 0;
+#else
+    state->relayTlsContext = NULL;
+    state->relayTlsHandle = NULL;
+    state->relayWebSocketBufferLength = 0u;
 #endif
     init_tracked_host_peers(state);
     state->connectionState = NETPLAY_CONNECTION_IDLE;
@@ -3147,16 +3408,6 @@ static bool start_outbound_connection(struct NetplayState *state,
         snprintf(state->peerAddress, sizeof(state->peerAddress), "%s", hostAddress);
     }
 
-#ifndef _WIN32
-    if (relayTransport && secureRelayTransport)
-    {
-        set_last_error(state, "secure relay transport is supported only on Windows builds");
-        state->connectionState = NETPLAY_CONNECTION_ERROR;
-        return false;
-    }
-#endif
-
-#ifdef _WIN32
     if (relayTransport)
     {
         if (!open_relay_transport(state,
@@ -3183,7 +3434,6 @@ static bool start_outbound_connection(struct NetplayState *state,
         }
         return true;
     }
-#endif
 
     snprintf(portText, sizeof(portText), "%hu", state->port);
     memset(&hints, 0, sizeof(hints));
