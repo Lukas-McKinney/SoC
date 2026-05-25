@@ -188,6 +188,14 @@ struct NetplayState
     HINTERNET relayConnection;
     HINTERNET relayRequest;
     HINTERNET relayWebSocket;
+    HANDLE relayReceiveThread;
+    CRITICAL_SECTION relayReceiveLock;
+    bool relayReceiveLockReady;
+    unsigned char relayReceiveQueue[NETPLAY_RECV_BUFFER_SIZE];
+    size_t relayReceiveQueueLength;
+    DWORD relayReceiveStatus;
+    bool relayReceiveClosed;
+    volatile LONG relayReceiveStopRequested;
 #endif
     unsigned char recvBuffer[NETPLAY_RECV_BUFFER_SIZE];
     size_t recvLength;
@@ -235,6 +243,10 @@ static bool open_relay_transport(struct NetplayState *state,
                                  bool secureTransport,
                                  bool isRelayHost,
                                  const char *roomCode);
+#ifdef _WIN32
+static void reset_winhttp_relay_receive_state(struct NetplayState *state);
+static DWORD WINAPI relay_receive_thread_main(LPVOID context);
+#endif
 static int send_relay_message(struct NetplayState *state, const unsigned char *buffer, size_t length, bool binaryMessage);
 static int receive_relay_message(struct NetplayState *state, unsigned char *buffer, size_t bufferSize);
 static NetSocket get_host_peer_socket_by_id(const struct NetplayState *state, int peerId);
@@ -802,6 +814,116 @@ static void close_socket_if_open(NetSocket *socketHandle)
     *socketHandle = NET_INVALID_SOCKET;
 }
 
+#ifdef _WIN32
+static void reset_winhttp_relay_receive_state(struct NetplayState *state)
+{
+    if (state == NULL)
+    {
+        return;
+    }
+
+    if (state->relayReceiveLockReady)
+    {
+        EnterCriticalSection(&state->relayReceiveLock);
+    }
+
+    state->relayReceiveQueueLength = 0u;
+    state->relayReceiveStatus = NO_ERROR;
+    state->relayReceiveClosed = false;
+    InterlockedExchange(&state->relayReceiveStopRequested, 0);
+
+    if (state->relayReceiveLockReady)
+    {
+        LeaveCriticalSection(&state->relayReceiveLock);
+    }
+}
+
+static DWORD WINAPI relay_receive_thread_main(LPVOID context)
+{
+    struct NetplayState *state = (struct NetplayState *)context;
+    unsigned char messageBuffer[NETPLAY_RECV_BUFFER_SIZE];
+
+    if (state == NULL || state->relayWebSocket == NULL || !state->relayReceiveLockReady)
+    {
+        return 0;
+    }
+
+    while (InterlockedCompareExchange(&state->relayReceiveStopRequested, 0, 0) == 0)
+    {
+        WINHTTP_WEB_SOCKET_BUFFER_TYPE bufferType = WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE;
+        DWORD bytesRead = 0u;
+        size_t totalBytes = 0u;
+
+        do
+        {
+            const DWORD result = WinHttpWebSocketReceive(state->relayWebSocket,
+                                                         messageBuffer + totalBytes,
+                                                         (DWORD)(sizeof(messageBuffer) - totalBytes),
+                                                         &bytesRead,
+                                                         &bufferType);
+            if (result != NO_ERROR)
+            {
+                if (InterlockedCompareExchange(&state->relayReceiveStopRequested, 0, 0) != 0 ||
+                    result == ERROR_WINHTTP_OPERATION_CANCELLED)
+                {
+                    return 0;
+                }
+
+                if (result == ERROR_WINHTTP_TIMEOUT)
+                {
+                    Sleep(1u);
+                    totalBytes = 0u;
+                    break;
+                }
+
+                EnterCriticalSection(&state->relayReceiveLock);
+                state->relayReceiveStatus = result;
+                LeaveCriticalSection(&state->relayReceiveLock);
+                return 0;
+            }
+
+            if (bufferType == WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE)
+            {
+                EnterCriticalSection(&state->relayReceiveLock);
+                state->relayReceiveClosed = true;
+                LeaveCriticalSection(&state->relayReceiveLock);
+                return 0;
+            }
+
+            totalBytes += (size_t)bytesRead;
+            if (totalBytes > sizeof(messageBuffer))
+            {
+                EnterCriticalSection(&state->relayReceiveLock);
+                state->relayReceiveStatus = ERROR_INSUFFICIENT_BUFFER;
+                LeaveCriticalSection(&state->relayReceiveLock);
+                return 0;
+            }
+        }
+        while (bufferType == WINHTTP_WEB_SOCKET_BINARY_FRAGMENT_BUFFER_TYPE ||
+               bufferType == WINHTTP_WEB_SOCKET_UTF8_FRAGMENT_BUFFER_TYPE);
+
+        if (totalBytes == 0u)
+        {
+            continue;
+        }
+
+        EnterCriticalSection(&state->relayReceiveLock);
+        if (totalBytes > sizeof(state->relayReceiveQueue) - state->relayReceiveQueueLength)
+        {
+            state->relayReceiveStatus = ERROR_INSUFFICIENT_BUFFER;
+            LeaveCriticalSection(&state->relayReceiveLock);
+            return 0;
+        }
+
+        memcpy(state->relayReceiveQueue + state->relayReceiveQueueLength, messageBuffer, totalBytes);
+        state->relayReceiveQueueLength += totalBytes;
+        LeaveCriticalSection(&state->relayReceiveLock);
+    }
+
+    return 0;
+}
+#endif
+
 static void close_relay_transport(struct NetplayState *state)
 {
 #ifdef _WIN32
@@ -810,9 +932,27 @@ static void close_relay_transport(struct NetplayState *state)
         return;
     }
 
+    if (state->relayReceiveThread != NULL)
+    {
+        DWORD waitResult = WAIT_OBJECT_0;
+        InterlockedExchange(&state->relayReceiveStopRequested, 1);
+        if (state->relayWebSocket != NULL)
+        {
+            WinHttpWebSocketClose(state->relayWebSocket, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, NULL, 0);
+        }
+
+        waitResult = WaitForSingleObject(state->relayReceiveThread, 2000u);
+        if (waitResult == WAIT_TIMEOUT)
+        {
+            TerminateThread(state->relayReceiveThread, 0);
+            (void)WaitForSingleObject(state->relayReceiveThread, 100u);
+        }
+        CloseHandle(state->relayReceiveThread);
+        state->relayReceiveThread = NULL;
+    }
+
     if (state->relayWebSocket != NULL)
     {
-        WinHttpWebSocketClose(state->relayWebSocket, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, NULL, 0);
         WinHttpCloseHandle(state->relayWebSocket);
         state->relayWebSocket = NULL;
     }
@@ -833,6 +973,12 @@ static void close_relay_transport(struct NetplayState *state)
     {
         WinHttpCloseHandle(state->relaySession);
         state->relaySession = NULL;
+    }
+
+    if (state->relayReceiveLockReady)
+    {
+        DeleteCriticalSection(&state->relayReceiveLock);
+        state->relayReceiveLockReady = false;
     }
 #else
     (void)state;
@@ -964,6 +1110,19 @@ static bool open_relay_transport(struct NetplayState *state,
 
     WinHttpCloseHandle(state->relayRequest);
     state->relayRequest = NULL;
+    if (!state->relayReceiveLockReady)
+    {
+        InitializeCriticalSection(&state->relayReceiveLock);
+        state->relayReceiveLockReady = true;
+    }
+    reset_winhttp_relay_receive_state(state);
+    state->relayReceiveThread = CreateThread(NULL, 0, relay_receive_thread_main, state, 0, NULL);
+    if (state->relayReceiveThread == NULL)
+    {
+        set_last_error(state, "websocket receive thread failed");
+        close_relay_transport(state);
+        return false;
+    }
     clear_last_error(state);
     return true;
 #else
@@ -1338,47 +1497,44 @@ static int send_relay_message(struct NetplayState *state, const unsigned char *b
 static int receive_relay_message(struct NetplayState *state, unsigned char *buffer, size_t bufferSize)
 {
 #ifdef _WIN32
-    WINHTTP_WEB_SOCKET_BUFFER_TYPE bufferType = WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE;
-    DWORD bytesRead = 0;
-    size_t totalBytes = 0u;
+    size_t bytesToCopy = 0u;
 
-    if (state == NULL || buffer == NULL || bufferSize == 0u || state->relayWebSocket == NULL)
+    if (state == NULL ||
+        buffer == NULL ||
+        bufferSize == 0u ||
+        state->relayWebSocket == NULL ||
+        !state->relayReceiveLockReady)
     {
         return NET_SOCKET_ERROR;
     }
 
-    do
+    EnterCriticalSection(&state->relayReceiveLock);
+
+    if (state->relayReceiveStatus != NO_ERROR)
     {
-        bytesRead = 0u;
-        bufferType = WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE;
-        if (WinHttpWebSocketReceive(state->relayWebSocket,
-                                    buffer + totalBytes,
-                                    (DWORD)(bufferSize - totalBytes),
-                                    &bytesRead,
-                                    &bufferType) != NO_ERROR)
-        {
-            if (GetLastError() == ERROR_WINHTTP_TIMEOUT)
-            {
-                return -2;
-            }
-            return NET_SOCKET_ERROR;
-        }
-
-        if (bufferType == WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE)
-        {
-            return 0;
-        }
-
-        totalBytes += (size_t)bytesRead;
-        if (totalBytes > bufferSize)
-        {
-            return NET_SOCKET_ERROR;
-        }
+        LeaveCriticalSection(&state->relayReceiveLock);
+        return NET_SOCKET_ERROR;
     }
-    while (bufferType == WINHTTP_WEB_SOCKET_BINARY_FRAGMENT_BUFFER_TYPE ||
-           bufferType == WINHTTP_WEB_SOCKET_UTF8_FRAGMENT_BUFFER_TYPE);
 
-    return (int)totalBytes;
+    if (state->relayReceiveQueueLength == 0u)
+    {
+        const bool closed = state->relayReceiveClosed;
+        LeaveCriticalSection(&state->relayReceiveLock);
+        return closed ? 0 : -2;
+    }
+
+    bytesToCopy = state->relayReceiveQueueLength < bufferSize ? state->relayReceiveQueueLength : bufferSize;
+    memcpy(buffer, state->relayReceiveQueue, bytesToCopy);
+    if (bytesToCopy < state->relayReceiveQueueLength)
+    {
+        memmove(state->relayReceiveQueue,
+                state->relayReceiveQueue + bytesToCopy,
+                state->relayReceiveQueueLength - bytesToCopy);
+    }
+    state->relayReceiveQueueLength -= bytesToCopy;
+
+    LeaveCriticalSection(&state->relayReceiveLock);
+    return (int)bytesToCopy;
 #else
     if (state == NULL || buffer == NULL || bufferSize == 0u || state->peerSocket == NET_INVALID_SOCKET)
     {
@@ -2841,6 +2997,12 @@ struct NetplayState *netplayCreate(void)
     state->relayConnection = NULL;
     state->relayRequest = NULL;
     state->relayWebSocket = NULL;
+    state->relayReceiveThread = NULL;
+    state->relayReceiveLockReady = false;
+    state->relayReceiveQueueLength = 0u;
+    state->relayReceiveStatus = NO_ERROR;
+    state->relayReceiveClosed = false;
+    state->relayReceiveStopRequested = 0;
 #endif
     init_tracked_host_peers(state);
     state->connectionState = NETPLAY_CONNECTION_IDLE;

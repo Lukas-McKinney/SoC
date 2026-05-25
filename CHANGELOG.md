@@ -7,7 +7,14 @@ This changelog summarizes user-visible changes from `v0.1.5` to the current `HEA
 ### Changed
 
 - Simplified the main menu by removing the redundant `Start vs AI` button, leaving a single `Start Game` entry that opens the unified local match seat picker.
-- Rebalanced AI build planning so harder AIs stop stalling on no-action turns and more reliably spend resources on settlements, cities, and follow-up roads.
+
+- Rebalanced AI build heuristics so stronger road scoring no longer crowds out settlement expansion; AIs should place settlements more reliably instead of overbuying roads and cities.
+- Added a Render Blueprint (`render.yaml`) for the relay web service so build/start commands and `/healthz` checks are configured consistently.
+
+### Fixed
+
+- Fixed relay WebSocket forwarding for Render-style deployments by relaying game traffic as binary frames and replying to ping frames with pong instead of dropping the connection.
+
 
 ## v0.1.6 (since v0.1.5)
 
