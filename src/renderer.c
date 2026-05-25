@@ -15,6 +15,17 @@
 #include <stdio.h>
 #include <string.h>
 
+static bool warn_if_roll_required_first(const struct Map *map)
+{
+    if (!gameCanRollDice(map))
+    {
+        return false;
+    }
+
+    uiShowCenteredWarning(loc("Roll the dice first."));
+    return true;
+}
+
 const struct AxialCoord kLandCoords[LAND_TILE_COUNT] = {
     {0, -2}, {1, -2}, {2, -2}, {-1, -1}, {0, -1}, {1, -1}, {2, -1}, {-2, 0}, {-1, 0}, {0, 0}, {1, 0}, {2, 0}, {-2, 1}, {-1, 1}, {0, 1}, {1, 1}, {-2, 2}, {-1, 2}, {0, 2}};
 
@@ -83,6 +94,12 @@ void HandleMapInput(struct MatchSession *session)
     const bool canBuySettlement = setupSettlementMode || gameCanAffordSettlement(map);
     const bool canBuyCity = map->phase == GAME_PHASE_PLAY && gameCanAffordCity(map);
     const bool canBuyDevelopment = gameCanBuyDevelopment(map);
+    const bool canAffordDevelopmentPurchase = map->developmentDeckCount > 0 &&
+                                              map->currentPlayer >= PLAYER_RED &&
+                                              map->currentPlayer <= PLAYER_BLACK &&
+                                              map->players[map->currentPlayer].resources[RESOURCE_WHEAT] >= 1 &&
+                                              map->players[map->currentPlayer].resources[RESOURCE_SHEEP] >= 1 &&
+                                              map->players[map->currentPlayer].resources[RESOURCE_STONE] >= 1;
     const bool hasFreeRoadPlacements = gameHasFreeRoadPlacements(map);
     const bool hasPendingIncomingTradeOffer = matchSessionHasPendingTradeOfferForLocalResponse(session);
     const Vector2 boardOrigin = origin;
@@ -676,9 +693,17 @@ void HandleMapInput(struct MatchSession *session)
         gBuildMode = BUILD_MODE_ROAD;
         uiSetBuildPanelOpen(true);
     }
+    else if (!hasFreeRoadPlacements && uiIsBuildPanelOpen() && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, buildButton) && canBuyRoad && warn_if_roll_required_first(map))
+    {
+        return;
+    }
     else if (!hasFreeRoadPlacements && uiIsBuildPanelOpen() && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, buildButton) && canBuyRoad)
     {
         gBuildMode = BUILD_MODE_ROAD;
+        return;
+    }
+    else if (!hasFreeRoadPlacements && uiIsBuildPanelOpen() && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, settlementButton) && canBuySettlement && warn_if_roll_required_first(map))
+    {
         return;
     }
     else if (!hasFreeRoadPlacements && uiIsBuildPanelOpen() && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, settlementButton) && canBuySettlement)
@@ -686,9 +711,17 @@ void HandleMapInput(struct MatchSession *session)
         gBuildMode = BUILD_MODE_SETTLEMENT;
         return;
     }
+    else if (!hasFreeRoadPlacements && uiIsBuildPanelOpen() && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, cityButton) && canBuyCity && warn_if_roll_required_first(map))
+    {
+        return;
+    }
     else if (!hasFreeRoadPlacements && uiIsBuildPanelOpen() && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, cityButton) && canBuyCity)
     {
         gBuildMode = BUILD_MODE_CITY;
+        return;
+    }
+    else if (!hasFreeRoadPlacements && uiIsBuildPanelOpen() && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, devButton) && canAffordDevelopmentPurchase && warn_if_roll_required_first(map))
+    {
         return;
     }
     else if (!hasFreeRoadPlacements && uiIsBuildPanelOpen() && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, devButton) && canBuyDevelopment)
@@ -718,6 +751,15 @@ void HandleMapInput(struct MatchSession *session)
     }
 
     if (humanControlledTurn &&
+        gameCanRollDice(map) &&
+        IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+        CheckCollisionPointRec(mouse, endTurnButton))
+    {
+        uiShowCenteredWarning(loc("Roll the dice first."));
+        return;
+    }
+
+    if (humanControlledTurn &&
         gameCanEndTurn(map) &&
         IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
         CheckCollisionPointRec(mouse, endTurnButton))
@@ -742,6 +784,10 @@ void HandleMapInput(struct MatchSession *session)
         IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
         CheckCollisionPointRec(mouse, tradeButton))
     {
+        if (warn_if_roll_required_first(map))
+        {
+            return;
+        }
         NormalizeMaritimeTradeSelection(map);
         uiToggleTradeMenu();
         uiSetPlayerTradeMenuOpen(false);
@@ -754,6 +800,10 @@ void HandleMapInput(struct MatchSession *session)
         IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
         CheckCollisionPointRec(mouse, playerTradeButton))
     {
+        if (warn_if_roll_required_first(map))
+        {
+            return;
+        }
         uiTogglePlayerTradeMenu();
         uiSetTradeMenuOpen(false);
         return;

@@ -183,6 +183,7 @@ static const struct TranslationEntry kTranslations[] = {
     {"Choose one adjacent", "Wähle einen benachbarten"},
     {"player to rob", "Spieler zum Berauben"},
     {"Rolling...", "Würfeln..."},
+    {"Roll the dice first.", "Wuerfle zuerst."},
     {"Choose what to do next.", "Wähle deine nächste Aktion."},
     {"Roll Dice (Enter)", "Würfeln (Enter)"},
     {"End Turn", "Zug beenden"},
