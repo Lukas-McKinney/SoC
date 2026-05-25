@@ -242,6 +242,7 @@ static bool parse_relay_endpoint(const char *input,
 static void detect_local_ipv4_address(char *buffer, size_t bufferSize);
 static void clear_last_error(struct NetplayState *state);
 static void set_last_error(struct NetplayState *state, const char *message);
+static void format_error_code_message(char *buffer, size_t bufferSize, const char *prefix, int errorCode);
 static bool set_socket_nonblocking(NetSocket socketHandle);
 static void set_socket_nodelay(NetSocket socketHandle);
 static void close_socket_if_open(NetSocket *socketHandle);
@@ -790,6 +791,53 @@ static void set_last_error(struct NetplayState *state, const char *message)
     }
 
     snprintf(state->lastError, sizeof(state->lastError), "%s", message == NULL ? "" : message);
+}
+
+static void format_error_code_message(char *buffer, size_t bufferSize, const char *prefix, int errorCode)
+{
+    const char *label = prefix == NULL ? "error" : prefix;
+
+    if (buffer == NULL || bufferSize == 0u)
+    {
+        return;
+    }
+
+#ifdef _WIN32
+    {
+        char systemText[128];
+        DWORD messageLength = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                                             NULL,
+                                             (DWORD)errorCode,
+                                             0,
+                                             systemText,
+                                             (DWORD)sizeof(systemText),
+                                             NULL);
+        if (messageLength > 0u)
+        {
+            while (messageLength > 0u &&
+                   (systemText[messageLength - 1u] == '\r' ||
+                    systemText[messageLength - 1u] == '\n' ||
+                    systemText[messageLength - 1u] == ' '))
+            {
+                systemText[--messageLength] = '\0';
+            }
+
+            snprintf(buffer, bufferSize, "%s (code %d: %s)", label, errorCode, systemText);
+            return;
+        }
+    }
+#else
+    {
+        const char *systemText = strerror(errorCode);
+        if (systemText != NULL && systemText[0] != '\0')
+        {
+            snprintf(buffer, bufferSize, "%s (code %d: %s)", label, errorCode, systemText);
+            return;
+        }
+    }
+#endif
+
+    snprintf(buffer, bufferSize, "%s (code %d)", label, errorCode);
 }
 
 static bool set_socket_nonblocking(NetSocket socketHandle)
@@ -1936,6 +1984,7 @@ static int receive_relay_message(struct NetplayState *state, unsigned char *buff
 {
 #ifdef _WIN32
     size_t bytesToCopy = 0u;
+    DWORD receiveStatus = NO_ERROR;
 
     if (state == NULL ||
         buffer == NULL ||
@@ -1948,9 +1997,18 @@ static int receive_relay_message(struct NetplayState *state, unsigned char *buff
 
     EnterCriticalSection(&state->relayReceiveLock);
 
-    if (state->relayReceiveStatus != NO_ERROR)
+    receiveStatus = state->relayReceiveStatus;
+    if (receiveStatus != NO_ERROR)
     {
         LeaveCriticalSection(&state->relayReceiveLock);
+        {
+            char errorText[NETPLAY_MAX_STATUS_TEXT];
+            format_error_code_message(errorText,
+                                      sizeof(errorText),
+                                      "relay websocket receive failed",
+                                      (int)receiveStatus);
+            set_last_error(state, errorText);
+        }
         return NET_SOCKET_ERROR;
     }
 
@@ -2703,13 +2761,15 @@ static void read_from_peer(struct NetplayState *state)
                 return;
             }
 
+            char errorText[NETPLAY_MAX_STATUS_TEXT];
+            format_error_code_message(errorText, sizeof(errorText), "receive failed", errorCode);
             if (state->mode == NETPLAY_MODE_HOST)
             {
-                disconnect_host_peer(state, 0, "receive failed");
+                disconnect_host_peer(state, 0, errorText);
             }
             else
             {
-                disconnect_peer(state, false, "receive failed");
+                disconnect_peer(state, false, errorText);
             }
             return;
         }
@@ -3180,7 +3240,11 @@ static void read_from_additional_host_peers(struct NetplayState *state)
                     break;
                 }
 
-                disconnect_additional_host_peer(state, i, "receive failed");
+                {
+                    char errorText[NETPLAY_MAX_STATUS_TEXT];
+                    format_error_code_message(errorText, sizeof(errorText), "receive failed", errorCode);
+                    disconnect_additional_host_peer(state, i, errorText);
+                }
                 break;
             }
 
