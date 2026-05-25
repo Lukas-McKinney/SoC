@@ -14,6 +14,7 @@ static int gTestCount = 0;
 static bool test_declining_pending_trade_does_not_transfer_resources(void);
 static bool test_authoritative_snapshot_restores_local_discard_control_after_rejoin(void);
 static bool test_lobby_state_clears_started_flag_until_fresh_match_sync(void);
+static bool test_snapshot_hash_ignores_local_turn_timer(void);
 
 #define ASSERT_TRUE(expr)                                                                                              \
     do                                                                                                                 \
@@ -49,6 +50,7 @@ int main(void)
         {"declining a pending trade leaves resources unchanged", test_declining_pending_trade_does_not_transfer_resources},
         {"authoritative snapshot restores local discard control after rejoin", test_authoritative_snapshot_restores_local_discard_control_after_rejoin},
         {"lobby state clears started flag until fresh match sync", test_lobby_state_clears_started_flag_until_fresh_match_sync},
+        {"snapshot hash ignores local turn timer", test_snapshot_hash_ignores_local_turn_timer},
     };
 
     for (int i = 0; i < (int)(sizeof(tests) / sizeof(tests[0])); i++)
@@ -173,5 +175,28 @@ static bool test_lobby_state_clears_started_flag_until_fresh_match_sync(void)
     ASSERT_FALSE(matchSessionHasStarted(&session));
     ASSERT_FALSE(matchSessionLocalControlsPlayer(&session, PLAYER_BLUE));
     ASSERT_FALSE(matchSessionLocalCanActOnCurrentDecision(&session));
+    return true;
+}
+
+static bool test_snapshot_hash_ignores_local_turn_timer(void)
+{
+    struct Map mapA;
+    struct Map mapB;
+    struct Map restoredMap;
+    unsigned char snapshot[NETPLAY_MAX_PAYLOAD_SIZE];
+    size_t snapshotSize = 0u;
+
+    ASSERT_TRUE(setupMap(&mapA));
+    mapB = mapA;
+    mapA.turnStartTime = 12.5;
+    mapB.turnStartTime = 98.25;
+
+    ASSERT_EQ_INT((int)mapComputeSnapshotHash(&mapA), (int)mapComputeSnapshotHash(&mapB));
+
+    snapshotSize = mapSerializeSnapshot(&mapA, snapshot, sizeof(snapshot));
+    ASSERT_EQ_INT((int)mapSnapshotSerializedSize(), (int)snapshotSize);
+    ASSERT_TRUE(mapDeserializeSnapshot(&restoredMap, snapshot, snapshotSize));
+    ASSERT_TRUE(restoredMap.turnStartTime == 0.0);
+    ASSERT_EQ_INT((int)mapComputeSnapshotHash(&mapA), (int)mapComputeSnapshotHash(&restoredMap));
     return true;
 }
