@@ -2,6 +2,7 @@
 #include "game_action.h"
 #include "game_logic.h"
 #include "match_session.h"
+#include "netplay.h"
 #include "renderer_internal.h"
 
 #include <stdbool.h>
@@ -46,6 +47,7 @@ struct RelayProcess
 };
 
 static bool test_relay_remote_play_starts_and_syncs_remote_setup_actions(void);
+static bool test_relay_disconnect_emits_single_disconnect_event(void);
 
 static bool choose_and_start_relay(struct RelayProcess *process);
 static bool start_relay_process_at_port(struct RelayProcess *process, unsigned short port);
@@ -109,6 +111,8 @@ int main(void)
     } tests[] = {
         {"relay remote play starts a match and syncs remote setup actions",
          test_relay_remote_play_starts_and_syncs_remote_setup_actions},
+        {"relay disconnect emits one disconnect event",
+         test_relay_disconnect_emits_single_disconnect_event},
     };
 
     if (!socket_layer_init())
@@ -264,6 +268,145 @@ cleanup:
     }
 #undef REQUIRE_TRUE
 #undef REQUIRE_EQ_INT
+    return success;
+}
+
+static bool test_relay_disconnect_emits_single_disconnect_event(void)
+{
+    struct RelayProcess relayProcess;
+    struct NetplayState *host = NULL;
+    struct NetplayState *client = NULL;
+    bool relayStarted = false;
+    bool hostConnected = false;
+    bool clientConnected = false;
+    int disconnectEvents = 0;
+    bool success = false;
+
+    memset(&relayProcess, 0, sizeof(relayProcess));
+
+#define REQUIRE_TRUE(expr)                                                                                             \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        if (!(expr))                                                                                                   \
+        {                                                                                                              \
+            fprintf(stderr, "%s:%d: assertion failed: %s\n", __func__, __LINE__, #expr);                             \
+            goto cleanup;                                                                                              \
+        }                                                                                                              \
+    } while (0)
+
+    if (!choose_and_start_relay(&relayProcess))
+    {
+        goto cleanup;
+    }
+    relayStarted = true;
+
+    host = netplayCreate();
+    client = netplayCreate();
+    REQUIRE_TRUE(host != NULL);
+    REQUIRE_TRUE(client != NULL);
+    REQUIRE_TRUE(netplayStartRelayHost(host, "127.0.0.1", relayProcess.port, "disconnect-spam-test"));
+    REQUIRE_TRUE(netplayStartRelayClient(client, "127.0.0.1", relayProcess.port, "disconnect-spam-test"));
+
+    {
+        const uint64_t connectDeadline = now_ms() + kPumpTimeoutMs;
+        while (now_ms() < connectDeadline && (!hostConnected || !clientConnected))
+        {
+            struct NetplayEvent event;
+
+            netplayUpdate(host);
+            netplayUpdate(client);
+
+            while (netplayPollEvent(host, &event))
+            {
+                if (event.type == NETPLAY_EVENT_CONNECTED)
+                {
+                    hostConnected = true;
+                }
+            }
+
+            while (netplayPollEvent(client, &event))
+            {
+                if (event.type == NETPLAY_EVENT_CONNECTED)
+                {
+                    clientConnected = true;
+                }
+            }
+
+            if (!hostConnected || !clientConnected)
+            {
+                sleep_ms(10u);
+            }
+        }
+    }
+
+    REQUIRE_TRUE(hostConnected);
+    REQUIRE_TRUE(clientConnected);
+
+    netplayDestroy(client);
+    client = NULL;
+
+    {
+        const uint64_t disconnectDeadline = now_ms() + kPumpTimeoutMs;
+        bool sawDisconnect = false;
+
+        while (now_ms() < disconnectDeadline && !sawDisconnect)
+        {
+            struct NetplayEvent event;
+
+            netplayUpdate(host);
+            while (netplayPollEvent(host, &event))
+            {
+                if (event.type == NETPLAY_EVENT_DISCONNECTED)
+                {
+                    disconnectEvents++;
+                    sawDisconnect = true;
+                }
+            }
+
+            if (!sawDisconnect)
+            {
+                sleep_ms(10u);
+            }
+        }
+    }
+
+    REQUIRE_TRUE(disconnectEvents == 1);
+
+    {
+        const uint64_t quietDeadline = now_ms() + 200u;
+        while (now_ms() < quietDeadline)
+        {
+            struct NetplayEvent event;
+
+            netplayUpdate(host);
+            while (netplayPollEvent(host, &event))
+            {
+                if (event.type == NETPLAY_EVENT_DISCONNECTED)
+                {
+                    disconnectEvents++;
+                }
+            }
+            sleep_ms(10u);
+        }
+    }
+
+    REQUIRE_TRUE(disconnectEvents == 1);
+    success = true;
+
+cleanup:
+    if (client != NULL)
+    {
+        netplayDestroy(client);
+    }
+    if (host != NULL)
+    {
+        netplayDestroy(host);
+    }
+    if (relayStarted)
+    {
+        stop_relay_process(&relayProcess);
+    }
+#undef REQUIRE_TRUE
     return success;
 }
 

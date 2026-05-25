@@ -259,6 +259,7 @@ static DWORD WINAPI relay_receive_thread_main(LPVOID context);
 static int send_relay_message(struct NetplayState *state, const unsigned char *buffer, size_t length, bool binaryMessage);
 static int receive_relay_message(struct NetplayState *state, unsigned char *buffer, size_t bufferSize);
 static NetSocket get_host_peer_socket_by_id(const struct NetplayState *state, int peerId);
+static bool relay_transport_is_open(const struct NetplayState *state);
 static bool socket_is_writable(NetSocket socketHandle);
 static void reset_connection_buffers(struct NetplayState *state);
 static void clear_relay_handshake(struct NetplayState *state);
@@ -364,11 +365,7 @@ static int count_tracked_host_peers(const struct NetplayState *state)
 
     if (state->relayTransport)
     {
-#ifdef _WIN32
-        return state->relayWebSocket != NULL ? 1 : 0;
-#else
-        return state->peerSocket != NET_INVALID_SOCKET ? 1 : 0;
-#endif
+        return relay_transport_is_open(state) ? 1 : 0;
     }
 
     if (state->peerSocket != NET_INVALID_SOCKET)
@@ -1076,10 +1073,25 @@ static int relay_transport_read_some(struct NetplayState *state, unsigned char *
             {
                 return -2;
             }
+            set_last_error(state, "relay TLS receive syscall failed");
             return received == 0 ? 0 : NET_SOCKET_ERROR;
         }
         default:
+        {
+            char sslErrorText[NETPLAY_MAX_STATUS_TEXT];
+            const unsigned long sslErrorCode = ERR_get_error();
+
+            if (sslErrorCode != 0ul)
+            {
+                ERR_error_string_n(sslErrorCode, sslErrorText, sizeof(sslErrorText));
+                set_last_error(state, sslErrorText);
+            }
+            else
+            {
+                set_last_error(state, "relay TLS receive failed");
+            }
             return NET_SOCKET_ERROR;
+        }
         }
     }
 
@@ -1096,6 +1108,7 @@ static int relay_transport_read_some(struct NetplayState *state, unsigned char *
             {
                 return -2;
             }
+            set_last_error(state, "relay websocket socket receive failed");
             return NET_SOCKET_ERROR;
         }
         return received;
@@ -1317,6 +1330,7 @@ static int relay_transport_receive_frame(struct NetplayState *state, unsigned ch
 
             if (payloadLength > (uint64_t)(SIZE_MAX - headerLength))
             {
+                set_last_error(state, "relay websocket frame too large");
                 return NET_SOCKET_ERROR;
             }
 
@@ -1328,6 +1342,7 @@ static int relay_transport_receive_frame(struct NetplayState *state, unsigned ch
 
             if (!fin)
             {
+                set_last_error(state, "relay websocket fragmentation unsupported");
                 return NET_SOCKET_ERROR;
             }
 
@@ -1343,6 +1358,7 @@ static int relay_transport_receive_frame(struct NetplayState *state, unsigned ch
                 unsigned char controlPayload[125];
                 if (payloadLength > sizeof(controlPayload))
                 {
+                    set_last_error(state, "relay websocket control frame too large");
                     return NET_SOCKET_ERROR;
                 }
 
@@ -1360,6 +1376,7 @@ static int relay_transport_receive_frame(struct NetplayState *state, unsigned ch
                 if (opcode == 0x9u &&
                     relay_transport_send_frame(state, 0xAu, controlPayload, (size_t)payloadLength) == NET_SOCKET_ERROR)
                 {
+                    set_last_error(state, "relay websocket pong failed");
                     return NET_SOCKET_ERROR;
                 }
                 continue;
@@ -1367,11 +1384,13 @@ static int relay_transport_receive_frame(struct NetplayState *state, unsigned ch
 
             if (opcode != 0x1u && opcode != 0x2u)
             {
+                set_last_error(state, "relay websocket opcode unsupported");
                 return NET_SOCKET_ERROR;
             }
 
             if (payloadLength > bufferSize)
             {
+                set_last_error(state, "relay websocket payload too large");
                 return NET_SOCKET_ERROR;
             }
 
@@ -1392,6 +1411,7 @@ static int relay_transport_receive_frame(struct NetplayState *state, unsigned ch
 read_more:
         if (state->relayWebSocketBufferLength >= sizeof(state->relayWebSocketBuffer))
         {
+            set_last_error(state, "relay websocket buffer overflow");
             return NET_SOCKET_ERROR;
         }
 
@@ -1973,6 +1993,20 @@ static NetSocket get_host_peer_socket_by_id(const struct NetplayState *state, in
     return state->trackedHostPeers[peerId - 1];
 }
 
+static bool relay_transport_is_open(const struct NetplayState *state)
+{
+    if (state == NULL || !state->relayTransport)
+    {
+        return false;
+    }
+
+#ifdef _WIN32
+    return state->relayWebSocket != NULL;
+#else
+    return state->peerSocket != NET_INVALID_SOCKET;
+#endif
+}
+
 static bool socket_is_writable(NetSocket socketHandle)
 {
     fd_set writeSet;
@@ -2102,11 +2136,7 @@ static bool queue_packet_to_peer(struct NetplayState *state,
 
     if (state->relayTransport)
     {
-#ifdef _WIN32
-        relayPeerAvailable = (peerId == 0 && state->relayWebSocket != NULL);
-#else
-        relayPeerAvailable = (peerId == 0 && state->peerSocket != NET_INVALID_SOCKET);
-#endif
+        relayPeerAvailable = (peerId == 0 && relay_transport_is_open(state));
     }
     else if (state->mode == NETPLAY_MODE_HOST)
     {
@@ -2609,10 +2639,14 @@ static void advance_pending_connect(struct NetplayState *state)
 
 static void read_from_peer(struct NetplayState *state)
 {
-    if (state != NULL && state->relayTransport)
+    if (state != NULL &&
+        state->relayTransport &&
+        state->connectionState == NETPLAY_CONNECTION_CONNECTED &&
+        relay_transport_is_open(state))
     {
         const int remainingCapacity = (int)(sizeof(state->recvBuffer) - state->recvLength);
         const int received = receive_relay_message(state, state->recvBuffer + state->recvLength, (size_t)remainingCapacity);
+        const char *relayFailureReason = (state->lastError[0] != '\0') ? state->lastError : "receive failed";
 
         if (received == 0)
         {
@@ -2622,7 +2656,7 @@ static void read_from_peer(struct NetplayState *state)
 
         if (received == NET_SOCKET_ERROR)
         {
-            disconnect_peer(state, false, "receive failed");
+            disconnect_peer(state, false, relayFailureReason);
             return;
         }
 

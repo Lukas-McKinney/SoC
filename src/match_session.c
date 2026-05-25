@@ -2332,7 +2332,10 @@ void matchSessionUpdate(struct MatchSession *session)
         set_connection_error(session, netplayGetLastError(session->netplay));
         if (session->networkMode == MATCH_NETWORK_PRIVATE_CLIENT)
         {
-            schedule_client_reconnect(session, CLIENT_RECONNECT_DELAY_SECONDS);
+            if (session->reconnectAttemptAtSeconds < 0.0)
+            {
+                schedule_client_reconnect(session, CLIENT_RECONNECT_DELAY_SECONDS);
+            }
         }
     }
 
