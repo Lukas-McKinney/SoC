@@ -63,6 +63,7 @@ static bool keep_sessions_connected_while_idle(struct MatchSession *host,
 static bool lobby_ready_for_match_start(const struct MatchSession *host, const struct MatchSession *client);
 static bool match_started_and_synced(const struct MatchSession *host, const struct MatchSession *client);
 static bool action_sync_complete(const struct MatchSession *host, const struct MatchSession *client);
+static bool snapshot_sync_complete(const struct MatchSession *host, const struct MatchSession *client);
 static void configure_two_player_relay_host(struct MatchSession *session);
 static bool start_match_until_remote_player_turn(struct MatchSession *host,
                                                  struct MatchSession *client,
@@ -256,6 +257,13 @@ static bool test_relay_remote_play_starts_and_syncs_remote_setup_actions(void)
     REQUIRE_TRUE(gameIsSetupSettlementTurn(&host.map));
     REQUIRE_TRUE(gameIsSetupSettlementTurn(&client.map));
     REQUIRE_EQ_INT((int)matchSessionGetStateHash(&host), (int)matchSessionGetStateHash(&client));
+    REQUIRE_TRUE(matchSessionBroadcastState(&host));
+    if (!wait_for_sessions_to_sync(&host, &client, kPumpTimeoutMs, snapshot_sync_complete))
+    {
+        goto cleanup;
+    }
+    REQUIRE_TRUE(client.initialSnapshotReceived);
+    REQUIRE_TRUE(keep_sessions_connected_while_idle(&host, &client, 100u));
 
     success = true;
 
@@ -623,6 +631,13 @@ static bool action_sync_complete(const struct MatchSession *host, const struct M
            client->connectionStatus == MATCH_CONNECTION_CONNECTED &&
            !client->awaitingAuthoritativeUpdate &&
            matchSessionGetStateHash(host) == matchSessionGetStateHash(client);
+}
+
+static bool snapshot_sync_complete(const struct MatchSession *host, const struct MatchSession *client)
+{
+    return action_sync_complete(host, client) &&
+           client != NULL &&
+           client->initialSnapshotReceived;
 }
 
 static void configure_two_player_relay_host(struct MatchSession *session)

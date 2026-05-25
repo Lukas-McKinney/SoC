@@ -44,7 +44,12 @@ typedef socklen_t RelaySockLen;
 
 #define RELAY_MAX_CLIENTS 32
 #define RELAY_MAX_ROOM_CODE 31
-#define RELAY_RECV_BUFFER_SIZE 4096
+/*
+ * Relay WebSocket frames need to carry full netplay packets, including
+ * authoritative snapshots that are currently about 5 KB and may grow up to
+ * the configured payload cap.
+ */
+#define RELAY_RECV_BUFFER_SIZE 65584
 #define RELAY_PENDING_BUFFER_SIZE 131072
 
 enum RelayRole
