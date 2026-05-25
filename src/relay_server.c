@@ -99,6 +99,7 @@ static size_t gRelayTestSendChunk = 0u;
 
 static bool relay_socket_layer_init(void);
 static bool set_socket_nonblocking(RelaySocket socketHandle);
+static bool set_socket_blocking_mode(RelaySocket socketHandle, bool blocking);
 static void set_socket_nodelay(RelaySocket socketHandle);
 static void close_socket_if_open(RelaySocket *socketHandle);
 static void disconnect_client(struct RelayClient *clients, int index, const char *reason);
@@ -146,6 +147,27 @@ static bool set_socket_nonblocking(RelaySocket socketHandle)
     if (flags < 0)
     {
         return false;
+    }
+
+    return fcntl(socketHandle, F_SETFL, flags | O_NONBLOCK) == 0;
+#endif
+}
+
+static bool set_socket_blocking_mode(RelaySocket socketHandle, bool blocking)
+{
+#ifdef _WIN32
+    u_long enabled = blocking ? 0ul : 1ul;
+    return ioctlsocket(socketHandle, FIONBIO, &enabled) == 0;
+#else
+    const int flags = fcntl(socketHandle, F_GETFL, 0);
+    if (flags < 0)
+    {
+        return false;
+    }
+
+    if (blocking)
+    {
+        return fcntl(socketHandle, F_SETFL, flags & ~O_NONBLOCK) == 0;
     }
 
     return fcntl(socketHandle, F_SETFL, flags | O_NONBLOCK) == 0;
@@ -201,27 +223,48 @@ static void normalize_handshake_line(char *line)
 
 static bool send_all_socket(RelaySocket socketHandle, const unsigned char *buffer, size_t length)
 {
+    bool restoreNonblocking = false;
     size_t sentTotal = 0u;
+
+    /*
+     * Handshake responses and WebSocket control frames are small. Send them in
+     * blocking mode so a transient WOULD_BLOCK does not tear down an otherwise
+     * healthy relay connection. Large relayed data frames use flush_client's
+     * stateful nonblocking path instead.
+     */
+    if (!set_socket_blocking_mode(socketHandle, true))
+    {
+        return false;
+    }
+    restoreNonblocking = true;
 
     while (sentTotal < length)
     {
         const int sent = send(socketHandle, (const char *)(buffer + sentTotal), (int)(length - sentTotal), 0);
         if (sent == RELAY_SOCKET_ERROR)
         {
-            const int errorCode = relay_last_error_code();
-            if (RELAY_WOULD_BLOCK(errorCode))
+            if (restoreNonblocking)
             {
-                return false;
+                (void)set_socket_blocking_mode(socketHandle, false);
             }
             return false;
         }
 
         if (sent <= 0)
         {
+            if (restoreNonblocking)
+            {
+                (void)set_socket_blocking_mode(socketHandle, false);
+            }
             return false;
         }
 
         sentTotal += (size_t)sent;
+    }
+
+    if (restoreNonblocking)
+    {
+        (void)set_socket_blocking_mode(socketHandle, false);
     }
 
     return true;
