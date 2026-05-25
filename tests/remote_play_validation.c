@@ -48,6 +48,8 @@ struct RelayProcess
 
 static bool test_relay_remote_play_starts_and_syncs_remote_setup_actions(void);
 static bool test_relay_remote_play_survives_partial_websocket_sends(void);
+static bool test_relay_connection_survives_idle_heartbeats(void);
+static bool test_relay_remote_end_turn_then_host_roll_stays_connected(void);
 static bool test_relay_disconnect_emits_single_disconnect_event(void);
 static bool run_relay_remote_play_sync_test(const char *relaySendChunk);
 
@@ -118,6 +120,10 @@ int main(void)
          test_relay_remote_play_starts_and_syncs_remote_setup_actions},
         {"relay remote play survives partial websocket sends",
          test_relay_remote_play_survives_partial_websocket_sends},
+        {"relay connection survives idle heartbeats",
+         test_relay_connection_survives_idle_heartbeats},
+        {"relay remote end turn then host roll stays connected",
+         test_relay_remote_end_turn_then_host_roll_stays_connected},
         {"relay disconnect emits one disconnect event",
          test_relay_disconnect_emits_single_disconnect_event},
     };
@@ -155,6 +161,307 @@ static bool test_relay_remote_play_starts_and_syncs_remote_setup_actions(void)
 static bool test_relay_remote_play_survives_partial_websocket_sends(void)
 {
     return run_relay_remote_play_sync_test("1024");
+}
+
+static bool test_relay_connection_survives_idle_heartbeats(void)
+{
+    struct RelayProcess relayProcess;
+    struct NetplayState *host = NULL;
+    struct NetplayState *client = NULL;
+    bool relayStarted = false;
+    bool hostConnected = false;
+    bool clientConnected = false;
+    bool clientReceivedHello = false;
+    bool success = false;
+    const int seatAuthority[MAX_PLAYERS] = {
+        MATCH_SEAT_REMOTE,
+        MATCH_SEAT_LOCAL,
+        MATCH_SEAT_AI,
+        MATCH_SEAT_AI};
+    const uint64_t connectDeadline = now_ms() + kPumpTimeoutMs;
+    const uint64_t idleDeadlineMs = 12000u;
+
+    memset(&relayProcess, 0, sizeof(relayProcess));
+
+#define REQUIRE_TRUE(expr)                                                                                             \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        if (!(expr))                                                                                                   \
+        {                                                                                                              \
+            fprintf(stderr, "%s:%d: assertion failed: %s\n", __func__, __LINE__, #expr);                             \
+            goto cleanup;                                                                                              \
+        }                                                                                                              \
+    } while (0)
+
+    if (!choose_and_start_relay(&relayProcess))
+    {
+        goto cleanup;
+    }
+    relayStarted = true;
+
+    host = netplayCreate();
+    client = netplayCreate();
+    REQUIRE_TRUE(host != NULL);
+    REQUIRE_TRUE(client != NULL);
+    REQUIRE_TRUE(netplayStartRelayHost(host, "127.0.0.1", relayProcess.port, "idle-heartbeat-test"));
+    REQUIRE_TRUE(netplayStartRelayClient(client, "127.0.0.1", relayProcess.port, "idle-heartbeat-test"));
+
+    while (now_ms() < connectDeadline && (!hostConnected || !clientConnected))
+    {
+        struct NetplayEvent event;
+
+        netplayUpdate(host);
+        netplayUpdate(client);
+
+        while (netplayPollEvent(host, &event))
+        {
+            if (event.type == NETPLAY_EVENT_CONNECTED)
+            {
+                hostConnected = true;
+            }
+        }
+
+        while (netplayPollEvent(client, &event))
+        {
+            if (event.type == NETPLAY_EVENT_CONNECTED)
+            {
+                clientConnected = true;
+            }
+        }
+
+        if (!hostConnected || !clientConnected)
+        {
+            sleep_ms(10u);
+        }
+    }
+
+    REQUIRE_TRUE(hostConnected);
+    REQUIRE_TRUE(clientConnected);
+    REQUIRE_TRUE(netplayQueueHello(host, PLAYER_RED, PLAYER_BLUE, seatAuthority));
+
+    {
+        const uint64_t helloDeadline = now_ms() + kPumpTimeoutMs;
+        while (now_ms() < helloDeadline && !clientReceivedHello)
+        {
+            struct NetplayEvent event;
+
+            netplayUpdate(host);
+            netplayUpdate(client);
+
+            while (netplayPollEvent(host, &event))
+            {
+                if (event.type == NETPLAY_EVENT_DISCONNECTED)
+                {
+                    fprintf(stderr, "%s:%d: host disconnected during hello: %s\n", __func__, __LINE__, event.message);
+                    goto cleanup;
+                }
+            }
+
+            while (netplayPollEvent(client, &event))
+            {
+                if (event.type == NETPLAY_EVENT_HELLO)
+                {
+                    clientReceivedHello = true;
+                }
+                else if (event.type == NETPLAY_EVENT_DISCONNECTED)
+                {
+                    fprintf(stderr, "%s:%d: client disconnected during hello: %s\n", __func__, __LINE__, event.message);
+                    goto cleanup;
+                }
+            }
+
+            if (!clientReceivedHello)
+            {
+                sleep_ms(10u);
+            }
+        }
+    }
+
+    REQUIRE_TRUE(clientReceivedHello);
+
+    {
+        const uint64_t idleDeadline = now_ms() + idleDeadlineMs;
+        while (now_ms() < idleDeadline)
+        {
+            struct NetplayEvent event;
+
+            netplayUpdate(host);
+            netplayUpdate(client);
+
+            while (netplayPollEvent(host, &event))
+            {
+                if (event.type == NETPLAY_EVENT_DISCONNECTED)
+                {
+                    fprintf(stderr, "%s:%d: host disconnected while idle: %s\n", __func__, __LINE__, event.message);
+                    goto cleanup;
+                }
+            }
+
+            while (netplayPollEvent(client, &event))
+            {
+                if (event.type == NETPLAY_EVENT_DISCONNECTED)
+                {
+                    fprintf(stderr, "%s:%d: client disconnected while idle: %s\n", __func__, __LINE__, event.message);
+                    goto cleanup;
+                }
+            }
+
+            sleep_ms(10u);
+        }
+    }
+
+    success = true;
+
+cleanup:
+    if (client != NULL)
+    {
+        netplayDestroy(client);
+    }
+    if (host != NULL)
+    {
+        netplayDestroy(host);
+    }
+    if (relayStarted)
+    {
+        stop_relay_process(&relayProcess);
+    }
+#undef REQUIRE_TRUE
+    return success;
+}
+
+static bool test_relay_remote_end_turn_then_host_roll_stays_connected(void)
+{
+    struct RelayProcess relayProcess;
+    struct MatchSession host;
+    struct MatchSession client;
+    struct Map playState;
+    struct GameActionResult actionResult;
+    bool relayStarted = false;
+    bool success = false;
+
+#define REQUIRE_TRUE(expr)                                                                                             \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        if (!(expr))                                                                                                   \
+        {                                                                                                              \
+            fprintf(stderr, "%s:%d: assertion failed: %s\n", __func__, __LINE__, #expr);                             \
+            goto cleanup;                                                                                              \
+        }                                                                                                              \
+    } while (0)
+
+#define REQUIRE_EQ_INT(expected, actual)                                                                               \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        const int expectedValue = (expected);                                                                          \
+        const int actualValue = (actual);                                                                              \
+        if (expectedValue != actualValue)                                                                              \
+        {                                                                                                              \
+            fprintf(stderr, "%s:%d: expected %d but was %d\n", __func__, __LINE__, expectedValue, actualValue);      \
+            goto cleanup;                                                                                              \
+        }                                                                                                              \
+    } while (0)
+
+    memset(&relayProcess, 0, sizeof(relayProcess));
+    memset(&host, 0, sizeof(host));
+    memset(&client, 0, sizeof(client));
+    memset(&playState, 0, sizeof(playState));
+    memset(&actionResult, 0, sizeof(actionResult));
+
+    srand(1);
+    matchSessionInit(&host);
+    matchSessionInit(&client);
+
+    if (!choose_and_start_relay(&relayProcess))
+    {
+        goto cleanup;
+    }
+    relayStarted = true;
+
+    matchSessionConfigurePrivateHostRelay(&host, PLAYER_BLUE, "127.0.0.1", relayProcess.port, "end-turn-roll-test");
+    configure_two_player_relay_host(&host);
+    if (!matchSessionOpenPrivateHostRelay(&host, relayProcess.port, "end-turn-roll-test"))
+    {
+        goto cleanup;
+    }
+
+    matchSessionConfigurePrivateClientRelay(&client, PLAYER_RED, "127.0.0.1", relayProcess.port, "end-turn-roll-test");
+    if (!matchSessionOpenPrivateClientRelay(&client, relayProcess.port, "end-turn-roll-test"))
+    {
+        goto cleanup;
+    }
+
+    if (!wait_for_sessions_to_sync(&host, &client, kPumpTimeoutMs, lobby_ready_for_match_start))
+    {
+        goto cleanup;
+    }
+
+    REQUIRE_TRUE(matchSessionStartNetplayMatch(&host));
+    if (!wait_for_sessions_to_sync(&host, &client, kPumpTimeoutMs, match_started_and_synced))
+    {
+        goto cleanup;
+    }
+
+    playState = host.map;
+    playState.phase = GAME_PHASE_PLAY;
+    playState.currentPlayer = PLAYER_RED;
+    playState.rolledThisTurn = true;
+    playState.lastDiceRoll = 6;
+    playState.awaitingThiefPlacement = false;
+    playState.awaitingThiefVictimSelection = false;
+    playState.playedDevelopmentCardThisTurn = false;
+    playState.freeRoadPlacementsRemaining = 0;
+    playState.turnStartTime = 123.0;
+    for (int player = PLAYER_RED; player <= PLAYER_BLACK; player++)
+    {
+        playState.discardRemaining[player] = 0;
+    }
+
+    host.map = playState;
+    matchSessionRefreshStateHash(&host);
+    REQUIRE_TRUE(matchSessionBroadcastState(&host));
+    if (!wait_for_sessions_to_sync(&host, &client, kPumpTimeoutMs, snapshot_sync_complete))
+    {
+        goto cleanup;
+    }
+
+    REQUIRE_TRUE(matchSessionLocalCanActOnCurrentDecision(&client));
+    REQUIRE_TRUE(matchSessionSubmitAction(&client,
+                                         &(struct GameAction){.type = GAME_ACTION_END_TURN},
+                                         NULL,
+                                         &actionResult));
+    if (!wait_for_sessions_to_sync(&host, &client, kPumpTimeoutMs, action_sync_complete))
+    {
+        goto cleanup;
+    }
+
+    REQUIRE_EQ_INT(PLAYER_BLUE, host.map.currentPlayer);
+    REQUIRE_EQ_INT(PLAYER_BLUE, client.map.currentPlayer);
+    REQUIRE_TRUE(matchSessionLocalCanActOnCurrentDecision(&host));
+    REQUIRE_TRUE(matchSessionSubmitAction(&host,
+                                         &(struct GameAction){.type = GAME_ACTION_ROLL_DICE, .diceRoll = 8},
+                                         NULL,
+                                         &actionResult));
+    if (!wait_for_sessions_to_sync(&host, &client, kPumpTimeoutMs, action_sync_complete))
+    {
+        goto cleanup;
+    }
+
+    REQUIRE_EQ_INT(8, host.map.lastDiceRoll);
+    REQUIRE_EQ_INT(8, client.map.lastDiceRoll);
+    REQUIRE_TRUE(keep_sessions_connected_while_idle(&host, &client, 12000u));
+
+    success = true;
+
+cleanup:
+    matchSessionShutdown(&client);
+    matchSessionShutdown(&host);
+    if (relayStarted)
+    {
+        stop_relay_process(&relayProcess);
+    }
+#undef REQUIRE_TRUE
+#undef REQUIRE_EQ_INT
+    return success;
 }
 
 static bool run_relay_remote_play_sync_test(const char *relaySendChunk)

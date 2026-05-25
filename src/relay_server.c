@@ -116,6 +116,7 @@ static bool send_websocket_upgrade_response(RelaySocket socketHandle, const char
 static bool send_http_text_response(RelaySocket socketHandle, int statusCode, const char *reasonPhrase, const char *body);
 static bool websocket_frame_append(struct RelayClient *clients, int index, const unsigned char *payload, size_t payloadSize);
 static bool websocket_frame_send(RelaySocket socketHandle, unsigned char opcode, const unsigned char *payload, size_t payloadSize);
+static bool websocket_close_send(RelaySocket socketHandle, const char *reason);
 static bool websocket_frame_parse(struct RelayClient *clients, int index);
 static void reset_websocket_send_state(struct RelayClient *client);
 static bool begin_websocket_send(struct RelayClient *client);
@@ -721,6 +722,26 @@ static bool websocket_frame_send(RelaySocket socketHandle, unsigned char opcode,
     return payloadSize == 0u || send_all_socket(socketHandle, payload, payloadSize);
 }
 
+static bool websocket_close_send(RelaySocket socketHandle, const char *reason)
+{
+    unsigned char payload[125];
+    size_t reasonLength = 0u;
+
+    payload[0] = 0x03u;
+    payload[1] = 0xF3u; /* 1011: internal error */
+    if (reason != NULL && reason[0] != '\0')
+    {
+        reasonLength = strlen(reason);
+        if (reasonLength > sizeof(payload) - 2u)
+        {
+            reasonLength = sizeof(payload) - 2u;
+        }
+        memcpy(payload + 2u, reason, reasonLength);
+    }
+
+    return websocket_frame_send(socketHandle, 0x8u, payload, 2u + reasonLength);
+}
+
 static bool websocket_frame_parse(struct RelayClient *clients, int index)
 {
     struct RelayClient *client = NULL;
@@ -899,6 +920,11 @@ static void disconnect_client(struct RelayClient *clients, int index, const char
     }
 
     peerIndex = clients[index].peerIndex;
+    if (clients[index].transportMode == RELAY_TRANSPORT_WEBSOCKET &&
+        clients[index].socketHandle != RELAY_INVALID_SOCKET)
+    {
+        (void)websocket_close_send(clients[index].socketHandle, reason);
+    }
     close_socket_if_open(&clients[index].socketHandle);
     clients[index].inUse = false;
     clients[index].handshakeComplete = false;
@@ -913,6 +939,16 @@ static void disconnect_client(struct RelayClient *clients, int index, const char
 
     if (peerIndex >= 0 && peerIndex < RELAY_MAX_CLIENTS && clients[peerIndex].inUse)
     {
+        if (clients[peerIndex].transportMode == RELAY_TRANSPORT_WEBSOCKET &&
+            clients[peerIndex].socketHandle != RELAY_INVALID_SOCKET)
+        {
+            char peerReason[125];
+            snprintf(peerReason,
+                     sizeof(peerReason),
+                     "relay peer disconnected: %s",
+                     reason != NULL && reason[0] != '\0' ? reason : "peer disconnected");
+            (void)websocket_close_send(clients[peerIndex].socketHandle, peerReason);
+        }
         close_socket_if_open(&clients[peerIndex].socketHandle);
         clients[peerIndex].inUse = false;
         clients[peerIndex].handshakeComplete = false;

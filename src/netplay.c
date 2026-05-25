@@ -199,6 +199,8 @@ struct NetplayState
     size_t relayReceiveQueueLength;
     DWORD relayReceiveStatus;
     bool relayReceiveClosed;
+    USHORT relayCloseStatus;
+    char relayCloseReason[NETPLAY_MAX_STATUS_TEXT];
     volatile LONG relayReceiveStopRequested;
 #else
     SSL_CTX *relayTlsContext;
@@ -889,6 +891,8 @@ static void reset_winhttp_relay_receive_state(struct NetplayState *state)
     state->relayReceiveQueueLength = 0u;
     state->relayReceiveStatus = NO_ERROR;
     state->relayReceiveClosed = false;
+    state->relayCloseStatus = WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS;
+    state->relayCloseReason[0] = '\0';
     InterlockedExchange(&state->relayReceiveStopRequested, 0);
 
     if (state->relayReceiveLockReady)
@@ -943,8 +947,37 @@ static DWORD WINAPI relay_receive_thread_main(LPVOID context)
 
             if (bufferType == WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE)
             {
+                USHORT closeStatus = WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS;
+                char closeReason[NETPLAY_MAX_STATUS_TEXT];
+                DWORD closeReasonLength = 0u;
+                DWORD queryStatus = NO_ERROR;
+
+                memset(closeReason, 0, sizeof(closeReason));
+                queryStatus = WinHttpWebSocketQueryCloseStatus(state->relayWebSocket,
+                                                               &closeStatus,
+                                                               closeReason,
+                                                               (DWORD)(sizeof(closeReason) - 1u),
+                                                               &closeReasonLength);
                 EnterCriticalSection(&state->relayReceiveLock);
                 state->relayReceiveClosed = true;
+                state->relayCloseStatus = closeStatus;
+                state->relayCloseReason[0] = '\0';
+                if (queryStatus == NO_ERROR && closeReasonLength > 0u)
+                {
+                    closeReason[closeReasonLength < sizeof(closeReason) ? closeReasonLength : sizeof(closeReason) - 1u] = '\0';
+                    snprintf(state->relayCloseReason,
+                             sizeof(state->relayCloseReason),
+                             "relay websocket closed (%u): %s",
+                             (unsigned int)closeStatus,
+                             closeReason);
+                }
+                else if (closeStatus != WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS)
+                {
+                    snprintf(state->relayCloseReason,
+                             sizeof(state->relayCloseReason),
+                             "relay websocket closed (%u)",
+                             (unsigned int)closeStatus);
+                }
                 LeaveCriticalSection(&state->relayReceiveLock);
                 return 0;
             }
@@ -1397,8 +1430,41 @@ static int relay_transport_receive_frame(struct NetplayState *state, unsigned ch
             payloadOffset = headerLength;
             if (opcode == 0x8u)
             {
+                if (payloadLength >= 2u)
+                {
+                    const unsigned int closeStatus = ((unsigned int)frame[payloadOffset] << 8u) |
+                                                     (unsigned int)frame[payloadOffset + 1u];
+
+                    if (payloadLength > 2u)
+                    {
+                        char closeReasonText[NETPLAY_MAX_STATUS_TEXT];
+                        char closeReasonBody[NETPLAY_MAX_STATUS_TEXT];
+                        const size_t reasonLength = (size_t)payloadLength - 2u;
+                        const size_t copyLength = reasonLength < (sizeof(closeReasonBody) - 1u)
+                                                      ? reasonLength
+                                                      : (sizeof(closeReasonBody) - 1u);
+
+                        memcpy(closeReasonBody, frame + payloadOffset + 2u, copyLength);
+                        closeReasonBody[copyLength] = '\0';
+                        snprintf(closeReasonText,
+                                 sizeof(closeReasonText),
+                                 "relay websocket closed (%u): %s",
+                                 closeStatus,
+                                 closeReasonBody);
+                        set_last_error(state, closeReasonText);
+                    }
+                    else
+                    {
+                        char closeStatusText[NETPLAY_MAX_STATUS_TEXT];
+                        snprintf(closeStatusText,
+                                 sizeof(closeStatusText),
+                                 "relay websocket closed (%u)",
+                                 closeStatus);
+                        set_last_error(state, closeStatusText);
+                    }
+                }
                 relay_transport_consume_buffer(state, frameLength);
-                return 0;
+                return state->lastError[0] != '\0' ? NET_SOCKET_ERROR : 0;
             }
 
             if (opcode == 0x9u || opcode == 0xAu)
@@ -1985,6 +2051,7 @@ static int receive_relay_message(struct NetplayState *state, unsigned char *buff
 #ifdef _WIN32
     size_t bytesToCopy = 0u;
     DWORD receiveStatus = NO_ERROR;
+    char closeReason[NETPLAY_MAX_STATUS_TEXT];
 
     if (state == NULL ||
         buffer == NULL ||
@@ -1996,6 +2063,7 @@ static int receive_relay_message(struct NetplayState *state, unsigned char *buff
     }
 
     EnterCriticalSection(&state->relayReceiveLock);
+    closeReason[0] = '\0';
 
     receiveStatus = state->relayReceiveStatus;
     if (receiveStatus != NO_ERROR)
@@ -2015,7 +2083,16 @@ static int receive_relay_message(struct NetplayState *state, unsigned char *buff
     if (state->relayReceiveQueueLength == 0u)
     {
         const bool closed = state->relayReceiveClosed;
+        if (closed && state->relayCloseReason[0] != '\0')
+        {
+            snprintf(closeReason, sizeof(closeReason), "%s", state->relayCloseReason);
+        }
         LeaveCriticalSection(&state->relayReceiveLock);
+        if (closed && closeReason[0] != '\0')
+        {
+            set_last_error(state, closeReason);
+            return NET_SOCKET_ERROR;
+        }
         return closed ? 0 : -2;
     }
 
@@ -3357,6 +3434,8 @@ struct NetplayState *netplayCreate(void)
     state->relayReceiveQueueLength = 0u;
     state->relayReceiveStatus = NO_ERROR;
     state->relayReceiveClosed = false;
+    state->relayCloseStatus = WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS;
+    state->relayCloseReason[0] = '\0';
     state->relayReceiveStopRequested = 0;
 #else
     state->relayTlsContext = NULL;
