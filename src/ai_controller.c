@@ -1789,6 +1789,15 @@ static float evaluate_road_candidate(const struct Map *map, int tileId, int side
     GetSideCornerIndices(sideIndex, &cornerA, &cornerB);
     if (corner_can_host_future_settlement(map, tileId, cornerA))
     {
+        score += evaluate_corner_value(map, tileId, cornerA, difficulty) * cornerMultiplier;
+    }
+    else if (map->tiles[tileId].corners[cornerA].owner == player)
+    {
+        score += 1.1f + 0.35f * count_player_roads_touching_corner(map, player, tileId, cornerA);
+    }
+
+    if (corner_can_host_future_settlement(map, tileId, cornerB))
+    {
         score += evaluate_corner_value(map, tileId, cornerB, difficulty) * cornerMultiplier;
     }
     else if (map->tiles[tileId].corners[cornerB].owner == player)
