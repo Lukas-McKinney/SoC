@@ -2998,7 +2998,7 @@ static bool choose_immediate_play_phase_fallback_action(const struct Map *map, e
         }
     }
 
-    if (!canAffordCity && !canAffordSettlement &&
+    if (!found &&
         gameCanAffordRoad(map) &&
         find_best_road_candidate(map, map->currentPlayer, difficulty, false, &roadCandidate))
     {
@@ -3034,6 +3034,7 @@ static bool find_best_play_phase_action_core(const struct Map *map, enum AiDiffi
     double budgetUsed = 0.0;
     unsigned int nodesVisited = 0;
     bool timedOut = false;
+    bool found = false;
 
     if (map == NULL || action == NULL)
     {
@@ -3057,6 +3058,11 @@ static bool find_best_play_phase_action_core(const struct Map *map, enum AiDiffi
     nodesVisited = gAiSearchNodesVisited;
     timedOut = gAiSearchTimedOut;
     ai_end_play_phase_search();
+    found = action->type != AI_ACTION_NONE;
+    if (!found)
+    {
+        found = choose_immediate_play_phase_fallback_action(map, difficulty, state.buildActionsRemaining, timedOut, action);
+    }
     if (budgetUsedOut != NULL)
     {
         *budgetUsedOut = budgetUsed;
@@ -3077,7 +3083,7 @@ static bool find_best_play_phase_action_core(const struct Map *map, enum AiDiffi
     {
         *elapsedOut = GetTime() - started;
     }
-    return action->type != AI_ACTION_NONE;
+    return found;
 }
 
 static bool find_best_play_phase_action(const struct Map *map, enum AiDifficulty difficulty, struct AiAction *action)
@@ -3087,18 +3093,11 @@ static bool find_best_play_phase_action(const struct Map *map, enum AiDifficulty
     unsigned int nodesVisited = 0;
     bool timedOut = false;
     double elapsed = 0.0;
-    int buildActionsRemaining = 0;
     bool found;
 
     if (map == NULL || action == NULL)
     {
         return false;
-    }
-
-    buildActionsRemaining = ai_build_action_budget(difficulty) - gAiBuildActionsThisTurn;
-    if (buildActionsRemaining < 0)
-    {
-        buildActionsRemaining = 0;
     }
 
     found = find_best_play_phase_action_core(map,
@@ -3111,10 +3110,6 @@ static bool find_best_play_phase_action(const struct Map *map, enum AiDifficulty
                                              &nodesVisited,
                                              &timedOut,
                                              &elapsed);
-    if (!found)
-    {
-        found = choose_immediate_play_phase_fallback_action(map, difficulty, buildActionsRemaining, timedOut, action);
-    }
     debugLog("AI", "play phase search action=%s score=%.3f elapsed=%.3f budget=%.3f nodes=%u timedOut=%d",
              ai_action_type_label(action->type),
              score,
