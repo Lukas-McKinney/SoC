@@ -380,6 +380,11 @@ int main(int argc, char **argv)
                     !uiIsDevelopmentPurchaseConfirmOpen() &&
                     !uiIsDevelopmentPlayConfirmOpen())
                 {
+                    if (gameCanRollDice(&session.map))
+                    {
+                        uiShowCenteredWarning(loc("Roll the dice first."));
+                        continue;
+                    }
                     uiTogglePlayerTradeMenu();
                     uiSetTradeMenuOpen(false);
                 }
@@ -390,6 +395,11 @@ int main(int argc, char **argv)
                     !uiIsDevelopmentPurchaseConfirmOpen() &&
                     !uiIsDevelopmentPlayConfirmOpen())
                 {
+                    if (gameCanRollDice(&session.map))
+                    {
+                        uiShowCenteredWarning(loc("Roll the dice first."));
+                        continue;
+                    }
                     uiToggleTradeMenu();
                     uiSetPlayerTradeMenuOpen(false);
                 }
