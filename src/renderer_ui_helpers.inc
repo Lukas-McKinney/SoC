@@ -133,6 +133,22 @@ static const char *PlayerName(enum PlayerType player)
     return locPlayerName(player);
 }
 
+static const char *ScoreboardPlayerName(const struct Map *map, enum PlayerType player)
+{
+    const enum PlayerType localHuman = LocalHumanPlayer(map);
+    const char *profileName = uiGetProfileName();
+
+    if (player == localHuman &&
+        profileName != NULL &&
+        profileName[0] != '\0' &&
+        strcmp(profileName, "Player") != 0)
+    {
+        return profileName;
+    }
+
+    return PlayerName(player);
+}
+
 static const char *ResourceName(enum ResourceType resource)
 {
     return locResourceName(resource);

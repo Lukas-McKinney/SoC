@@ -136,6 +136,7 @@ static const struct TranslationEntry kTranslations[] = {
     {"Developement Cards", "Entwicklungskarten"},
     {"Resources", "Rohstoffe"},
     {"Opponents", "Gegner"},
+    {"Players", "Spieler"},
     {"Visible VP", "Sichtbare SP"},
     {"Buy Development Card?", "Entwicklungskarte kaufen?"},
     {"Cost: Wheat + Sheep + Stone", "Kosten: Getreide + Wolle + Erz"},
