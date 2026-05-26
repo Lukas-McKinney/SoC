@@ -3118,7 +3118,8 @@ static bool choose_immediate_play_phase_fallback_action(const struct Map *map, e
     struct EdgeCandidate roadCandidate;
     const enum PlayerType player = map != NULL ? map->currentPlayer : PLAYER_NONE;
     const Vector2 origin = {(float)GetScreenWidth() * BOARD_ORIGIN_X_FACTOR, (float)GetScreenHeight() * BOARD_ORIGIN_Y_FACTOR};
-    float bestScore = -FLT_MAX;
+    const float epsilon = 0.001f;
+    float bestScore;
     bool found = false;
 
     if (map == NULL || action == NULL || map->currentPlayer < PLAYER_RED || map->currentPlayer > PLAYER_BLACK)
@@ -3128,6 +3129,7 @@ static bool choose_immediate_play_phase_fallback_action(const struct Map *map, e
 
     memset(action, 0, sizeof(*action));
     action->type = AI_ACTION_NONE;
+    bestScore = evaluate_player_position(map, player, difficulty);
 
     if (gameCanPlayDevelopmentCard(map, DEVELOPMENT_CARD_KNIGHT))
     {
@@ -3140,7 +3142,7 @@ static bool choose_immediate_play_phase_fallback_action(const struct Map *map, e
                                                         difficulty,
                                                         (struct AiSearchState){0},
                                                         NULL);
-            if (!found || score > bestScore)
+            if (score > bestScore + epsilon)
             {
                 bestScore = score;
                 action->type = AI_ACTION_PLAY_KNIGHT;
@@ -3169,7 +3171,7 @@ static bool choose_immediate_play_phase_fallback_action(const struct Map *map, e
             if (roadsPlaced > 0)
             {
                 const float score = evaluate_immediate_follow_up_score(&simulatedMap, player, difficulty);
-                if (!found || score > bestScore)
+                if (score > bestScore + epsilon)
                 {
                     bestScore = score;
                     action->type = AI_ACTION_PLAY_ROAD_BUILDING;
@@ -3194,7 +3196,7 @@ static bool choose_immediate_play_phase_fallback_action(const struct Map *map, e
 
                 {
                     const float score = evaluate_immediate_follow_up_score(&simulatedMap, player, difficulty);
-                    if (!found || score > bestScore)
+                    if (score > bestScore + epsilon)
                     {
                         bestScore = score;
                         action->type = AI_ACTION_PLAY_YEAR_OF_PLENTY;
@@ -3220,7 +3222,7 @@ static bool choose_immediate_play_phase_fallback_action(const struct Map *map, e
 
             {
                 const float score = evaluate_immediate_follow_up_score(&simulatedMap, player, difficulty);
-                if (!found || score > bestScore)
+                if (score > bestScore + epsilon)
                 {
                     bestScore = score;
                     action->type = AI_ACTION_PLAY_MONOPOLY;
@@ -3245,7 +3247,7 @@ static bool choose_immediate_play_phase_fallback_action(const struct Map *map, e
 
                 {
                     const float score = evaluate_player_position(&simulatedMap, player, difficulty);
-                    if (!found || score > bestScore)
+                    if (score > bestScore + epsilon)
                     {
                         bestScore = score;
                         action->type = AI_ACTION_BUILD_CITY;
@@ -3270,7 +3272,7 @@ static bool choose_immediate_play_phase_fallback_action(const struct Map *map, e
 
                 {
                     const float score = evaluate_player_position(&simulatedMap, player, difficulty);
-                    if (!found || score > bestScore)
+                    if (score > bestScore + epsilon)
                     {
                         bestScore = score;
                         action->type = AI_ACTION_BUILD_SETTLEMENT;
@@ -3293,7 +3295,7 @@ static bool choose_immediate_play_phase_fallback_action(const struct Map *map, e
 
                 {
                     const float score = evaluate_player_position(&simulatedMap, player, difficulty);
-                    if (!found || score > bestScore)
+                    if (score > bestScore + epsilon)
                     {
                         bestScore = score;
                         action->type = AI_ACTION_BUY_DEVELOPMENT;
@@ -3318,7 +3320,7 @@ static bool choose_immediate_play_phase_fallback_action(const struct Map *map, e
 
                 {
                     const float score = evaluate_player_position(&simulatedMap, player, difficulty);
-                    if (!found || score > bestScore)
+                    if (score > bestScore + epsilon)
                     {
                         bestScore = score;
                         action->type = AI_ACTION_BUILD_ROAD;

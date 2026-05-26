@@ -18,6 +18,7 @@ static bool test_authoritative_snapshot_restores_local_discard_control_after_rej
 static bool test_lobby_state_clears_started_flag_until_fresh_match_sync(void);
 static bool test_snapshot_hash_ignores_local_turn_timer(void);
 static bool test_ai_plays_year_of_plenty_when_it_improves_position(void);
+static bool test_ai_skips_monopoly_when_it_cannot_improve_position(void);
 
 #define ASSERT_TRUE(expr)                                                                                              \
     do                                                                                                                 \
@@ -55,6 +56,7 @@ int main(void)
         {"lobby state clears started flag until fresh match sync", test_lobby_state_clears_started_flag_until_fresh_match_sync},
         {"snapshot hash ignores local turn timer", test_snapshot_hash_ignores_local_turn_timer},
         {"ai spends year of plenty when it improves position", test_ai_plays_year_of_plenty_when_it_improves_position},
+        {"ai skips monopoly when it cannot improve position", test_ai_skips_monopoly_when_it_cannot_improve_position},
     };
 
     for (int i = 0; i < (int)(sizeof(tests) / sizeof(tests[0])); i++)
@@ -244,5 +246,35 @@ static bool test_ai_plays_year_of_plenty_when_it_improves_position(void)
                       map.players[PLAYER_RED].resources[RESOURCE_CLAY] +
                       map.players[PLAYER_RED].resources[RESOURCE_SHEEP] +
                       map.players[PLAYER_RED].resources[RESOURCE_STONE]);
+    return true;
+}
+
+static bool test_ai_skips_monopoly_when_it_cannot_improve_position(void)
+{
+    struct Map map;
+    struct GameAction action;
+
+    ASSERT_TRUE(setupMap(&map));
+    map.phase = GAME_PHASE_PLAY;
+    map.currentPlayer = PLAYER_RED;
+    map.setupStartPlayer = PLAYER_RED;
+    map.rolledThisTurn = true;
+    map.turnStartTime = 0.0;
+
+    map.players[PLAYER_RED].controlMode = PLAYER_CONTROL_AI;
+    map.players[PLAYER_RED].aiDifficulty = AI_DIFFICULTY_EASY;
+    map.players[PLAYER_BLUE].controlMode = PLAYER_CONTROL_HUMAN;
+    map.players[PLAYER_GREEN].controlMode = PLAYER_CONTROL_DISABLED;
+    map.players[PLAYER_BLACK].controlMode = PLAYER_CONTROL_DISABLED;
+    gameApplySeatControlModes(&map);
+
+    memset(map.players[PLAYER_RED].resources, 0, sizeof(map.players[PLAYER_RED].resources));
+    memset(map.players[PLAYER_BLUE].resources, 0, sizeof(map.players[PLAYER_BLUE].resources));
+    memset(map.players[PLAYER_RED].developmentCards, 0, sizeof(map.players[PLAYER_RED].developmentCards));
+    memset(map.players[PLAYER_RED].newlyPurchasedDevelopmentCards, 0, sizeof(map.players[PLAYER_RED].newlyPurchasedDevelopmentCards));
+    map.players[PLAYER_RED].developmentCards[DEVELOPMENT_CARD_MONOPOLY] = 1;
+    map.playedDevelopmentCardThisTurn = false;
+
+    ASSERT_FALSE(aiChoosePlayPhaseActionForTesting(&map, AI_DIFFICULTY_EASY, 0, 0, &action));
     return true;
 }
