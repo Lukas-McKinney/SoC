@@ -926,6 +926,7 @@ void DrawPlayerPanel(const struct Map *map)
 {
     const struct PlayerState *player = CurrentPlayerState(map);
     const bool showingPinnedLocalInfo = IsPrivateInfoPinnedToLocalHuman(map);
+    const int discardRiskThreshold = 7;
     if (player == NULL)
     {
         return;
@@ -969,13 +970,34 @@ void DrawPlayerPanel(const struct Map *map)
 
     {
         int totalResources = 0;
-        const char *resourcesLabel = NULL;
+        const int resourcesFont = UiScaledFont(18);
+        const Color warningColor = (Color){176, 63, 52, 255};
+        const float resourcesX = panelX + UiScaled(16.0f);
+        const float resourcesY = panelY + UiScaled(126.0f);
         for (int resource = 0; resource < 5; resource++)
         {
             totalResources += player->resources[resource];
         }
-        resourcesLabel = TextFormat("%s (%d)", loc("Resources"), totalResources);
-        DrawUiText(resourcesLabel, panelX + UiScaled(16.0f), panelY + UiScaled(126.0f), UiScaledFont(18), textColor);
+
+        {
+            const bool discardRisk = totalResources >= discardRiskThreshold;
+            const char *resourcesPrefixLabel = TextFormat("%s (", loc("Resources"));
+            const char *resourceTotalLabel = TextFormat("%d", totalResources);
+            const int prefixWidth = MeasureUiText(resourcesPrefixLabel, resourcesFont);
+            const int totalWidth = MeasureUiText(resourceTotalLabel, resourcesFont);
+
+            DrawUiText(resourcesPrefixLabel, resourcesX, resourcesY, resourcesFont, textColor);
+            DrawUiText(resourceTotalLabel,
+                       resourcesX + (float)prefixWidth,
+                       resourcesY,
+                       resourcesFont,
+                       discardRisk ? warningColor : textColor);
+            DrawUiText(")",
+                       resourcesX + (float)(prefixWidth + totalWidth),
+                       resourcesY,
+                       resourcesFont,
+                       textColor);
+        }
     }
     for (int resource = 0; resource < 5; resource++)
     {
