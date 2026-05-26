@@ -13,6 +13,7 @@
 #define LAND_TILE_COUNT 19
 #define HEX_CORNERS 6
 #define INPUT_LINE_MAX 512
+#define DISCARD_RISK_HAND_SIZE 7
 
 enum BuildType
 {
@@ -57,6 +58,8 @@ static const char *phase_name(enum GamePhase phase);
 static const char *resource_name(enum ResourceType resource);
 static const char *tile_type_name(enum TileType type);
 static const char *dev_card_name(enum DevelopmentCardType card);
+static int player_hand_total(const struct Map *map, enum PlayerType player);
+static const char *discard_risk_suffix(int handTotal);
 
 static bool equals_ignore_case(const char *a, const char *b);
 static bool parse_int(const char *text, int *valueOut);
@@ -211,6 +214,28 @@ static const char *dev_card_name(enum DevelopmentCardType card)
     default:
         return "unknown";
     }
+}
+
+static int player_hand_total(const struct Map *map, enum PlayerType player)
+{
+    int total = 0;
+
+    if (map == NULL || player < PLAYER_RED || player > PLAYER_BLACK)
+    {
+        return 0;
+    }
+
+    for (int resource = RESOURCE_WOOD; resource <= RESOURCE_STONE; resource++)
+    {
+        total += map->players[player].resources[resource];
+    }
+
+    return total;
+}
+
+static const char *discard_risk_suffix(int handTotal)
+{
+    return handTotal >= DISCARD_RISK_HAND_SIZE ? " [discard-risk]" : "";
 }
 
 static bool parse_player(const char *text, enum PlayerType *playerOut)
@@ -764,32 +789,32 @@ static void print_status(const struct ConsoleState *state)
 
     for (int p = PLAYER_RED; p <= PLAYER_BLACK; p++)
     {
+        const int handTotal = player_hand_total(map, (enum PlayerType)p);
+
         if (state->privateViewEnabled && p != shownPlayer)
         {
-            int handTotal = 0;
             int devTotal = 0;
-            for (int resource = RESOURCE_WOOD; resource <= RESOURCE_STONE; resource++)
-            {
-                handTotal += map->players[p].resources[resource];
-            }
             for (int type = 0; type < DEVELOPMENT_CARD_COUNT; type++)
             {
                 devTotal += map->players[p].developmentCards[type];
             }
 
-            printf("%s vp=%d vis=%d hidden(hand=%d dev=%d)\n",
+            printf("%s vp=%d vis=%d hidden(hand=%d dev=%d)%s\n",
                    player_name((enum PlayerType)p),
                    gameComputeVictoryPoints(map, (enum PlayerType)p),
                    gameComputeVisibleVictoryPoints(map, (enum PlayerType)p),
                    handTotal,
-                   devTotal);
+                   devTotal,
+                   discard_risk_suffix(handTotal));
         }
         else
         {
-            printf("%s vp=%d vis=%d hand=[w:%d wh:%d c:%d s:%d st:%d] dev=[k:%d vp:%d rb:%d yop:%d m:%d]\n",
+            printf("%s vp=%d vis=%d hand_total=%d%s hand=[w:%d wh:%d c:%d s:%d st:%d] dev=[k:%d vp:%d rb:%d yop:%d m:%d]\n",
                    player_name((enum PlayerType)p),
                    gameComputeVictoryPoints(map, (enum PlayerType)p),
                    gameComputeVisibleVictoryPoints(map, (enum PlayerType)p),
+                   handTotal,
+                   discard_risk_suffix(handTotal),
                    map->players[p].resources[RESOURCE_WOOD],
                    map->players[p].resources[RESOURCE_WHEAT],
                    map->players[p].resources[RESOURCE_CLAY],
@@ -856,13 +881,17 @@ static void print_hands(const struct ConsoleState *state, bool allPlayers)
 
     for (int p = PLAYER_RED; p <= PLAYER_BLACK; p++)
     {
+        const int handTotal = player_hand_total(map, (enum PlayerType)p);
+
         if (state->privateViewEnabled && !allPlayers && p != shownPlayer)
         {
             continue;
         }
 
-        printf("%s: wood=%d wheat=%d clay=%d sheep=%d stone=%d\n",
+        printf("%s: total=%d%s wood=%d wheat=%d clay=%d sheep=%d stone=%d\n",
                player_name((enum PlayerType)p),
+               handTotal,
+               discard_risk_suffix(handTotal),
                map->players[p].resources[RESOURCE_WOOD],
                map->players[p].resources[RESOURCE_WHEAT],
                map->players[p].resources[RESOURCE_CLAY],
