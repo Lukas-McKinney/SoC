@@ -76,11 +76,14 @@ void HandleMapInput(struct MatchSession *session)
     const Rectangle playerTradeModal = GetPlayerTradeModalBounds();
     const Rectangle settingsButton = GetSettingsButtonBounds();
     const Rectangle settingsModalTarget = GetSettingsModalBounds();
+    const Rectangle gameLogPanel = GetGameLogBounds();
+    const Rectangle gameLogBackToTopButton = GetGameLogBackToTopButtonBounds();
     const Rectangle discardModal = GetDiscardModalBounds();
     const Rectangle thiefVictimModal = GetThiefVictimModalBounds();
     const Rectangle victoryOverlay = GetVictoryOverlayBounds();
     const Rectangle victoryRestartButton = GetVictoryOverlayRestartButtonBounds();
     const Rectangle victoryMenuButton = GetVictoryOverlayMenuButtonBounds();
+    const int gameLogVisibleRows = 7;
     const bool setupSettlementMode = gameIsSetupSettlementTurn(map);
     const bool setupRoadMode = gameIsSetupRoadTurn(map);
     const bool hasPendingDiscards = gameHasPendingDiscards(map);
@@ -104,6 +107,25 @@ void HandleMapInput(struct MatchSession *session)
     const bool hasPendingIncomingTradeOffer = matchSessionHasPendingTradeOfferForLocalResponse(session);
     const Vector2 boardOrigin = origin;
     const struct GameActionContext actionContext = {boardOrigin, radius};
+    const float mouseWheel = GetMouseWheelMove();
+
+    if (CheckCollisionPointRec(mouse, gameLogPanel))
+    {
+        if (fabsf(mouseWheel) > 0.01f)
+        {
+            uiAdjustGameLogScroll(mouseWheel < 0.0f ? 1 : -1, gameLogVisibleRows);
+            return;
+        }
+
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+        {
+            if (uiIsGameLogScrolled(gameLogVisibleRows) && CheckCollisionPointRec(mouse, gameLogBackToTopButton))
+            {
+                uiScrollGameLogToTop();
+            }
+            return;
+        }
+    }
 
     if (hasPendingIncomingTradeOffer)
     {

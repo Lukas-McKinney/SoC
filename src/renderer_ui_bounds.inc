@@ -36,6 +36,17 @@ Rectangle GetSettingsButtonBounds(void)
     return (Rectangle){UiScaled(24.0f), UiScaled(24.0f), UiScaled(156.0f), UiScaled(42.0f)};
 }
 
+Rectangle GetGameLogBounds(void)
+{
+    return (Rectangle){UiScaled(24.0f), UiScaled(78.0f), UiScaled(372.0f), UiScaled(276.0f)};
+}
+
+Rectangle GetGameLogBackToTopButtonBounds(void)
+{
+    const Rectangle panel = GetGameLogBounds();
+    return (Rectangle){panel.x + panel.width - UiScaled(118.0f), panel.y + UiScaled(10.0f), UiScaled(98.0f), UiScaled(28.0f)};
+}
+
 Rectangle GetTradeModalBounds(void)
 {
     const float panelWidth = UiScaled(460.0f);

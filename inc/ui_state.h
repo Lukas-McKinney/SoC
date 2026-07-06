@@ -62,6 +62,17 @@ float uiGetCenteredStatusAlpha(void);
 float uiGetCenteredStatusVerticalOffset(void);
 float uiGetCenteredStatusEmphasis(void);
 float uiGetTurnAnnouncementEmphasis(void);
+void uiPushGameLog(const char *text, enum UiNotificationTone tone);
+void uiPushGameLogForPlayer(const char *text, enum UiNotificationTone tone, enum PlayerType player);
+int uiGetGameLogEntryCount(void);
+const char *uiGetGameLogEntryText(int index);
+enum UiNotificationTone uiGetGameLogEntryTone(int index);
+enum PlayerType uiGetGameLogEntryPlayer(int index);
+float uiGetGameLogEntryAlpha(int index);
+void uiAdjustGameLogScroll(int delta, int visibleEntries);
+void uiScrollGameLogToTop(void);
+int uiGetGameLogScrollOffset(int visibleEntries);
+bool uiIsGameLogScrolled(int visibleEntries);
 
 void uiToggleTradeMenu(void);
 void uiSetTradeMenuOpen(bool open);

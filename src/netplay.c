@@ -59,6 +59,9 @@ typedef socklen_t NetSockLen;
 #define NETPLAY_STALE_TIMEOUT_MS 10000u
 #define NETPLAY_RELAY_HANDSHAKE_MAX (NETPLAY_MAX_RELAY_ROOM_CODE + 32)
 #define NETPLAY_RELAY_WS_BUFFER_SIZE (NETPLAY_RECV_BUFFER_SIZE + 32u)
+#ifdef _WIN32
+#define NETPLAY_WINHTTP_RECV_TIMEOUT_MS 100
+#endif
 
 enum NetplayPacketType
 {
@@ -934,9 +937,18 @@ static DWORD WINAPI relay_receive_thread_main(LPVOID context)
 
                 if (result == ERROR_WINHTTP_TIMEOUT)
                 {
+                    /*
+                     * Internet relays can deliver a single WebSocket message
+                     * across multiple receive calls. Preserve any partial
+                     * message data across short WinHTTP timeouts instead of
+                     * discarding it and silently dropping heartbeats.
+                     */
                     Sleep(1u);
-                    totalBytes = 0u;
-                    break;
+                    if (totalBytes == 0u)
+                    {
+                        break;
+                    }
+                    continue;
                 }
 
                 EnterCriticalSection(&state->relayReceiveLock);
@@ -1594,7 +1606,7 @@ static bool open_relay_transport(struct NetplayState *state,
         return false;
     }
 
-    if (!WinHttpSetTimeouts(state->relaySession, 5000, 5000, 5000, 1))
+    if (!WinHttpSetTimeouts(state->relaySession, 5000, 5000, 5000, NETPLAY_WINHTTP_RECV_TIMEOUT_MS))
     {
         set_last_error(state, "websocket timeout setup failed");
         close_relay_transport(state);

@@ -13,6 +13,8 @@
 #define PLAYER_NOTIFICATION_SLOTS 8
 #define PLAYER_NOTIFICATION_TEXT_CAPACITY 96
 #define CENTERED_WARNING_TEXT_CAPACITY 192
+#define GAME_LOG_ENTRY_SLOTS 256
+#define GAME_LOG_TEXT_CAPACITY 160
 
 struct UiPlayerNotification
 {
@@ -22,6 +24,15 @@ struct UiPlayerNotification
     enum UiNotificationTone tone;
     double startTime;
     double dismissStartTime;
+};
+
+struct UiGameLogEntry
+{
+    bool active;
+    char text[GAME_LOG_TEXT_CAPACITY];
+    enum UiNotificationTone tone;
+    enum PlayerType player;
+    double startTime;
 };
 
 static bool gTradeMenuOpen = false;
@@ -82,6 +93,8 @@ static int gCurrentTurnResourceGain[5] = {0};
 static int gTrackedPlayerResources[MAX_PLAYERS][5] = {0};
 static int gTrackedVisibleVictoryPoints[MAX_PLAYERS] = {0};
 static struct UiPlayerNotification gPlayerNotifications[MAX_PLAYERS][PLAYER_NOTIFICATION_SLOTS] = {0};
+static struct UiGameLogEntry gGameLogEntries[GAME_LOG_ENTRY_SLOTS] = {0};
+static int gGameLogScrollOffset = 0;
 static char gCenteredWarningText[CENTERED_WARNING_TEXT_CAPACITY] = {0};
 static double gCenteredWarningStartTime = -1.0;
 static char gCenteredStatusText[CENTERED_WARNING_TEXT_CAPACITY] = {0};
@@ -104,6 +117,8 @@ static void snapshot_player_delta_state(const struct Map *map);
 static void prune_player_notifications(void);
 static void push_player_notification(enum PlayerType player, const char *text, enum UiNotificationTone tone);
 static void dismiss_player_notifications(void);
+static int active_game_log_entry_count(void);
+static int clamp_game_log_scroll_offset(int visibleEntries);
 static const char *resource_label(enum ResourceType resource, bool abbreviated);
 static const char *player_label(enum PlayerType player);
 static enum PlayerType local_human_player(const struct Map *map);
@@ -210,6 +225,8 @@ static void reset_ui_state(bool resetTheme)
     memset(gTrackedPlayerResources, 0, sizeof(gTrackedPlayerResources));
     memset(gTrackedVisibleVictoryPoints, 0, sizeof(gTrackedVisibleVictoryPoints));
     memset(gPlayerNotifications, 0, sizeof(gPlayerNotifications));
+    memset(gGameLogEntries, 0, sizeof(gGameLogEntries));
+    gGameLogScrollOffset = 0;
     memset(gCenteredWarningText, 0, sizeof(gCenteredWarningText));
     gCenteredWarningStartTime = -1.0;
     memset(gCenteredStatusText, 0, sizeof(gCenteredStatusText));
@@ -461,6 +478,125 @@ void uiShowCenteredStatusForPlayer(const char *text, enum UiNotificationTone ton
     }
 
     show_centered_status_internal(text, tone, player);
+}
+
+void uiPushGameLogForPlayer(const char *text, enum UiNotificationTone tone, enum PlayerType player)
+{
+    struct UiGameLogEntry *entry = NULL;
+    const int entryCount = active_game_log_entry_count();
+
+    if (text == NULL || text[0] == '\0')
+    {
+        return;
+    }
+
+    if (player < PLAYER_RED || player > PLAYER_BLACK)
+    {
+        player = PLAYER_NONE;
+    }
+
+    if (gGameLogScrollOffset > 0 && entryCount > 0)
+    {
+        gGameLogScrollOffset++;
+    }
+    for (int index = GAME_LOG_ENTRY_SLOTS - 1; index > 0; index--)
+    {
+        gGameLogEntries[index] = gGameLogEntries[index - 1];
+    }
+
+    entry = &gGameLogEntries[0];
+    memset(entry, 0, sizeof(*entry));
+    entry->active = true;
+    strncpy(entry->text, text, sizeof(entry->text) - 1);
+    entry->text[sizeof(entry->text) - 1] = '\0';
+    entry->tone = tone;
+    entry->player = player;
+    entry->startTime = GetTime();
+    clamp_game_log_scroll_offset(1);
+}
+
+void uiPushGameLog(const char *text, enum UiNotificationTone tone)
+{
+    uiPushGameLogForPlayer(text, tone, PLAYER_NONE);
+}
+
+int uiGetGameLogEntryCount(void)
+{
+    return active_game_log_entry_count();
+}
+
+const char *uiGetGameLogEntryText(int index)
+{
+    if (index < 0 || index >= GAME_LOG_ENTRY_SLOTS || !gGameLogEntries[index].active)
+    {
+        return "";
+    }
+
+    return gGameLogEntries[index].text;
+}
+
+enum UiNotificationTone uiGetGameLogEntryTone(int index)
+{
+    if (index < 0 || index >= GAME_LOG_ENTRY_SLOTS || !gGameLogEntries[index].active)
+    {
+        return UI_NOTIFICATION_NEUTRAL;
+    }
+
+    return gGameLogEntries[index].tone;
+}
+
+enum PlayerType uiGetGameLogEntryPlayer(int index)
+{
+    if (index < 0 || index >= GAME_LOG_ENTRY_SLOTS || !gGameLogEntries[index].active)
+    {
+        return PLAYER_NONE;
+    }
+
+    return gGameLogEntries[index].player;
+}
+
+float uiGetGameLogEntryAlpha(int index)
+{
+    const float fadeIn = 0.10f;
+    float elapsed = 0.0f;
+
+    if (index < 0 || index >= GAME_LOG_ENTRY_SLOTS || !gGameLogEntries[index].active)
+    {
+        return 0.0f;
+    }
+
+    elapsed = (float)(GetTime() - gGameLogEntries[index].startTime);
+    if (elapsed <= 0.0f)
+    {
+        return 0.0f;
+    }
+    if (elapsed < fadeIn)
+    {
+        return elapsed / fadeIn;
+    }
+
+    return 1.0f;
+}
+
+void uiAdjustGameLogScroll(int delta, int visibleEntries)
+{
+    gGameLogScrollOffset += delta;
+    clamp_game_log_scroll_offset(visibleEntries);
+}
+
+void uiScrollGameLogToTop(void)
+{
+    gGameLogScrollOffset = 0;
+}
+
+int uiGetGameLogScrollOffset(int visibleEntries)
+{
+    return clamp_game_log_scroll_offset(visibleEntries);
+}
+
+bool uiIsGameLogScrolled(int visibleEntries)
+{
+    return uiGetGameLogScrollOffset(visibleEntries) > 0;
 }
 
 bool uiHasCenteredStatus(void)
@@ -1617,6 +1753,40 @@ static void dismiss_player_notifications(void)
             gPlayerNotifications[player][i].dismissStartTime = GetTime();
         }
     }
+}
+
+static int active_game_log_entry_count(void)
+{
+    int count = 0;
+
+    for (int index = 0; index < GAME_LOG_ENTRY_SLOTS; index++)
+    {
+        if (!gGameLogEntries[index].active)
+        {
+            break;
+        }
+        count++;
+    }
+
+    return count;
+}
+
+static int clamp_game_log_scroll_offset(int visibleEntries)
+{
+    const int entryCount = active_game_log_entry_count();
+    const int resolvedVisibleEntries = visibleEntries > 0 ? visibleEntries : 1;
+    const int maxOffset = entryCount > resolvedVisibleEntries ? entryCount - resolvedVisibleEntries : 0;
+
+    if (gGameLogScrollOffset < 0)
+    {
+        gGameLogScrollOffset = 0;
+    }
+    if (gGameLogScrollOffset > maxOffset)
+    {
+        gGameLogScrollOffset = maxOffset;
+    }
+
+    return gGameLogScrollOffset;
 }
 
 static const char *resource_label(enum ResourceType resource, bool abbreviated)

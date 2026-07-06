@@ -451,6 +451,7 @@ static void DrawMapUiLayer(const struct Map *map)
     DrawPlayerPanel(map);
     DrawDevelopmentHand(map);
     DrawTurnPanel(map);
+    DrawGameLog();
     DrawSettingsButton();
     if (!gameHasWinner(map))
     {

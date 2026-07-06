@@ -56,11 +56,14 @@ bool GetHoveredDevelopmentHandCard(const struct Map *map, enum DevelopmentCardTy
 void DrawDevelopmentCardDrawAnimation(const struct Map *map);
 void DrawDevelopmentPurchaseOverlay(const struct Map *map);
 void DrawDevelopmentPlayOverlay(const struct Map *map);
+void DrawGameLog(void);
 void DrawCenteredStatus(void);
 void DrawCenteredWarning(void);
 void DrawTurnPanel(const struct Map *map);
 void DrawVictoryOverlay(const struct Map *map);
 
+Rectangle GetGameLogBounds(void);
+Rectangle GetGameLogBackToTopButtonBounds(void);
 Rectangle GetPlayerPanelBounds(void);
 Rectangle GetTurnPanelBounds(void);
 Rectangle GetTradeButtonBounds(void);
