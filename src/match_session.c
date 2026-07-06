@@ -43,10 +43,15 @@ static void apply_client_authoritative_result(struct MatchSession *session,
 static void init_action_result(struct GameActionResult *result);
 static enum DevelopmentCardType development_card_for_action(enum GameActionType type);
 static bool action_actor_is_local_viewer(const struct MatchSession *session, enum PlayerType actor);
+static void format_resource_gain_list(const int deltas[5], char *buffer, size_t bufferSize);
+static void push_roll_resource_log_entries(const struct Map *beforeMap,
+                                           const struct Map *afterMap);
 static void show_action_feedback(const struct MatchSession *session,
                                  enum PlayerType actor,
                                  const struct GameAction *action,
-                                 const struct GameActionResult *result);
+                                 const struct GameActionResult *result,
+                                 const struct Map *beforeMap,
+                                 const struct Map *afterMap);
 static bool broadcast_host_snapshot(struct MatchSession *session);
 static void handle_netplay_event(struct MatchSession *session, const struct NetplayEvent *event);
 static void reset_client_transient_ui(void);
@@ -564,10 +569,86 @@ static bool action_actor_is_local_viewer(const struct MatchSession *session, enu
     return session->seatAuthority[actor] == MATCH_SEAT_LOCAL;
 }
 
+static void format_resource_gain_list(const int deltas[5], char *buffer, size_t bufferSize)
+{
+    bool first = true;
+
+    if (buffer == NULL || bufferSize == 0u)
+    {
+        return;
+    }
+
+    buffer[0] = '\0';
+    for (int resource = RESOURCE_WOOD; resource <= RESOURCE_STONE; resource++)
+    {
+        char segment[40];
+
+        if (deltas[resource] <= 0)
+        {
+            continue;
+        }
+
+        snprintf(segment,
+                 sizeof(segment),
+                 "%s%d %s",
+                 first ? "" : ", ",
+                 deltas[resource],
+                 locResourceName((enum ResourceType)resource));
+        strncat(buffer, segment, bufferSize - strlen(buffer) - 1);
+        first = false;
+    }
+}
+
+static void push_roll_resource_log_entries(const struct Map *beforeMap,
+                                           const struct Map *afterMap)
+{
+    bool distributedAnyResources = false;
+
+    if (beforeMap == NULL || afterMap == NULL)
+    {
+        return;
+    }
+
+    for (int player = PLAYER_BLACK; player >= PLAYER_RED; player--)
+    {
+        int positiveDeltas[5] = {0};
+        char resourcesText[128];
+        char message[192];
+        int positiveTotal = 0;
+
+        for (int resource = RESOURCE_WOOD; resource <= RESOURCE_STONE; resource++)
+        {
+            const int delta = afterMap->players[player].resources[resource] - beforeMap->players[player].resources[resource];
+            if (delta > 0)
+            {
+                positiveDeltas[resource] = delta;
+                positiveTotal += delta;
+            }
+        }
+
+        if (positiveTotal <= 0)
+        {
+            continue;
+        }
+
+        distributedAnyResources = true;
+        format_resource_gain_list(positiveDeltas, resourcesText, sizeof(resourcesText));
+        snprintf(message, sizeof(message), loc("%s got %s."), locPlayerName((enum PlayerType)player), resourcesText);
+        uiPushGameLogForPlayer(message, UI_NOTIFICATION_POSITIVE, (enum PlayerType)player);
+    }
+
+    if (!distributedAnyResources)
+    {
+        uiPushGameLog(loc("No resources distributed."), UI_NOTIFICATION_NEUTRAL);
+    }
+}
+
 static void show_action_feedback(const struct MatchSession *session,
                                  enum PlayerType actor,
                                  const struct GameAction *action,
-                                 const struct GameActionResult *result)
+                                 const struct GameActionResult *result,
+                                 const struct Map *beforeMap,
+                                 const struct Map *afterMap)
 {
     char message[160];
     const bool actorIsLocal = action_actor_is_local_viewer(session, actor);
@@ -588,72 +669,84 @@ static void show_action_feedback(const struct MatchSession *session,
     switch (action->type)
     {
     case GAME_ACTION_ROLL_DICE:
-        if (!actorIsLocal && rolledTotal >= 2 && rolledTotal <= 12)
+        if (rolledTotal >= 2 && rolledTotal <= 12)
         {
-            snprintf(message, sizeof(message), loc("%s rolled %d."), actorLabel, rolledTotal);
-            uiShowCenteredStatusForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
+            if (rolledTotal != 7)
+            {
+                push_roll_resource_log_entries(beforeMap, afterMap);
+            }
+
+            if (actorIsLocal)
+            {
+                snprintf(message, sizeof(message), loc("You rolled %d."), rolledTotal);
+            }
+            else
+            {
+                snprintf(message, sizeof(message), loc("%s rolled %d."), actorLabel, rolledTotal);
+            }
+            uiPushGameLogForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
         }
         return;
     case GAME_ACTION_PLACE_ROAD:
         if (actorIsLocal)
         {
-            uiShowCenteredStatus(loc("Road placed."), UI_NOTIFICATION_POSITIVE);
+            uiPushGameLogForPlayer(loc("Road placed."), UI_NOTIFICATION_POSITIVE, actor);
         }
         else
         {
             snprintf(message, sizeof(message), loc("%s built a road."), actorLabel);
-            uiShowCenteredStatusForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
+            uiPushGameLogForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
         }
         return;
     case GAME_ACTION_PLACE_SETTLEMENT:
         if (actorIsLocal)
         {
-            uiShowCenteredStatus(loc("Settlement placed."), UI_NOTIFICATION_POSITIVE);
+            uiPushGameLogForPlayer(loc("Settlement placed."), UI_NOTIFICATION_POSITIVE, actor);
         }
         else
         {
             snprintf(message, sizeof(message), loc("%s built a settlement."), actorLabel);
-            uiShowCenteredStatusForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
+            uiPushGameLogForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
         }
         return;
     case GAME_ACTION_PLACE_CITY:
         if (actorIsLocal)
         {
-            uiShowCenteredStatus(loc("City built."), UI_NOTIFICATION_POSITIVE);
+            uiPushGameLogForPlayer(loc("City built."), UI_NOTIFICATION_POSITIVE, actor);
         }
         else
         {
             snprintf(message, sizeof(message), loc("%s built a city."), actorLabel);
-            uiShowCenteredStatusForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
+            uiPushGameLogForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
         }
         return;
     case GAME_ACTION_SUBMIT_DISCARD:
         if (actorIsLocal)
         {
-            uiShowCenteredStatus(loc("Cards discarded."), UI_NOTIFICATION_NEUTRAL);
+            uiPushGameLogForPlayer(loc("Cards discarded."), UI_NOTIFICATION_NEUTRAL, actor);
         }
         else
         {
             snprintf(message, sizeof(message), loc("%s discarded cards."), actorLabel);
-            uiShowCenteredStatusForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
+            uiPushGameLogForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
         }
         return;
     case GAME_ACTION_MOVE_THIEF:
         if (actorIsLocal)
         {
-            uiShowCenteredStatus(loc("Thief moved."), UI_NOTIFICATION_NEUTRAL);
+            uiPushGameLogForPlayer(loc("Thief moved."), UI_NOTIFICATION_NEUTRAL, actor);
         }
         else
         {
             snprintf(message, sizeof(message), loc("%s moved the thief."), actorLabel);
-            uiShowCenteredStatusForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
+            uiPushGameLogForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
         }
         return;
     case GAME_ACTION_STEAL_RANDOM_RESOURCE:
         if (!actorIsLocal)
         {
             snprintf(message, sizeof(message), loc("%s stole from %s."), actorLabel, targetLabel);
-            uiShowCenteredStatusForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
+            uiPushGameLogForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
         }
         return;
     case GAME_ACTION_BUY_DEVELOPMENT:
@@ -664,17 +757,17 @@ static void show_action_feedback(const struct MatchSession *session,
                 result->drawnCard < DEVELOPMENT_CARD_COUNT)
             {
                 snprintf(message, sizeof(message), loc("Bought %s."), locDevelopmentCardTitle(result->drawnCard));
-                uiShowCenteredStatus(message, UI_NOTIFICATION_POSITIVE);
+                uiPushGameLogForPlayer(message, UI_NOTIFICATION_POSITIVE, actor);
             }
             else
             {
-                uiShowCenteredStatus(loc("Development card bought."), UI_NOTIFICATION_POSITIVE);
+                uiPushGameLogForPlayer(loc("Development card bought."), UI_NOTIFICATION_POSITIVE, actor);
             }
         }
         else
         {
             snprintf(message, sizeof(message), loc("%s bought a development card."), actorLabel);
-            uiShowCenteredStatusForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
+            uiPushGameLogForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
         }
         return;
     case GAME_ACTION_PLAY_KNIGHT:
@@ -687,31 +780,31 @@ static void show_action_feedback(const struct MatchSession *session,
             if (actorIsLocal)
             {
                 snprintf(message, sizeof(message), loc("Played %s."), locDevelopmentCardTitle(cardType));
-                uiShowCenteredStatus(message, UI_NOTIFICATION_NEUTRAL);
+                uiPushGameLogForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
             }
             else
             {
                 snprintf(message, sizeof(message), loc("%s played %s."), actorLabel, locDevelopmentCardTitle(cardType));
-                uiShowCenteredStatusForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
+                uiPushGameLogForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
             }
         }
         return;
     case GAME_ACTION_TRADE_MARITIME:
         if (actorIsLocal)
         {
-            uiShowCenteredStatus(loc("Trade completed."), UI_NOTIFICATION_POSITIVE);
+            uiPushGameLogForPlayer(loc("Trade completed."), UI_NOTIFICATION_POSITIVE, actor);
         }
         else
         {
             snprintf(message, sizeof(message), loc("%s traded with the bank."), actorLabel);
-            uiShowCenteredStatusForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
+            uiPushGameLogForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
         }
         return;
     case GAME_ACTION_TRADE_WITH_PLAYER:
         if (!actorIsLocal)
         {
             snprintf(message, sizeof(message), loc("%s traded with %s."), actorLabel, targetLabel);
-            uiShowCenteredStatusForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
+            uiPushGameLogForPlayer(message, UI_NOTIFICATION_NEUTRAL, actor);
         }
         return;
     case GAME_ACTION_NONE:
@@ -1540,6 +1633,7 @@ static void apply_client_authoritative_result(struct MatchSession *session,
 {
     bool needsApply = false;
     const enum PlayerType actor = active_decision_player(session);
+    const struct Map beforeMap = session != NULL ? session->map : (struct Map){0};
     const bool locallyPredictedAction = predictedLocally &&
                                         !is_authoritative_only_action(action->type);
 
@@ -1585,7 +1679,7 @@ static void apply_client_authoritative_result(struct MatchSession *session,
 
     if (needsApply)
     {
-        show_action_feedback(session, actor, action, result);
+        show_action_feedback(session, actor, action, result, &beforeMap, &session->map);
     }
 
     if (action->type == GAME_ACTION_ROLL_DICE && result->diceRoll >= 2 && result->diceRoll <= 12)
@@ -1607,6 +1701,7 @@ static bool submit_client_action(struct MatchSession *session,
                                  struct GameActionResult *result)
 {
     struct GameAction outboundAction;
+    struct Map beforeMap;
     struct GameActionResult localResult;
     struct GameActionResult *applyResult = result;
     const enum PlayerType actor = active_decision_player(session);
@@ -1645,6 +1740,7 @@ static bool submit_client_action(struct MatchSession *session,
 
     if (!is_authoritative_only_action(action->type) && !remoteHumanTrade)
     {
+        beforeMap = session->map;
         if (applyResult == NULL)
         {
             init_action_result(&localResult);
@@ -1657,7 +1753,7 @@ static bool submit_client_action(struct MatchSession *session,
             return false;
         }
         matchSessionRefreshStateHash(session);
-        show_action_feedback(session, actor, action, applyResult);
+        show_action_feedback(session, actor, action, applyResult, &beforeMap, &session->map);
     }
     else if (result != NULL)
     {
@@ -1764,6 +1860,7 @@ bool matchSessionSubmitAction(struct MatchSession *session,
                               struct GameActionResult *result)
 {
     bool applied = false;
+    struct Map beforeMap;
     struct GameActionResult localResult;
     struct GameActionResult authoritativeResult;
     struct GameActionResult *authoritativeResultPtr = result;
@@ -1776,6 +1873,7 @@ bool matchSessionSubmitAction(struct MatchSession *session,
 
     if (!matchSessionIsNetplay(session))
     {
+        beforeMap = session->map;
         if (authoritativeResultPtr == NULL)
         {
             init_action_result(&localResult);
@@ -1786,7 +1884,7 @@ bool matchSessionSubmitAction(struct MatchSession *session,
         if (applied)
         {
             matchSessionRefreshStateHash(session);
-            show_action_feedback(session, actor, action, authoritativeResultPtr);
+            show_action_feedback(session, actor, action, authoritativeResultPtr, &beforeMap, &session->map);
         }
         return applied;
     }
@@ -1842,6 +1940,7 @@ bool matchSessionSubmitAction(struct MatchSession *session,
         authoritativeResultPtr = &authoritativeResult;
     }
 
+    beforeMap = session->map;
     applied = gameApplyAction(&session->map, action, context, authoritativeResultPtr);
     if (!applied)
     {
@@ -1849,7 +1948,7 @@ bool matchSessionSubmitAction(struct MatchSession *session,
     }
 
     matchSessionRefreshStateHash(session);
-    show_action_feedback(session, actor, action, authoritativeResultPtr);
+    show_action_feedback(session, actor, action, authoritativeResultPtr, &beforeMap, &session->map);
     if (session->netplay != NULL && netplayIsConnected(session->netplay))
     {
         netplayQueueActionResult(session->netplay, action, authoritativeResultPtr, session->stateHash);
@@ -2143,10 +2242,12 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
             }
 
             init_action_result(&actionResult);
+            {
+                const struct Map beforeMap = session->map;
             if (gameApplyAction(&session->map, &authoritativeAction, NULL, &actionResult))
             {
                 matchSessionRefreshStateHash(session);
-                show_action_feedback(session, actor, &authoritativeAction, &actionResult);
+                show_action_feedback(session, actor, &authoritativeAction, &actionResult, &beforeMap, &session->map);
                 if (session->netplay != NULL)
                 {
                     netplayQueueActionResult(session->netplay, &authoritativeAction, &actionResult, session->stateHash);
@@ -2159,6 +2260,7 @@ static void handle_netplay_event(struct MatchSession *session, const struct Netp
                                                     "action rejected",
                                                     session->stateHash);
                 broadcast_host_snapshot(session);
+            }
             }
         }
         else if (session->isHost && session->netplay != NULL)

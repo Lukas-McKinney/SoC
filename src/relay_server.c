@@ -96,6 +96,7 @@ struct RelayClient
 
 static bool gSocketLayerReady = false;
 static size_t gRelayTestSendChunk = 0u;
+static unsigned int gRelayTestSendDelayMs = 0u;
 
 static bool relay_socket_layer_init(void);
 static bool set_socket_nonblocking(RelaySocket socketHandle);
@@ -121,6 +122,7 @@ static bool websocket_frame_parse(struct RelayClient *clients, int index);
 static void reset_websocket_send_state(struct RelayClient *client);
 static bool begin_websocket_send(struct RelayClient *client);
 static enum RelaySendResult send_socket_progress(RelaySocket socketHandle, const unsigned char *buffer, size_t length, size_t *offset);
+static void relay_sleep_ms(unsigned int milliseconds);
 
 static bool relay_socket_layer_init(void)
 {
@@ -136,6 +138,15 @@ static bool relay_socket_layer_init(void)
     }
 #endif
     return true;
+}
+
+static void relay_sleep_ms(unsigned int milliseconds)
+{
+#ifdef _WIN32
+    Sleep(milliseconds);
+#else
+    usleep((useconds_t)milliseconds * 1000u);
+#endif
 }
 
 static bool set_socket_nonblocking(RelaySocket socketHandle)
@@ -365,6 +376,10 @@ static enum RelaySendResult send_socket_progress(RelaySocket socketHandle, const
 
         if (gRelayTestSendChunk > 0u && *offset < length)
         {
+            if (gRelayTestSendDelayMs > 0u)
+            {
+                relay_sleep_ms(gRelayTestSendDelayMs);
+            }
             return RELAY_SEND_BLOCKED;
         }
     }
@@ -1366,6 +1381,7 @@ int main(int argc, char **argv)
     unsigned short port = 24680u;
     const char *portEnv = getenv("PORT");
     const char *testSendChunkEnv = getenv("SOC_RELAY_TEST_SEND_CHUNK");
+    const char *testSendDelayEnv = getenv("SOC_RELAY_TEST_SEND_DELAY_MS");
     fd_set readSet;
     int maxSocket = 0;
 
@@ -1386,6 +1402,18 @@ int main(int argc, char **argv)
         {
             gRelayTestSendChunk = (size_t)parsedChunk;
             fprintf(stderr, "[relay] test websocket send chunk enabled: %zu\n", gRelayTestSendChunk);
+            fflush(stderr);
+        }
+    }
+
+    if (testSendDelayEnv != NULL && testSendDelayEnv[0] != '\0')
+    {
+        char *parseEnd = NULL;
+        const unsigned long parsedDelay = strtoul(testSendDelayEnv, &parseEnd, 10);
+        if (parseEnd != testSendDelayEnv && parsedDelay > 0ul)
+        {
+            gRelayTestSendDelayMs = (unsigned int)parsedDelay;
+            fprintf(stderr, "[relay] test websocket send delay enabled: %u ms\n", gRelayTestSendDelayMs);
             fflush(stderr);
         }
     }

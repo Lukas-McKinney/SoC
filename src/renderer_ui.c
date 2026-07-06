@@ -1183,6 +1183,117 @@ void DrawOpponentVictoryBar(const struct Map *map)
     }
 }
 
+void DrawGameLog(void)
+{
+    const int entryCount = uiGetGameLogEntryCount();
+    const int visibleRows = 7;
+    const int scrollOffset = uiGetGameLogScrollOffset(visibleRows);
+    const int visibleCount = entryCount - scrollOffset < visibleRows ? entryCount - scrollOffset : visibleRows;
+    const Rectangle panel = GetGameLogBounds();
+    const Rectangle backToTopButton = GetGameLogBackToTopButtonBounds();
+    const float panelPadding = UiScaled(12.0f);
+    const float headerY = panel.y + UiScaled(10.0f);
+    const float rowHeight = UiScaled(24.0f);
+    const float rowGap = UiScaled(6.0f);
+    const float rowStartY = panel.y + UiScaled(46.0f);
+    const Color panelColor = UiPanelColor();
+    const Color borderColor = UiPanelBorderColor();
+    const Color textColor = UiTextColor();
+    const Color mutedText = UiMutedTextColor();
+
+    if (entryCount <= 0)
+    {
+        return;
+    }
+
+    DrawPanelFrame(panel, 0.12f, UiScaled(6.0f), UiScaled(8.0f), 0.09f, panelColor, borderColor);
+    DrawUiText(loc("Game Log"), panel.x + panelPadding, headerY, UiScaledFont(18), textColor);
+
+    if (uiIsGameLogScrolled(visibleRows))
+    {
+        DrawRectangleRounded(backToTopButton, 0.35f, 8, UiButtonFillColor());
+        DrawRectangleLinesEx(backToTopButton, UiScaled(1.5f), UiPanelBorderColor());
+        DrawCenteredUiTextFitted(loc("Back to Top"), backToTopButton, 15, 11, 0.0f, textColor);
+    }
+
+    for (int visibleIndex = 0; visibleIndex < visibleCount; visibleIndex++)
+    {
+        const int index = scrollOffset + visibleIndex;
+        const char *entryText = uiGetGameLogEntryText(index);
+        const enum UiNotificationTone tone = uiGetGameLogEntryTone(index);
+        const enum PlayerType player = uiGetGameLogEntryPlayer(index);
+        const float alpha = uiGetGameLogEntryAlpha(index);
+        const Rectangle row = {
+            panel.x + panelPadding,
+            rowStartY + visibleIndex * (rowHeight + rowGap),
+            panel.width - panelPadding * 2.0f - UiScaled(8.0f),
+            rowHeight};
+        Rectangle textBounds = row;
+        Color accentColor = mutedText;
+        Color rowFill = UiSectionFillColor();
+        Color rowBorder = UiDisabledBorderColor();
+        Color rowTextColor = textColor;
+
+        if (alpha <= 0.01f || entryText == NULL || entryText[0] == '\0')
+        {
+            continue;
+        }
+
+        if (tone == UI_NOTIFICATION_POSITIVE)
+        {
+            accentColor = (Color){70, 136, 78, 255};
+            rowFill = (Color){230, 242, 228, 248};
+            rowBorder = (Color){96, 150, 92, 255};
+            rowTextColor = (Color){47, 92, 48, 255};
+        }
+        else if (tone == UI_NOTIFICATION_NEGATIVE)
+        {
+            accentColor = (Color){176, 63, 52, 255};
+            rowFill = (Color){247, 229, 225, 248};
+            rowBorder = (Color){186, 88, 74, 255};
+            rowTextColor = (Color){140, 43, 34, 255};
+        }
+        else if (tone == UI_NOTIFICATION_VICTORY)
+        {
+            accentColor = (Color){184, 140, 43, 255};
+            rowFill = (Color){247, 239, 213, 248};
+            rowBorder = (Color){190, 150, 58, 255};
+            rowTextColor = (Color){120, 84, 19, 255};
+        }
+
+        if (player >= PLAYER_RED && player <= PLAYER_BLACK)
+        {
+            accentColor = UiReadablePlayerColor(player);
+        }
+
+        DrawRectangleRounded(row, 0.32f, 8, Fade(rowFill, alpha));
+        DrawRectangleLinesEx(row, UiScaled(1.2f), Fade(rowBorder, alpha));
+        DrawRectangleRounded((Rectangle){row.x + UiScaled(6.0f), row.y + UiScaled(4.0f), UiScaled(5.0f), row.height - UiScaled(8.0f)},
+                             0.45f,
+                             8,
+                             Fade(accentColor, alpha));
+
+        textBounds.x += UiScaled(18.0f);
+        textBounds.y += UiScaled(2.0f);
+        textBounds.width -= UiScaled(24.0f);
+        DrawLeftUiTextFitted(entryText, textBounds, 0.0f, 15, 11, 0.0f, Fade(rowTextColor, alpha));
+    }
+
+    if (entryCount > visibleRows)
+    {
+        const float trackWidth = UiScaled(6.0f);
+        const float trackHeight = visibleRows * rowHeight + (visibleRows - 1) * rowGap;
+        const float trackX = panel.x + panel.width - panelPadding - trackWidth;
+        const float trackY = rowStartY;
+        const float thumbHeight = trackHeight * ((float)visibleRows / (float)entryCount);
+        const float maxOffset = (float)(entryCount - visibleRows);
+        const float thumbOffset = maxOffset > 0.0f ? ((float)scrollOffset / maxOffset) * (trackHeight - thumbHeight) : 0.0f;
+
+        DrawRectangleRounded((Rectangle){trackX, trackY, trackWidth, trackHeight}, 0.5f, 8, Fade(UiTrackFillColor(), 0.8f));
+        DrawRectangleRounded((Rectangle){trackX, trackY + thumbOffset, trackWidth, thumbHeight}, 0.5f, 8, UiReadableAccent(borderColor));
+    }
+}
+
 void DrawTurnBanner(const struct Map *map)
 {
     const struct MatchSession *session = matchSessionGetActive();
