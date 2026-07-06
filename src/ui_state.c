@@ -57,6 +57,7 @@ static char gProfileName[32] = "Player";
 static bool gReturnToMainMenuRequested = false;
 static bool gRestartGameRequested = false;
 static bool gQuitGameRequested = false;
+static bool gVictoryOverlayVisible = true;
 static unsigned long long gCommittedTotalPlaytimeSeconds = 0ULL;
 static unsigned long long gCommittedTotalWins = 0ULL;
 static unsigned long long gCommittedTotalLosses = 0ULL;
@@ -238,6 +239,7 @@ static void reset_ui_state(bool resetTheme)
     gReturnToMainMenuRequested = false;
     gRestartGameRequested = false;
     gQuitGameRequested = false;
+    gVictoryOverlayVisible = true;
     if (resetTheme)
     {
         gTheme = UI_THEME_LIGHT;
@@ -980,6 +982,16 @@ bool uiConsumeQuitGameRequest(void)
     const bool requested = gQuitGameRequested;
     gQuitGameRequested = false;
     return requested;
+}
+
+void uiSetVictoryOverlayVisible(bool visible)
+{
+    gVictoryOverlayVisible = visible;
+}
+
+bool uiIsVictoryOverlayVisible(void)
+{
+    return gVictoryOverlayVisible;
 }
 
 void uiSetPersistedTotalPlaytimeSeconds(unsigned long long seconds)

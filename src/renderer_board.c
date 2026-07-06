@@ -503,7 +503,7 @@ static void DrawMapUiLayer(const struct Map *map)
     {
         DrawSettingsModal();
     }
-    if (gameHasWinner(map))
+    if (gameHasWinner(map) && uiIsVictoryOverlayVisible())
     {
         DrawVictoryOverlay(map);
     }
