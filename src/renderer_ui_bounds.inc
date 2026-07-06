@@ -232,14 +232,23 @@ Rectangle GetVictoryOverlayBounds(void)
         panelHeight};
 }
 
-Rectangle GetVictoryOverlayRestartButtonBounds(void)
+Rectangle GetVictoryOverlayShowBoardButtonBounds(void)
 {
     const Rectangle panel = GetVictoryOverlayBounds();
-    return (Rectangle){panel.x + UiScaled(34.0f), panel.y + panel.height - UiScaled(62.0f), UiScaled(196.0f), UiScaled(42.0f)};
+    const float inset = UiScaled(34.0f);
+    const float gap = UiScaled(14.0f);
+    const float buttonWidth = (panel.width - inset * 2.0f - gap * 2.0f) / 3.0f;
+    return (Rectangle){panel.x + inset, panel.y + panel.height - UiScaled(62.0f), buttonWidth, UiScaled(42.0f)};
+}
+
+Rectangle GetVictoryOverlayRestartButtonBounds(void)
+{
+    const Rectangle showBoardButton = GetVictoryOverlayShowBoardButtonBounds();
+    return (Rectangle){showBoardButton.x + showBoardButton.width + UiScaled(14.0f), showBoardButton.y, showBoardButton.width, showBoardButton.height};
 }
 
 Rectangle GetVictoryOverlayMenuButtonBounds(void)
 {
-    const Rectangle panel = GetVictoryOverlayBounds();
-    return (Rectangle){panel.x + panel.width - UiScaled(230.0f), panel.y + panel.height - UiScaled(62.0f), UiScaled(196.0f), UiScaled(42.0f)};
+    const Rectangle restartButton = GetVictoryOverlayRestartButtonBounds();
+    return (Rectangle){restartButton.x + restartButton.width + UiScaled(14.0f), restartButton.y, restartButton.width, restartButton.height};
 }

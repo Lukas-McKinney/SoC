@@ -94,6 +94,7 @@ Rectangle GetDevelopmentPlayOverlayBounds(void);
 Rectangle GetDevelopmentPlayConfirmButtonBounds(void);
 Rectangle GetDevelopmentPlayCancelButtonBounds(void);
 Rectangle GetVictoryOverlayBounds(void);
+Rectangle GetVictoryOverlayShowBoardButtonBounds(void);
 Rectangle GetVictoryOverlayRestartButtonBounds(void);
 Rectangle GetVictoryOverlayMenuButtonBounds(void);
 

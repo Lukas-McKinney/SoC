@@ -81,6 +81,7 @@ void HandleMapInput(struct MatchSession *session)
     const Rectangle discardModal = GetDiscardModalBounds();
     const Rectangle thiefVictimModal = GetThiefVictimModalBounds();
     const Rectangle victoryOverlay = GetVictoryOverlayBounds();
+    const Rectangle victoryShowBoardButton = GetVictoryOverlayShowBoardButtonBounds();
     const Rectangle victoryRestartButton = GetVictoryOverlayRestartButtonBounds();
     const Rectangle victoryMenuButton = GetVictoryOverlayMenuButtonBounds();
     const int gameLogVisibleRows = 7;
@@ -628,9 +629,15 @@ void HandleMapInput(struct MatchSession *session)
     if (hasWinner)
     {
         uiSetSettingsMenuOpen(false);
-        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, victoryOverlay))
+        if (uiIsVictoryOverlayVisible() &&
+            IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+            CheckCollisionPointRec(mouse, victoryOverlay))
         {
-            if (CheckCollisionPointRec(mouse, victoryRestartButton))
+            if (CheckCollisionPointRec(mouse, victoryShowBoardButton))
+            {
+                uiSetVictoryOverlayVisible(false);
+            }
+            else if (CheckCollisionPointRec(mouse, victoryRestartButton))
             {
                 uiRequestRestartGame();
             }
@@ -638,6 +645,12 @@ void HandleMapInput(struct MatchSession *session)
             {
                 uiRequestReturnToMainMenu();
             }
+        }
+        else if (!uiIsVictoryOverlayVisible() &&
+                 IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+                 CheckCollisionPointRec(mouse, endTurnButton))
+        {
+            uiSetVictoryOverlayVisible(true);
         }
         uiSetBuildPanelOpen(false);
         uiSetDevelopmentPurchaseConfirmOpen(false);

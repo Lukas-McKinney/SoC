@@ -30,6 +30,7 @@ struct DevelopmentHandCard
 
 static struct ButtonAnimationState gRollDiceButtonAnimation = {0};
 static struct ButtonAnimationState gEndTurnButtonAnimation = {0};
+static struct ButtonAnimationState gVictoryOverlayToggleButtonAnimation = {0};
 
 static void DrawDie(Rectangle bounds, int value, float tilt, float alpha);
 static enum PlayerType LocalHumanPlayer(const struct Map *map);
@@ -1953,6 +1954,7 @@ void DrawTurnPanel(const struct Map *map)
     const bool diceLocked = map->rolledThisTurn || uiIsDiceRolling();
     const bool rollButtonInteractive = humanControlledTurn && !diceLocked;
     const bool endTurnButtonInteractive = humanControlledTurn && canEndTurn;
+    const bool victoryOverlayVisible = uiIsVictoryOverlayVisible();
     const Rectangle dieA = {panel.x + UiScaled(20.0f), panel.y + UiScaled(76.0f), UiScaled(54.0f), UiScaled(54.0f)};
     const Rectangle dieB = {panel.x + UiScaled(84.0f), panel.y + UiScaled(76.0f), UiScaled(54.0f), UiScaled(54.0f)};
     const int shownTotal = uiIsDiceRolling() ? (uiGetDisplayedDieA() + uiGetDisplayedDieB()) : map->lastDiceRoll;
@@ -1997,13 +1999,24 @@ void DrawTurnPanel(const struct Map *map)
         DrawUiText(headline, panel.x + UiScaled(16.0f), panel.y + UiScaled(88.0f), UiScaledFont(28), winner == LocalHumanPlayer(map) ? (Color){54, 130, 72, 255} : UiReadablePlayerColor(winner));
         DrawUiText(subheadline, panel.x + UiScaled(16.0f), panel.y + UiScaled(124.0f), UiScaledFont(18), UiReadablePlayerColor(winner));
         DrawUiText(TextFormat(loc("%d victory points"), winnerPoints), panel.x + UiScaled(16.0f), panel.y + UiScaled(150.0f), UiScaledFont(18), mutedText);
-        DrawUiText(loc("Board is locked"), panel.x + UiScaled(16.0f), panel.y + UiScaled(174.0f), UiScaledFont(20), textColor);
-        DrawUiText(loc("Use the overlay buttons"), panel.x + UiScaled(16.0f), panel.y + UiScaled(202.0f), UiScaledFont(18), mutedText);
-        DrawUiText(loc("to restart or return"), panel.x + UiScaled(16.0f), panel.y + UiScaled(224.0f), UiScaledFont(18), mutedText);
-        DrawUiText(matchLength, panel.x + UiScaled(16.0f), panel.y + UiScaled(254.0f), UiScaledFont(18), textColor);
-        DrawUiText(totalPlaytime, panel.x + UiScaled(16.0f), panel.y + UiScaled(278.0f), UiScaledFont(18), mutedText);
         UpdateTurnButtonAnimation(&gRollDiceButtonAnimation, rollDiceButton, false);
         UpdateTurnButtonAnimation(&gEndTurnButtonAnimation, endTurnButton, false);
+        if (victoryOverlayVisible)
+        {
+            UpdateTurnButtonAnimation(&gVictoryOverlayToggleButtonAnimation, endTurnButton, false);
+            DrawUiText(loc("Board is locked"), panel.x + UiScaled(16.0f), panel.y + UiScaled(174.0f), UiScaledFont(20), textColor);
+            DrawUiText(loc("Use the overlay buttons"), panel.x + UiScaled(16.0f), panel.y + UiScaled(202.0f), UiScaledFont(18), mutedText);
+            DrawUiText(loc("to restart or return"), panel.x + UiScaled(16.0f), panel.y + UiScaled(224.0f), UiScaledFont(18), mutedText);
+            DrawUiText(matchLength, panel.x + UiScaled(16.0f), panel.y + UiScaled(254.0f), UiScaledFont(18), textColor);
+            DrawUiText(totalPlaytime, panel.x + UiScaled(16.0f), panel.y + UiScaled(278.0f), UiScaledFont(18), mutedText);
+            return;
+        }
+
+        DrawUiText(loc("Board is locked"), panel.x + UiScaled(16.0f), panel.y + UiScaled(174.0f), UiScaledFont(20), textColor);
+        DrawUiText(loc("Board view active"), panel.x + UiScaled(16.0f), panel.y + UiScaled(198.0f), UiScaledFont(18), mutedText);
+        UpdateTurnButtonAnimation(&gVictoryOverlayToggleButtonAnimation, endTurnButton, true);
+        DrawTurnActionButton(endTurnButton, loc("Show End Screen"), 20, mutedButton, borderColor, textColor, actionColor, &gVictoryOverlayToggleButtonAnimation);
+        DrawUiText(matchLength, panel.x + UiScaled(16.0f), panel.y + UiScaled(272.0f), UiScaledFont(16), textColor);
         return;
     }
 
@@ -2123,6 +2136,7 @@ void DrawVictoryOverlay(const struct Map *map)
     const enum PlayerType winner = gameGetWinner(map);
     const int winnerPoints = gameComputeVictoryPoints(map, winner);
     const Rectangle panel = GetVictoryOverlayBounds();
+    const Rectangle showBoardButton = GetVictoryOverlayShowBoardButtonBounds();
     const Rectangle restartButton = GetVictoryOverlayRestartButtonBounds();
     const Rectangle menuButton = GetVictoryOverlayMenuButtonBounds();
     const Color borderColor = UiPanelBorderColor();
@@ -2150,6 +2164,7 @@ void DrawVictoryOverlay(const struct Map *map)
     const int totalTimeWidth = MeasureUiText(totalTimeLine, 18);
     const char *hint = loc("Choose what to do next.");
     const int hintWidth = MeasureUiText(hint, 18);
+    const char *showBoardLabel = loc("Show Board");
     const char *restartLabel = loc("Restart Game");
     const char *menuLabel = loc("Back to Menu");
     DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, 0.36f));
@@ -2162,6 +2177,11 @@ void DrawVictoryOverlay(const struct Map *map)
     DrawUiText(matchTimeLine, panel.x + panel.width * 0.5f - matchTimeWidth * 0.5f, panel.y + 156.0f, 18, textColor);
     DrawUiText(totalTimeLine, panel.x + panel.width * 0.5f - totalTimeWidth * 0.5f, panel.y + 180.0f, 18, mutedText);
     DrawUiText(hint, panel.x + panel.width * 0.5f - hintWidth * 0.5f, panel.y + 208.0f, 18, mutedText);
+
+    DrawRectangleRounded((Rectangle){showBoardButton.x + 4.0f, showBoardButton.y + 6.0f, showBoardButton.width, showBoardButton.height}, 0.22f, 8, Fade(BLACK, 0.10f));
+    DrawRectangleRounded(showBoardButton, 0.22f, 8, UiSectionFillColor());
+    DrawRectangleLinesEx(showBoardButton, 2.0f, borderColor);
+    DrawCenteredUiTextFitted(showBoardLabel, showBoardButton, 19, 14, 0.0f, textColor);
 
     DrawRectangleRounded((Rectangle){restartButton.x + 4.0f, restartButton.y + 6.0f, restartButton.width, restartButton.height}, 0.22f, 8, Fade(BLACK, 0.10f));
     DrawRectangleRounded(restartButton, 0.22f, 8, (Color){171, 82, 54, 255});

@@ -108,6 +108,8 @@ void uiRequestRestartGame(void);
 bool uiConsumeRestartGameRequest(void);
 void uiRequestQuitGame(void);
 bool uiConsumeQuitGameRequest(void);
+void uiSetVictoryOverlayVisible(bool visible);
+bool uiIsVictoryOverlayVisible(void);
 
 void uiSetPersistedTotalPlaytimeSeconds(unsigned long long seconds);
 void uiSetPersistedMatchRecord(unsigned long long wins, unsigned long long losses);
